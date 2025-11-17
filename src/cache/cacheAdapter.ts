@@ -1,0 +1,1 @@
+//src/cache/cacheAdapter.ts
