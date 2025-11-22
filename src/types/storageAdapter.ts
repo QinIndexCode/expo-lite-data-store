@@ -1,13 +1,14 @@
 //src/core/storageAdapter.ts
+// storage adapter interface / 存储适配器接口
+// storage error class / 存储错误类
 import { Directory } from "expo-file-system";
 import type {
-    FilterCondition,
-    StorageErrorCode,
-    WriteResult,
-    ReadOptions,
     CreateTableOptions,
+    ReadOptions,
+    StorageErrorCode,
     WriteOptions,
-} from "../types/storage";
+    WriteResult
+} from "./storageTypes";
 
 
 //———————————— Storage Adapter Interface / 存储适配器接口 ————————————
@@ -30,7 +31,7 @@ export interface StorageAdapter {
  
      * @returns Promise<void>
      */
-    createTable(dir: Directory,options?: CreateTableOptions): Promise<void>;
+    createTable(dir: Directory,options: CreateTableOptions): Promise<void>;
 
     /**
      * zh-CN:

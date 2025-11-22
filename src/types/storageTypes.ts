@@ -16,7 +16,9 @@ export type StorageErrorCode =
   | "CHUNK_INTEGRITY_FAILED"
   | "PERMISSION_DENIED"
   | "TIMEOUT"
-  | "UNKNOWN";
+  | "UNKNOWN"
+  | "META_FILE_READ_ERROR"
+  | "META_FILE_WRITE_ERROR";
 
 export type WriteResult = {
     /**
