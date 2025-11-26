@@ -47,6 +47,8 @@ export type StorageErrorCode =
   | "FILE_CLOSE_FAILED" //文件关闭失败
   | "FILE_SEEK_FAILED" //文件定位失败
   | "FILE_TELL_FAILED" //文件长度失败
+
+
 // other part error codes
   | "UNKNOWN" //未知错误
   | "TIMEOUT" //超时
@@ -57,4 +59,8 @@ export type StorageErrorCode =
   | "CHUNK_INTEGRITY_FAILED" //分片完整性失败
   | "META_FILE_READ_ERROR" //元文件读取失败
   | "META_FILE_WRITE_ERROR" //元文件写入失败
+  | "QUERY_FAILED" //查询失败
+  | "MIGRATION_FAILED" //迁移失败
+  | "WRITTEN_COUNT_MISMATCH" //写入数量不匹配
+  | "BULK_OPERATION_FAILED" //批量操作失败
   ;

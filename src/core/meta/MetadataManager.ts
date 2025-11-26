@@ -2,7 +2,7 @@
 // 元数据管理器终极版 / Metadata Manager Ultimate Edition
 
 import { File } from "expo-file-system";
-import { StorageError } from "../../types/storageAdapterInfc";
+import { StorageError } from "../../types/storageErrorInfc";
 import ROOT from "../../utils/ROOTPath";
  
 const META_FILE = new File(ROOT, "meta.ldb");

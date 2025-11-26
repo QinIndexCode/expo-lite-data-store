@@ -1,26 +1,9 @@
 // src/core/file/SingleFileHandler.ts
 import { File, FileInfo } from "expo-file-system";
 import * as Crypto from "expo-crypto";
-import { StorageError } from "../../types/storageAdapterInfc";
+import { StorageError } from "../../types/storageErrorInfc";
+import withTimeout from "../../utils/withTimeout.js";
 
-/**
- * timeout wrapper with operation name 
- * throws StorageError with TIMEOUT code if operation takes longer than ms
- */
-const withTimeout = <T>(
-  promise: Promise<T>,
-  ms = 10000,
-  operation = "file operation"
-): Promise<T> => {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() =>
-        reject(new StorageError(`${operation} timeout`, "TIMEOUT")), ms
-      )
-    ),
-  ]);
-};
 
 export class SingleFileHandler {
   constructor(private file: File) {}

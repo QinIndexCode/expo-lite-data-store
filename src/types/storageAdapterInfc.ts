@@ -1,14 +1,12 @@
 //src/core/storageAdapter.ts
 // storage adapter interface / 存储适配器接口
 // storage error class / 存储错误类
-import { Directory } from "expo-file-system";
 import type {
     CreateTableOptions,
     ReadOptions,
     WriteOptions,
     WriteResult
 } from "./storageTypes";
-import { StorageErrorCode } from "./storageErrorCode";
 
 //———————————— Storage Adapter Interface / 存储适配器接口 ————————————
 export interface StorageAdapterInfc {
@@ -19,18 +17,28 @@ export interface StorageAdapterInfc {
      * 选项：options:[intermediates,chunkSize]
      *              intermediates : 是否创建中间目录（没有则创建）
      *              chunkSize : 分片大小（如果文件大小超过此值，则采取分片写入）
+     *              columns : 列定义
+     *              initialData : 初始数据
+     *              mode : 存储模式（single或chunked）
      * en:
      * create a table with name tableName
      * dir:dir
      * options:[intermediates,chunkSize]
      *              intermediates : whether to create intermediate directories(if not exist)
      *              chunkSize : chunk size(if file size exceeds this value)
+     *              columns : column definitions
+     *              initialData : initial data
+     *              mode : storage mode (single or chunked)
      * ————————
-     * @param dir table directory / 表目录 包含 tablename
- 
+     * @param tableName table name / 表名
+     * @param options create table options / 创建表选项
      * @returns Promise<void>
      */
-    createTable(tableName: string, options?: CreateTableOptions): Promise<void>;
+    createTable(tableName: string, options?: CreateTableOptions & {
+        columns?: Record<string, string>;
+        initialData?: Record<string, any>[];
+        mode?: "single" | "chunked";
+    }): Promise<void>;
 
     /**
      * zh-CN:
@@ -116,19 +124,81 @@ export interface StorageAdapterInfc {
         tableName: string,
         options?: ReadOptions
     ): Promise<Record<string, any>[]>;
+
+    /**
+     * zh-CN:
+     * 获取表记录数
+     * en:
+     * get table record count
+     * ————————
+     * @param tableName table name / 表名
+     * @returns Promise<number>
+     */
+    count(tableName: string): Promise<number>;
+
+    /**
+     * zh-CN:
+     * 查找单条记录
+     * en:
+     * find one record
+     * ————————
+     * @param tableName table name / 表名
+     * @param filter filter condition / 过滤条件
+     * @returns Promise<Record<string, any> | null>
+     */
+    findOne(
+        tableName: string,
+        filter: Record<string, any>
+    ): Promise<Record<string, any> | null>;
+
+    /**
+     * zh-CN:
+     * 查找多条记录
+     * en:
+     * find many records
+     * ————————
+     * @param tableName table name / 表名
+     * @param filter filter condition / 过滤条件
+     * @param options options including skip and limit / 包含skip和limit的选项
+     * @returns Promise<Record<string, any>[]>
+     */
+    findMany(
+        tableName: string,
+        filter?: Record<string, any>,
+        options?: { skip?: number; limit?: number }
+    ): Promise<Record<string, any>[]>;
+
+    /**
+     * zh-CN:
+     * 批量操作
+     * en:
+     * bulk operations
+     * ————————
+     * @param tableName table name / 表名
+     * @param operations array of operations / 操作数组
+     * @returns Promise<WriteResult>
+     */
+    bulkWrite(
+        tableName: string,
+        operations: Array<{
+            type: "insert" | "update" | "delete";
+            data: Record<string, any> | Record<string, any>[];
+        }>
+    ): Promise<WriteResult>;
+
+    /**
+     * zh-CN:
+     * 迁移到分片模式
+     * en:
+     * migrate to chunked mode
+     * ————————
+     * @param tableName table name / 表名
+     * @returns Promise<void>
+     */
+    migrateToChunked(tableName: string): Promise<void>;
 }
 
-// StorageError 存储层错误
-export class StorageError extends Error {
-    constructor(
-        message: string,
-        public readonly code: StorageErrorCode,
-        public readonly cause?: unknown
-    ) {
-        super(message);
-        this.name = "StorageError";
-    }
-}
+// StorageError 存储层错误类
 
 
 
