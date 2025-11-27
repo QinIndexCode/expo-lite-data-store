@@ -4,7 +4,7 @@ const {
     sortByColumnFast,
     sortByColumnCounting,
     sortByColumnMerge,
-    sortByColumnSlow
+    sortByColumnSlow,
 } = require("./src/utils/sortingTools");
 
 // 生成测试数据
@@ -236,6 +236,29 @@ for (const [algoName, results] of Object.entries(allResults)) {
 
 console.log("\n全部算法测试和对比完成！");
 
+
 // 保存综合对比结果
 writeResult("sortingComparisonSummary.json", allResults);
 console.log("综合对比结果已保存到 sortingComparisonSummary.json");
+// 最佳算法选择
+console.log("\n\n========== 最佳算法选择 ==========");
+datasets.forEach(dataset => {
+    // 在当前 dataset 作用域内重新计算 algoStats
+    const algoStats: any = {};
+    for (const [algoName, results] of Object.entries(allResults)) {
+        if ((results as Record<string, any>)[dataset.name]) {
+            const avgTimes = (results as Record<string, any>)[dataset.name].avg;
+            const totalAvg = Object.values(avgTimes as Record<string, number>)
+                .reduce((sum: number, val: number) => sum + val, 0) / columns.length;
+            algoStats[algoName] = {
+                totalAvg,
+                score: (results as Record<string, any>)[dataset.name].avgScore
+            };
+        }
+    }
+
+    const bestAlgo = Object.entries(algoStats)
+        .sort(([,a], [,b]) => (b as { totalAvg: number; score: number }).score - (a as { totalAvg: number; score: number }).score)
+        .map(([name]) => name)[0];
+    console.log(`${dataset.name} 最佳算法: ${bestAlgo} (平均耗时: ${algoStats[bestAlgo].totalAvg.toFixed(2)}ms, 评分: ${algoStats[bestAlgo].score.toFixed(1)}/100)`);
+});
