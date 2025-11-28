@@ -18,56 +18,56 @@ describe('CacheManager Performance', () => {
         });
     });
     
-    it('应该能够快速处理大量缓存项', () => {
+    it('should be able to quickly handle large number of cache items', () => {
         const startTime = Date.now();
         const itemCount = 10000;
         
-        // 设置大量缓存项
+        // Set large number of cache items
         for (let i = 0; i < itemCount; i++) {
             cacheManager.set(`key-${i}`, `value-${i}`);
         }
         
         const setTime = Date.now() - startTime;
-        console.log(`设置 ${itemCount} 个缓存项耗时: ${setTime}ms`);
-        expect(setTime).toBeLessThan(1000); // 1秒内完成
+        console.log(`Setting ${itemCount} cache items took: ${setTime}ms`);
+        expect(setTime).toBeLessThan(1000); // Complete within 1 second
         
-        // 获取大量缓存项
+        // Get large number of cache items
         const getStartTime = Date.now();
         for (let i = 0; i < itemCount; i++) {
             cacheManager.get(`key-${i}`);
         }
         
         const getTime = Date.now() - getStartTime;
-        console.log(`获取 ${itemCount} 个缓存项耗时: ${getTime}ms`);
-        expect(getTime).toBeLessThan(500); // 500ms内完成
+        console.log(`Getting ${itemCount} cache items took: ${getTime}ms`);
+        expect(getTime).toBeLessThan(500); // Complete within 500ms
         
-        // 检查缓存大小
+        // Check cache size
         expect(cacheManager.getSize()).toBe(itemCount);
     });
     
-    it('应该能够高效处理缓存淘汰', () => {
+    it('should be able to efficiently handle cache eviction', () => {
         const startTime = Date.now();
-        const itemCount = 20000; // 超过最大容量
+        const itemCount = 20000; // Exceed maximum capacity
         
-        // 设置超过容量的缓存项，触发淘汰
+        // Set cache items exceeding capacity, triggering eviction
         for (let i = 0; i < itemCount; i++) {
             cacheManager.set(`key-${i}`, `value-${i}`);
         }
         
         const setTime = Date.now() - startTime;
-        console.log(`设置 ${itemCount} 个缓存项（含淘汰）耗时: ${setTime}ms`);
-        expect(setTime).toBeLessThan(5000); // 5秒内完成
+        console.log(`Setting ${itemCount} cache items (with eviction) took: ${setTime}ms`);
+        expect(setTime).toBeLessThan(5000); // Complete within 5 seconds
         
-        // 检查缓存大小
-        expect(cacheManager.getSize()).toBe(10000); // 最大容量
+        // Check cache size
+        expect(cacheManager.getSize()).toBe(10000); // Maximum capacity
     });
     
-    it('应该能够高效处理并发访问', async () => {
+    it('should be able to efficiently handle concurrent access', async () => {
         const startTime = Date.now();
         const concurrentCount = 1000;
         const iterations = 10;
         
-        // 并发访问缓存
+        // Concurrent access to cache
         const promises = [];
         for (let i = 0; i < concurrentCount; i++) {
             promises.push(
@@ -85,12 +85,12 @@ describe('CacheManager Performance', () => {
         
         const totalTime = Date.now() - startTime;
         const operationsPerSecond = (concurrentCount * iterations * 2) / (totalTime / 1000);
-        console.log(`并发访问性能: ${operationsPerSecond.toFixed(0)} 操作/秒`);
-        expect(operationsPerSecond).toBeGreaterThan(1000); // 至少1000操作/秒
+        console.log(`Concurrent access performance: ${operationsPerSecond.toFixed(0)} operations/second`);
+        expect(operationsPerSecond).toBeGreaterThan(1000); // At least 1000 operations/second
     });
     
-    it('应该能够高效处理不同缓存策略', () => {
-        // 测试LRU策略性能
+    it('should be able to efficiently handle different cache strategies', () => {
+        // Test LRU strategy performance
         const lruCache = new CacheManager({
             strategy: CacheStrategy.LRU,
             maxSize: 5000,
@@ -102,9 +102,9 @@ describe('CacheManager Performance', () => {
             lruCache.set(`lru-key-${i}`, `lru-value-${i}`);
         }
         const lruTime = Date.now() - lruStartTime;
-        console.log(`LRU策略设置10000个缓存项耗时: ${lruTime}ms`);
+        console.log(`LRU strategy setting 10000 cache items took: ${lruTime}ms`);
         
-        // 测试LFU策略性能
+        // Test LFU strategy performance
         const lfuCache = new CacheManager({
             strategy: CacheStrategy.LFU,
             maxSize: 5000,
@@ -116,9 +116,9 @@ describe('CacheManager Performance', () => {
             lfuCache.set(`lfu-key-${i}`, `lfu-value-${i}`);
         }
         const lfuTime = Date.now() - lfuStartTime;
-        console.log(`LFU策略设置10000个缓存项耗时: ${lfuTime}ms`);
+        console.log(`LFU strategy setting 10000 cache items took: ${lfuTime}ms`);
         
-        // 两种策略都应该在合理时间内完成
+        // Both strategies should complete within reasonable time
         expect(lruTime).toBeLessThan(1500);
         expect(lfuTime).toBeLessThan(1500);
     });

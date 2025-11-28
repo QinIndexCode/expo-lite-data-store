@@ -41,13 +41,13 @@ describe('DataReader', () => {
     });
     
     describe('read', () => {
-        it('应该能够读取不存在表的数据，返回空数组', async () => {
+        it('should be able to read data from non-existent table, return empty array', async () => {
             const result = await dataReader.read('non_existent_table');
             expect(result).toEqual([]);
         });
         
-        it('应该能够读取存在表的数据', async () => {
-            // 先创建表元数据
+        it('should be able to read data from existing table', async () => {
+            // Create table metadata first
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,
@@ -64,8 +64,8 @@ describe('DataReader', () => {
             expect(result).toEqual([]);
         });
         
-        it('应该能够使用过滤条件查询数据', async () => {
-            // 先创建表元数据
+        it('should be able to query data with filter conditions', async () => {
+            // Create table metadata first
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,
@@ -79,16 +79,16 @@ describe('DataReader', () => {
                 }
             });
             
-            // 这里我们模拟数据读取，实际数据会从文件系统读取
-            // 由于我们使用了mock，所以返回空数组
+            // Here we simulate data reading, actual data would be read from file system
+            // Since we're using mock, it returns empty array
             const result = await dataReader.read(testTableName, {
                 filter: { age: { $gt: 18 } }
             });
             expect(result).toEqual([]);
         });
         
-        it('应该能够使用分页查询数据', async () => {
-            // 先创建表元数据
+        it('should be able to query data with pagination', async () => {
+            // Create table metadata first
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,
@@ -108,8 +108,8 @@ describe('DataReader', () => {
             expect(result).toEqual([]);
         });
         
-        it('应该能够绕过缓存查询数据', async () => {
-            // 先创建表元数据
+        it('should be able to bypass cache when querying data', async () => {
+            // Create table metadata first
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,
@@ -130,13 +130,13 @@ describe('DataReader', () => {
     });
     
     describe('findOne', () => {
-        it('应该能够查找不存在的记录，返回null', async () => {
+        it('should be able to find non-existent record, return null', async () => {
             const result = await dataReader.findOne(testTableName, { id: 'non_existent_id' });
             expect(result).toBeNull();
         });
         
-        it('应该能够查找存在的记录', async () => {
-            // 先创建表元数据
+        it('should be able to find existing record', async () => {
+            // Create table metadata first
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,
@@ -155,8 +155,8 @@ describe('DataReader', () => {
     });
     
     describe('findMany', () => {
-        it('应该能够查找多条记录', async () => {
-            // 先创建表元数据
+        it('should be able to find multiple records', async () => {
+            // Create table metadata first
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,
@@ -175,8 +175,8 @@ describe('DataReader', () => {
             expect(result).toEqual([]);
         });
         
-        it('应该能够查找多条记录并分页', async () => {
-            // 先创建表元数据
+        it('should be able to find multiple records with pagination', async () => {
+            // Create table metadata first
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,

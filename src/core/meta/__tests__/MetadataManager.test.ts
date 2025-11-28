@@ -14,13 +14,13 @@ describe('MetadataManager', () => {
     });
     
     describe('get', () => {
-        it('应该能够获取不存在表的元数据，返回undefined', () => {
+        it('should be able to get metadata for non-existent table, return undefined', () => {
             const result = metadataManager.get('non_existent_table');
             expect(result).toBeUndefined();
         });
         
-        it('应该能够获取存在表的元数据', () => {
-            // 先创建表元数据
+        it('should be able to get metadata for existing table', () => {
+            // Create table metadata first
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,
@@ -42,8 +42,8 @@ describe('MetadataManager', () => {
     });
     
     describe('getPath', () => {
-        it('应该能够获取表的路径', () => {
-            // 先创建表元数据
+        it('should be able to get table path', () => {
+            // Create table metadata first
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,
@@ -60,14 +60,14 @@ describe('MetadataManager', () => {
             expect(result).toBe(`${testTableName}.ldb`);
         });
         
-        it('应该能够获取不存在表的默认路径', () => {
+        it('should be able to get default path for non-existent table', () => {
             const result = metadataManager.getPath('non_existent_table');
             expect(result).toBe('non_existent_table.ldb');
         });
     });
     
     describe('update', () => {
-        it('应该能够创建新表的元数据', () => {
+        it('should be able to create metadata for new table', () => {
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,
@@ -90,8 +90,8 @@ describe('MetadataManager', () => {
             });
         });
         
-        it('应该能够更新现有表的元数据', () => {
-            // 先创建表元数据
+        it('should be able to update metadata for existing table', () => {
+            // Create table metadata first
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,
@@ -104,7 +104,7 @@ describe('MetadataManager', () => {
                 }
             });
             
-            // 更新表元数据
+            // Update table metadata
             metadataManager.update(testTableName, {
                 count: 10,
                 mode: 'chunked',
@@ -124,8 +124,8 @@ describe('MetadataManager', () => {
     });
     
     describe('delete', () => {
-        it('应该能够删除表的元数据', () => {
-            // 先创建表元数据
+        it('should be able to delete table metadata', () => {
+            // Create table metadata first
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,
@@ -138,22 +138,22 @@ describe('MetadataManager', () => {
                 }
             });
             
-            // 删除表元数据
+            // Delete table metadata
             metadataManager.delete(testTableName);
             
             const result = metadataManager.get(testTableName);
             expect(result).toBeUndefined();
         });
         
-        it('应该能够安全删除不存在表的元数据', () => {
-            // 直接删除不存在的表，不应该抛出错误
+        it('should be able to safely delete metadata for non-existent table', () => {
+            // Directly delete non-existent table, should not throw error
             expect(() => metadataManager.delete('non_existent_table')).not.toThrow();
         });
     });
     
     describe('allTables', () => {
-        it('应该能够获取所有表名', () => {
-            // 创建多个表元数据
+        it('should be able to get all table names', () => {
+            // Create multiple table metadata
             metadataManager.update('table1', {
                 mode: 'single',
                 path: 'table1.ldb',
@@ -192,8 +192,8 @@ describe('MetadataManager', () => {
             expect(result.length).toBe(3);
         });
         
-        it('应该在没有表时返回空数组', () => {
-            // 确保没有表元数据
+        it('should return empty array when no tables exist', () => {
+            // Ensure no table metadata exists
             metadataManager.delete(testTableName);
             
             const result = metadataManager.allTables();
@@ -202,8 +202,8 @@ describe('MetadataManager', () => {
     });
     
     describe('count', () => {
-        it('应该能够获取表的记录数', () => {
-            // 先创建表元数据
+        it('should be able to get table record count', () => {
+            // Create table metadata first
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,
@@ -220,15 +220,15 @@ describe('MetadataManager', () => {
             expect(result).toBe(5);
         });
         
-        it('应该能够获取不存在表的记录数，返回0', () => {
+        it('should be able to get record count for non-existent table, return 0', () => {
             const result = metadataManager.count('non_existent_table');
             expect(result).toBe(0);
         });
     });
     
     describe('debugDump_checkMetaCache', () => {
-        it('应该能够获取完整的元数据缓存', () => {
-            // 先创建表元数据
+        it('should be able to get complete metadata cache', () => {
+            // Create table metadata first
             metadataManager.update(testTableName, {
                 mode: 'single',
                 path: `${testTableName}.ldb`,

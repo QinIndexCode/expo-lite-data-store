@@ -1,7 +1,7 @@
 // src/core/api/__tests__/RateLimiter.test.ts
 // RateLimiter 单元测试
 
-import { RateLimiter, GlobalRateLimiter } from '../RateLimiter';
+import { GlobalRateLimiter, RateLimiter } from '../RateLimiter';
 
 describe('RateLimiter', () => {
     let rateLimiter: RateLimiter;
@@ -15,104 +15,104 @@ describe('RateLimiter', () => {
         });
     });
     
-    describe('基本功能测试', () => {
-        it('应该能够检查请求是否允许', () => {
-            // 初始状态，应该允许请求
+    describe('Basic Functionality Tests', () => {
+        it('should be able to check if request is allowed', () => {
+            // Initial state, should allow request
             const result = rateLimiter.check('test-client');
             expect(result.allowed).toBe(true);
-            expect(result.remaining).toBe(19); // 消耗了1个令牌
+            expect(result.remaining).toBe(19); // Consumed 1 token
         });
         
-        it('应该能够消耗指定数量的令牌', () => {
-            // 消耗5个令牌
+        it('should be able to consume specified number of tokens', () => {
+            // Consume 5 tokens
             const result = rateLimiter.consume('test-client', 5);
             expect(result.allowed).toBe(true);
-            expect(result.remaining).toBe(15); // 消耗了5个令牌
+            expect(result.remaining).toBe(15); // Consumed 5 tokens
         });
         
-        it('应该拒绝超出限制的请求', () => {
-            // 消耗超过容量的令牌
+        it('should reject requests that exceed limits', () => {
+            // Consume more tokens than capacity
             const result = rateLimiter.consume('test-client', 30);
             expect(result.allowed).toBe(false);
             expect(result.retryAfter).toBeDefined();
         });
         
-        it('应该能够重置客户端限流信息', () => {
-            // 消耗一些令牌
+        it('should be able to reset client rate limiting info', () => {
+            // Consume some tokens
             rateLimiter.consume('test-client', 5);
             expect(rateLimiter.getClientInfo('test-client')?.tokens).toBe(15);
             
-            // 重置客户端限流信息
+            // Reset client rate limiting info
             rateLimiter.reset('test-client');
             expect(rateLimiter.getClientInfo('test-client')).toBeUndefined();
         });
         
-        it('应该能够清空所有客户端限流信息', () => {
-            // 为多个客户端消耗令牌
+        it('should be able to clear all client rate limiting info', () => {
+            // Consume tokens for multiple clients
             rateLimiter.consume('client1', 5);
             rateLimiter.consume('client2', 3);
             rateLimiter.consume('client3', 7);
             
-            // 清空所有客户端限流信息
+            // Clear all client rate limiting info
             rateLimiter.clear();
             
-            // 检查结果
+            // Check results
             expect(rateLimiter.getClientInfo('client1')).toBeUndefined();
             expect(rateLimiter.getClientInfo('client2')).toBeUndefined();
             expect(rateLimiter.getClientInfo('client3')).toBeUndefined();
         });
     });
     
-    describe('限流配置测试', () => {
-        it('应该能够更新限流配置', () => {
-            // 更新配置
+    describe('Rate Limiting Configuration Tests', () => {
+        it('should be able to update rate limiting configuration', () => {
+            // Update configuration
             rateLimiter.updateConfig({
                 rate: 20,
                 capacity: 40
             });
             
-            // 检查更新后的配置
+            // Check updated configuration
             const config = rateLimiter.getConfig();
             expect(config.rate).toBe(20);
             expect(config.capacity).toBe(40);
         });
         
-        it('应该能够禁用限流', () => {
-            // 禁用限流
+        it('should be able to disable rate limiting', () => {
+            // Disable rate limiting
             rateLimiter.updateConfig({ enabled: false });
             
-            // 检查结果
+            // Check result
             const result = rateLimiter.consume('test-client', 100);
             expect(result.allowed).toBe(true);
         });
         
-        it('应该能够启用限流', () => {
-            // 先禁用限流
+        it('should be able to enable rate limiting', () => {
+            // First disable rate limiting
             rateLimiter.updateConfig({ enabled: false });
             expect(rateLimiter.consume('test-client', 100).allowed).toBe(true);
             
-            // 启用限流
+            // Enable rate limiting
             rateLimiter.updateConfig({ enabled: true });
             expect(rateLimiter.consume('test-client', 100).allowed).toBe(false);
         });
     });
     
-    describe('令牌生成测试', () => {
-        it('应该能够随时间生成新令牌', () => {
-            // 消耗所有令牌
+    describe('Token Generation Tests', () => {
+        it('should be able to generate new tokens over time', () => {
+            // Consume all tokens
             rateLimiter.consume('test-client', 20);
             expect(rateLimiter.consume('test-client', 1).allowed).toBe(false);
             
-            // 模拟时间流逝，生成新令牌
+            // Simulate time passing, generating new tokens
             jest.useFakeTimers();
             
-            // 等待1秒，应该生成10个新令牌
+            // Wait 1 second, should generate 10 new tokens
             jest.advanceTimersByTime(1000);
             
-            // 检查结果
+            // Check result
             const result = rateLimiter.consume('test-client', 5);
             expect(result.allowed).toBe(true);
-            expect(result.remaining).toBe(5); // 10个新令牌 - 5个消耗 = 5个剩余
+            expect(result.remaining).toBe(5); // 10 new tokens - 5 consumed = 5 remaining
             
             jest.useRealTimers();
         });

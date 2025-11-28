@@ -41,7 +41,7 @@ describe('DataWriter', () => {
     });
     
     describe('createTable', () => {
-        it('应该能够创建新表', async () => {
+        it('should be able to create new table', async () => {
             await dataWriter.createTable(testTableName, {
                 mode: 'single',
                 columns: {
@@ -55,14 +55,14 @@ describe('DataWriter', () => {
                 ]
             });
             
-            // 检查表是否创建成功
+            // Check if table was created successfully
             const tableMeta = metadataManager.get(testTableName);
             expect(tableMeta).toBeDefined();
             expect(tableMeta?.mode).toBe('single');
             expect(tableMeta?.count).toBe(2);
         });
         
-        it('应该能够创建分片表', async () => {
+        it('should be able to create chunked table', async () => {
             await dataWriter.createTable(testTableName, {
                 mode: 'chunked',
                 columns: {
@@ -72,7 +72,7 @@ describe('DataWriter', () => {
                 }
             });
             
-            // 检查表是否创建成功
+            // Check if table was created successfully
             const tableMeta = metadataManager.get(testTableName);
             expect(tableMeta).toBeDefined();
             expect(tableMeta?.mode).toBe('chunked');
@@ -80,8 +80,8 @@ describe('DataWriter', () => {
     });
     
     describe('write', () => {
-        it('应该能够写入数据到存在的表', async () => {
-            // 先创建表
+        it('should be able to write data to existing table', async () => {
+            // Create table first
             await dataWriter.createTable(testTableName, {
                 mode: 'single',
                 columns: {
@@ -91,21 +91,21 @@ describe('DataWriter', () => {
                 }
             });
             
-            // 写入数据
+            // Write data
             const result = await dataWriter.write(testTableName, {
                 id: '1',
                 name: 'test',
                 age: 20
             });
             
-            // 检查写入结果
+            // Check write result
             expect(result).toBeDefined();
             expect(result.written).toBe(1);
             expect(result.totalAfterWrite).toBe(1);
         });
         
-        it('应该能够批量写入数据到存在的表', async () => {
-            // 先创建表
+        it('should be able to batch write data to existing table', async () => {
+            // Create table first
             await dataWriter.createTable(testTableName, {
                 mode: 'single',
                 columns: {
@@ -115,14 +115,14 @@ describe('DataWriter', () => {
                 }
             });
             
-            // 批量写入数据
+            // Batch write data
             const result = await dataWriter.write(testTableName, [
                 { id: '1', name: 'test1', age: 20 },
                 { id: '2', name: 'test2', age: 25 },
                 { id: '3', name: 'test3', age: 30 }
             ]);
             
-            // 检查写入结果
+            // Check write result
             expect(result).toBeDefined();
             expect(result.written).toBe(3);
             expect(result.totalAfterWrite).toBe(3);
@@ -130,8 +130,8 @@ describe('DataWriter', () => {
     });
     
     describe('delete', () => {
-        it('应该能够删除表中的数据', async () => {
-            // 先创建表并写入数据
+        it('should be able to delete data from table', async () => {
+            // Create table and write data first
             await dataWriter.createTable(testTableName, {
                 mode: 'single',
                 columns: {
@@ -146,15 +146,15 @@ describe('DataWriter', () => {
                 ]
             });
             
-            // 删除数据
+            // Delete data
             const result = await dataWriter.delete(testTableName, { age: { $gt: 25 } });
             
-            // 检查删除结果
+            // Check delete result
             expect(result).toBe(1);
         });
         
-        it('应该能够删除所有符合条件的数据', async () => {
-            // 先创建表并写入数据
+        it('should be able to delete all matching data', async () => {
+            // Create table and write data first
             await dataWriter.createTable(testTableName, {
                 mode: 'single',
                 columns: {
@@ -169,17 +169,17 @@ describe('DataWriter', () => {
                 ]
             });
             
-            // 删除所有数据
+            // Delete all data
             const result = await dataWriter.delete(testTableName, {});
             
-            // 检查删除结果
+            // Check delete result
             expect(result).toBe(3);
         });
     });
     
     describe('count', () => {
-        it('应该能够获取表的记录数', async () => {
-            // 先创建表并写入数据
+        it('should be able to get table record count', async () => {
+            // Create table and write data first
             await dataWriter.createTable(testTableName, {
                 mode: 'single',
                 columns: {
@@ -193,25 +193,25 @@ describe('DataWriter', () => {
                 ]
             });
             
-            // 获取表的记录数
+            // Get table record count
             const count = await dataWriter.count(testTableName);
             
-            // 检查结果
+            // Check result
             expect(count).toBe(2);
         });
         
-        it('应该能够获取不存在表的记录数，返回0', async () => {
-            // 获取不存在表的记录数
+        it('should be able to get record count for non-existent table, return 0', async () => {
+            // Get record count for non-existent table
             const count = await dataWriter.count('non_existent_table');
             
-            // 检查结果
+            // Check result
             expect(count).toBe(0);
         });
     });
     
     describe('deleteTable', () => {
-        it('应该能够删除存在的表', async () => {
-            // 先创建表
+        it('should be able to delete existing table', async () => {
+            // Create table first
             await dataWriter.createTable(testTableName, {
                 mode: 'single',
                 columns: {
@@ -221,23 +221,23 @@ describe('DataWriter', () => {
                 }
             });
             
-            // 删除表
+            // Delete table
             await dataWriter.deleteTable(testTableName);
             
-            // 检查表是否删除成功
+            // Check if table was deleted successfully
             const tableMeta = metadataManager.get(testTableName);
             expect(tableMeta).toBeUndefined();
         });
         
-        it('应该能够安全删除不存在的表', async () => {
-            // 直接删除不存在的表，不应该抛出错误
+        it('should be able to safely delete non-existent table', async () => {
+            // Directly delete non-existent table, should not throw error
             await expect(dataWriter.deleteTable('non_existent_table')).resolves.not.toThrow();
         });
     });
     
     describe('hasTable', () => {
-        it('应该能够检查存在的表，返回true', async () => {
-            // 先创建表
+        it('should be able to check existing table, return true', async () => {
+            // Create table first
             await dataWriter.createTable(testTableName, {
                 mode: 'single',
                 columns: {
@@ -247,18 +247,18 @@ describe('DataWriter', () => {
                 }
             });
             
-            // 检查表是否存在
+            // Check if table exists
             const result = await dataWriter.hasTable(testTableName);
             
-            // 检查结果
+            // Check result
             expect(result).toBe(true);
         });
         
-        it('应该能够检查不存在的表，返回false', async () => {
-            // 检查不存在的表
+        it('should be able to check non-existent table, return false', async () => {
+            // Check non-existent table
             const result = await dataWriter.hasTable('non_existent_table');
             
-            // 检查结果
+            // Check result
             expect(result).toBe(false);
         });
     });

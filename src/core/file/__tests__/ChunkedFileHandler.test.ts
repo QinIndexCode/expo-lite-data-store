@@ -1,7 +1,7 @@
 // src/core/file/__tests__/ChunkedFileHandler.test.ts
 
-import { ChunkedFileHandler } from '../ChunkedFileHandler';
 import { MetadataManager } from '../../meta/MetadataManager';
+import { ChunkedFileHandler } from '../ChunkedFileHandler';
 
 describe('ChunkedFileHandler', () => {
     let chunkedFileHandler: ChunkedFileHandler;
@@ -18,157 +18,157 @@ describe('ChunkedFileHandler', () => {
         await chunkedFileHandler.clear();
     });
 
-    describe('基本功能测试', () => {
-        it('应该能够写入和读取数据', async () => {
+    describe('Basic Functionality Tests', () => {
+        it('should be able to write and read data', async () => {
             const testData = [{ id: 1, name: 'test1' }, { id: 2, name: 'test2' }];
             
-            // 写入数据
+            // Write data
             await chunkedFileHandler.write(testData);
             
-            // 读取数据
+            // Read data
             const result = await chunkedFileHandler.read();
             
             expect(result).toEqual(testData);
         });
 
-        it('应该能够追加数据', async () => {
+        it('should be able to append data', async () => {
             const initialData = [{ id: 1, name: 'test1' }];
             const appendData = [{ id: 2, name: 'test2' }, { id: 3, name: 'test3' }];
             
-            // 写入初始数据
+            // Write initial data
             await chunkedFileHandler.write(initialData);
             
-            // 追加数据
+            // Append data
             await chunkedFileHandler.append(appendData);
             
-            // 读取所有数据
+            // Read all data
             const result = await chunkedFileHandler.read();
             
             expect(result).toEqual([...initialData, ...appendData]);
         });
 
-        it('应该能够清空数据', async () => {
+        it('should be able to clear data', async () => {
             const testData = [{ id: 1, name: 'test1' }, { id: 2, name: 'test2' }];
             
-            // 写入数据
+            // Write data
             await chunkedFileHandler.write(testData);
             
-            // 清空数据
+            // Clear data
             await chunkedFileHandler.clear();
             
-            // 读取数据，应该返回空数组
+            // Read data, should return empty array
             const result = await chunkedFileHandler.read();
             
             expect(result).toEqual([]);
         });
 
-        it('应该能够删除数据', async () => {
+        it('should be able to delete data', async () => {
             const testData = [{ id: 1, name: 'test1' }, { id: 2, name: 'test2' }];
             
-            // 写入数据
+            // Write data
             await chunkedFileHandler.write(testData);
             
-            // 删除数据
+            // Delete data
             await chunkedFileHandler.delete();
             
-            // 读取数据，应该返回空数组
+            // Read data, should return empty array
             const result = await chunkedFileHandler.read();
             
             expect(result).toEqual([]);
         });
     });
 
-    describe('高级功能测试', () => {
-        it('应该能够读取所有数据', async () => {
+    describe('Advanced Functionality Tests', () => {
+        it('should be able to read all data', async () => {
             const testData = [{ id: 1, name: 'test1' }, { id: 2, name: 'test2' }, { id: 3, name: 'test3' }];
             
-            // 写入数据
+            // Write data
             await chunkedFileHandler.write(testData);
             
-            // 使用 readAll 读取所有数据
+            // Read all data using readAll
             const result = await chunkedFileHandler.readAll();
             
             expect(result).toEqual(testData);
         });
 
-        it('应该能够读取指定范围的分片数据', async () => {
-            // 写入足够多的数据，确保生成多个分片
+        it('should be able to read data from specified chunk range', async () => {
+            // Write enough data to ensure multiple chunks are created
             const testData = Array.from({ length: 1000 }, (_, i) => ({ id: i, name: `test${i}` }));
             
-            // 写入数据
+            // Write data
             await chunkedFileHandler.write(testData);
             
-            // 读取指定范围的分片数据
+            // Read data from specified chunk range
             const result = await chunkedFileHandler.readRange(0, 0);
             
-            // 验证结果不为空
+            // Verify result is not empty
             expect(result.length).toBeGreaterThan(0);
             expect(result.length).toBeLessThanOrEqual(1000);
         });
     });
 
-    describe('边界条件测试', () => {
-        it('应该能够处理空数据', async () => {
-            // 写入空数据
+    describe('Edge Case Tests', () => {
+        it('should be able to handle empty data', async () => {
+            // Write empty data
             await chunkedFileHandler.write([]);
             
-            // 读取数据，应该返回空数组
+            // Read data, should return empty array
             const result = await chunkedFileHandler.read();
             
             expect(result).toEqual([]);
         });
 
-        it('应该能够处理单次写入大量数据', async () => {
-            // 生成大量测试数据
+        it('should be able to handle large data write in single operation', async () => {
+            // Generate large test data
             const testData = Array.from({ length: 500 }, (_, i) => ({ 
                 id: i, 
                 name: `test${i}`, 
-                data: `test data ${i}`.repeat(100) // 增加数据大小，确保分块
+                data: `test data ${i}`.repeat(100) // Increase data size to ensure chunking
             }));
             
-            // 写入数据
+            // Write data
             await chunkedFileHandler.write(testData);
             
-            // 读取数据
+            // Read data
             const result = await chunkedFileHandler.readAll();
             
-            // 验证数据完整性
+            // Verify data integrity
             expect(result.length).toBe(testData.length);
             expect(result[0]).toEqual(testData[0]);
             expect(result[result.length - 1]).toEqual(testData[testData.length - 1]);
         });
     });
 
-    describe('错误处理测试', () => {
-        it('应该能够处理无效数据', async () => {
-            // @ts-ignore - 故意传入无效数据类型
+    describe('Error Handling Tests', () => {
+        it('should be able to handle invalid data', async () => {
+            // @ts-ignore - Intentionally passing invalid data type
             await expect(chunkedFileHandler.write('invalid data')).rejects.toThrow();
         });
     });
 
-    describe('分片处理测试', () => {
-        it('应该能够正确处理分片写入和读取', async () => {
-            // 写入多批数据，确保生成多个分片
+    describe('Chunk Processing Tests', () => {
+        it('should correctly handle chunked write and read operations', async () => {
+            // Write multiple batches of data to ensure multiple chunks are created
             const batch1 = Array.from({ length: 300 }, (_, i) => ({ id: i, name: `batch1-${i}` }));
             const batch2 = Array.from({ length: 300 }, (_, i) => ({ id: 300 + i, name: `batch2-${i}` }));
             const batch3 = Array.from({ length: 300 }, (_, i) => ({ id: 600 + i, name: `batch3-${i}` }));
             
-            // 写入第一批数据
+            // Write first batch
             await chunkedFileHandler.write(batch1);
             
-            // 追加第二批数据
+            // Append second batch
             await chunkedFileHandler.append(batch2);
             
-            // 追加第三批数据
+            // Append third batch
             await chunkedFileHandler.append(batch3);
             
-            // 读取所有数据
+            // Read all data
             const result = await chunkedFileHandler.readAll();
             
-            // 验证数据完整性
+            // Verify data integrity
             expect(result.length).toBe(batch1.length + batch2.length + batch3.length);
             
-            // 验证数据顺序
+            // Verify data order
             expect(result[0]).toEqual(batch1[0]);
             expect(result[300]).toEqual(batch2[0]);
             expect(result[600]).toEqual(batch3[0]);

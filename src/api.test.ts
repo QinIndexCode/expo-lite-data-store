@@ -137,6 +137,52 @@ describe('Public API Tests', () => {
       const users = await findMany(TEST_TABLE);
       expect(users.length).toBe(TEST_DATA.length);
     });
+
+    it('should find records using greater than operator', async () => {
+      const users = await findMany(TEST_TABLE, { age: { $gt: 30 } });
+      expect(users.length).toBe(1);
+      expect(users[0].id).toBe(3);
+    });
+
+    it('should find records using less than or equal operator', async () => {
+      const users = await findMany(TEST_TABLE, { age: { $lte: 30 } });
+      expect(users.length).toBe(2);
+      expect(users.every((user: any) => user.age <= 30)).toBe(true);
+    });
+
+    it('should find records using IN operator', async () => {
+      const users = await findMany(TEST_TABLE, { id: { $in: [1, 3] } });
+      expect(users.length).toBe(2);
+      expect(users.map((user: any) => user.id)).toEqual(expect.arrayContaining([1, 3]));
+    });
+
+    it('should find records using NIN operator', async () => {
+      const users = await findMany(TEST_TABLE, { id: { $nin: [1, 2] } });
+      expect(users.length).toBe(1);
+      expect(users[0].id).toBe(3);
+    });
+
+    it('should find records using LIKE operator', async () => {
+      const users = await findMany(TEST_TABLE, { name: { $like: '%User%' } });
+      expect(users.length).toBe(3);
+    });
+
+    it('should find records using AND compound query', async () => {
+      const users = await findMany(TEST_TABLE, { $and: [{ active: true }, { age: { $gt: 25 } }] });
+      expect(users.length).toBe(1);
+      expect(users[0].id).toBe(3);
+    });
+
+    it('should find records using OR compound query', async () => {
+      const users = await findMany(TEST_TABLE, { $or: [{ id: 1 }, { id: 3 }] });
+      expect(users.length).toBe(2);
+      expect(users.map((user: any) => user.id)).toEqual(expect.arrayContaining([1, 3]));
+    });
+
+    it('should handle empty filter correctly', async () => {
+      const users = await findMany(TEST_TABLE, {});
+      expect(users.length).toBe(TEST_DATA.length);
+    });
   });
 
   describe('Update and Delete API', () => {

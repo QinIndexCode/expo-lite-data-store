@@ -32,7 +32,7 @@ describe('IndexManager', () => {
     });
     
     describe('createIndex', () => {
-        it('应该能够创建普通索引', async () => {
+        it('should be able to create normal index', async () => {
             await indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
             const indexes = indexManager.getTableIndexes(testTableName);
             expect(indexes.length).toBe(1);
@@ -41,7 +41,7 @@ describe('IndexManager', () => {
             expect(indexes[0].fields).toEqual(['name']);
         });
         
-        it('应该能够创建唯一索引', async () => {
+        it('should be able to create unique index', async () => {
             await indexManager.createIndex(testTableName, 'id', IndexType.UNIQUE);
             const indexes = indexManager.getTableIndexes(testTableName);
             expect(indexes.length).toBe(1);
@@ -50,35 +50,35 @@ describe('IndexManager', () => {
             expect(indexes[0].fields).toEqual(['id']);
         });
         
-        it('应该在创建重复索引时抛出错误', async () => {
+        it('should throw error when creating duplicate index', async () => {
             await indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
             await expect(indexManager.createIndex(testTableName, 'name', IndexType.NORMAL)).rejects.toThrow(StorageError);
         });
         
-        it('应该在表不存在时抛出错误', async () => {
+        it('should throw error when table does not exist', async () => {
             await expect(indexManager.createIndex('non_existent_table', 'name', IndexType.NORMAL)).rejects.toThrow(StorageError);
         });
         
-        it('应该在字段名为空时抛出错误', async () => {
+        it('should throw error when field name is empty', async () => {
             await expect(indexManager.createIndex(testTableName, '', IndexType.NORMAL)).rejects.toThrow(StorageError);
         });
     });
     
     describe('dropIndex', () => {
-        it('应该能够删除索引', async () => {
+        it('should be able to drop index', async () => {
             await indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
             await indexManager.dropIndex(testTableName, 'name', IndexType.NORMAL);
             const indexes = indexManager.getTableIndexes(testTableName);
             expect(indexes.length).toBe(0);
         });
         
-        it('应该在索引不存在时抛出错误', async () => {
+        it('should throw error when index does not exist', async () => {
             await expect(indexManager.dropIndex(testTableName, 'non_existent_field', IndexType.NORMAL)).rejects.toThrow(StorageError);
         });
     });
     
     describe('addToIndex', () => {
-        it('应该能够为数据添加索引', () => {
+        it('should be able to add data to index', () => {
             indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
             
             const data = { id: '1', name: 'test', age: 25 };
@@ -88,7 +88,7 @@ describe('IndexManager', () => {
             expect(result).toEqual(['1']);
         });
         
-        it('应该在违反唯一约束时抛出错误', () => {
+        it('should throw error when violating unique constraint', () => {
             indexManager.createIndex(testTableName, 'name', IndexType.UNIQUE);
             
             const data1 = { id: '1', name: 'test', age: 25 };
@@ -98,16 +98,16 @@ describe('IndexManager', () => {
             expect(() => indexManager.addToIndex(testTableName, data2)).toThrow(StorageError);
         });
         
-        it('应该跳过没有ID的数据', () => {
+        it('should skip data without ID', () => {
             indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
             
-            const data = { name: 'test', age: 25 }; // 没有ID
+            const data = { name: 'test', age: 25 }; // No ID
             expect(() => indexManager.addToIndex(testTableName, data)).not.toThrow();
         });
     });
     
     describe('removeFromIndex', () => {
-        it('应该能够从索引中删除数据', () => {
+        it('should be able to remove data from index', () => {
             indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
             
             const data = { id: '1', name: 'test', age: 25 };
@@ -123,7 +123,7 @@ describe('IndexManager', () => {
     });
     
     describe('updateIndex', () => {
-        it('应该能够更新索引', () => {
+        it('should be able to update index', () => {
             indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
             
             const oldData = { id: '1', name: 'old_name', age: 25 };
@@ -143,7 +143,7 @@ describe('IndexManager', () => {
     });
     
     describe('queryIndex', () => {
-        it('应该能够查询索引', () => {
+        it('should be able to query index', () => {
             indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
             indexManager.createIndex(testTableName, 'age', IndexType.NORMAL);
             
@@ -162,14 +162,14 @@ describe('IndexManager', () => {
             expect(result).toEqual(['2']);
         });
         
-        it('应该在索引不存在时返回空数组', () => {
+        it('should return empty array when index does not exist', () => {
             const result = indexManager.queryIndex(testTableName, 'non_existent_field', 'value');
             expect(result).toEqual([]);
         });
     });
     
     describe('hasIndex', () => {
-        it('应该能够检查字段是否有索引', () => {
+        it('should be able to check if field has index', () => {
             indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
             
             expect(indexManager.hasIndex(testTableName, 'name')).toBe(true);
@@ -178,7 +178,7 @@ describe('IndexManager', () => {
     });
     
     describe('clearTableIndexes', () => {
-        it('应该能够清除表的所有索引', () => {
+        it('should be able to clear all indexes for table', () => {
             indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
             indexManager.createIndex(testTableName, 'age', IndexType.NORMAL);
             

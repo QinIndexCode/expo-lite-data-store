@@ -15,90 +15,90 @@ describe('FileOperationManager', () => {
         fileOperationManager = new FileOperationManager(chunkSize, metadataManager);
     });
 
-    describe('基本功能测试', () => {
-        it('应该能够创建实例', () => {
+    describe('Basic Functionality Tests', () => {
+        it('should be able to create instance', () => {
             expect(fileOperationManager).toBeInstanceOf(FileOperationManager);
         });
 
-        it('应该能够检查权限', async () => {
-            // 权限检查应该能够正常执行，不会抛出错误
+        it('should be able to check permissions', async () => {
+            // Permission check should execute normally without throwing errors
             await expect(fileOperationManager.checkPermissions()).resolves.not.toThrow();
         });
 
-        it('应该能够清除文件信息缓存', () => {
-            // 清除文件信息缓存应该能够正常执行，不会抛出错误
+        it('should be able to clear file info cache', () => {
+            // Clearing file info cache should execute normally without throwing errors
             expect(() => fileOperationManager.clearFileInfoCache()).not.toThrow();
             expect(() => fileOperationManager.clearFileInfoCache('test_path')).not.toThrow();
         });
     });
 
-    describe('文件处理器测试', () => {
-        it('应该能够获取单文件处理器', () => {
+    describe('File Handler Tests', () => {
+        it('should be able to get single file handler', () => {
             const singleFileHandler = fileOperationManager.getSingleFileHandler(testTableName);
             expect(singleFileHandler).toBeDefined();
         });
 
-        it('应该能够获取分片文件处理器', () => {
+        it('should be able to get chunked file handler', () => {
             const chunkedFileHandler = fileOperationManager.getChunkedFileHandler(testTableName);
             expect(chunkedFileHandler).toBeDefined();
         });
 
-        it('应该能够判断是否使用分片模式', () => {
-            // 小数据量不应该使用分片模式
+        it('should be able to determine if chunked mode should be used', () => {
+            // Small data should not use chunked mode
             const smallData = [{ id: 1, name: 'test' }];
             expect(fileOperationManager.shouldUseChunkedMode(smallData)).toBe(false);
 
-            // 大数据量应该使用分片模式
+            // Large data should use chunked mode
             const largeData = Array.from({ length: 1000 }, (_, i) => ({
                 id: i,
                 name: `test${i}`,
-                data: `large data ${i}`.repeat(1000) // 增加数据大小
+                data: `large data ${i}`.repeat(1000) // Increase data size
             }));
             expect(fileOperationManager.shouldUseChunkedMode(largeData)).toBe(true);
         });
     });
 
-    describe('文件操作测试', () => {
-        it('应该能够处理单文件读写操作', async () => {
+    describe('File Operation Tests', () => {
+        it('should be able to handle single file read and write operations', async () => {
             const testData = [{ id: 1, name: 'test1' }, { id: 2, name: 'test2' }];
             
-            // 写入单文件数据
+            // Write single file data
             await fileOperationManager.writeSingleFile(testTableName, testData);
             
-            // 读取单文件数据
+            // Read single file data
             const result = await fileOperationManager.readSingleFile(testTableName);
             
             expect(result).toEqual(testData);
             
-            // 清理测试数据
+            // Clean up test data
             await fileOperationManager.deleteSingleFile(testTableName);
         });
 
-        it('应该能够处理分片文件读写操作', async () => {
+        it('should be able to handle chunked file read and write operations', async () => {
             const testData = [{ id: 1, name: 'test1' }, { id: 2, name: 'test2' }];
             
-            // 写入分片文件数据
+            // Write chunked file data
             await fileOperationManager.writeChunkedFile(testTableName, testData);
             
-            // 读取分片文件数据
+            // Read chunked file data
             const result = await fileOperationManager.readChunkedFile(testTableName);
             
             expect(result.length).toBeGreaterThan(0);
             
-            // 清理测试数据
+            // Clean up test data
             await fileOperationManager.clearChunkedFile(testTableName);
         });
     });
 
-    describe('边界条件测试', () => {
-        it('应该能够处理空数据', async () => {
-            // 写入空数据到单文件
+    describe('Edge Case Tests', () => {
+        it('should be able to handle empty data', async () => {
+            // Write empty data to single file
             await expect(fileOperationManager.writeSingleFile(testTableName, [])).resolves.not.toThrow();
             
-            // 写入空数据到分片文件
+            // Write empty data to chunked file
             await expect(fileOperationManager.writeChunkedFile(testTableName, [])).resolves.not.toThrow();
             
-            // 清理测试数据
+            // Clean up test data
             await fileOperationManager.deleteSingleFile(testTableName);
             await fileOperationManager.clearChunkedFile(testTableName);
         });

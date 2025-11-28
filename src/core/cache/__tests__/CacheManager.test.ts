@@ -18,97 +18,97 @@ describe('CacheManager', () => {
         });
     });
     
-    describe('基本功能测试', () => {
-        it('应该能够设置和获取缓存项', () => {
-            // 测试设置缓存
+    describe('Basic Functionality Tests', () => {
+        it('should be able to set and get cache items', () => {
+            // Test setting cache
             cacheManager.set('test-key', 'test-value');
             
-            // 测试获取缓存
+            // Test getting cache
             const result = cacheManager.get('test-key');
             expect(result).toBe('test-value');
         });
         
-        it('应该能够删除缓存项', () => {
-            // 设置缓存
+        it('should be able to delete cache items', () => {
+            // Set cache
             cacheManager.set('test-key', 'test-value');
             expect(cacheManager.get('test-key')).toBe('test-value');
             
-            // 删除缓存
+            // Delete cache
             cacheManager.delete('test-key');
             expect(cacheManager.get('test-key')).toBeUndefined();
         });
         
-        it('应该能够检查缓存项是否存在', () => {
-            // 设置缓存
+        it('should be able to check if cache item exists', () => {
+            // Set cache
             cacheManager.set('test-key', 'test-value');
             expect(cacheManager.has('test-key')).toBe(true);
             
-            // 检查不存在的缓存
+            // Check non-existent cache
             expect(cacheManager.has('non-existent-key')).toBe(false);
         });
         
-        it('应该能够清空缓存', () => {
-            // 设置多个缓存项
+        it('should be able to clear cache', () => {
+            // Set multiple cache items
             cacheManager.set('key1', 'value1');
             cacheManager.set('key2', 'value2');
             cacheManager.set('key3', 'value3');
             
-            // 清空缓存
+            // Clear cache
             cacheManager.clear();
             
-            // 检查所有缓存项是否被清空
+            // Check if all cache items are cleared
             expect(cacheManager.get('key1')).toBeUndefined();
             expect(cacheManager.get('key2')).toBeUndefined();
             expect(cacheManager.get('key3')).toBeUndefined();
         });
     });
     
-    describe('缓存策略测试', () => {
-        it('应该根据LRU策略淘汰缓存项', () => {
-            // 创建LRU策略的缓存管理器，禁用雪崩防护以便测试
+    describe('Cache Strategy Tests', () => {
+        it('should evict cache items according to LRU strategy', () => {
+            // Create LRU strategy cache manager, disable avalanche protection for testing
             const lruCache = new CacheManager({
                 strategy: CacheStrategy.LRU,
                 maxSize: 3,
                 enableAvalancheProtection: false,
             });
             
-            // 设置超过容量的缓存项
+            // Set cache items exceeding capacity
             lruCache.set('key1', 'value1');
             lruCache.set('key2', 'value2');
             lruCache.set('key3', 'value3');
             
-            // 直接检查缓存大小
+            // Directly check cache size
             expect(lruCache.getSize()).toBe(3);
             
-            // 设置第4个缓存项，应该淘汰最早的key1
+            // Set 4th cache item, should evict oldest key1
             lruCache.set('key4', 'value4');
             
-            // 检查结果
+            // Check results
             expect(lruCache.getSize()).toBe(3);
             expect(lruCache.get('key4')).toBe('value4');
         });
         
-        it('应该根据LFU策略淘汰缓存项', () => {
-            // 创建LFU策略的缓存管理器
+        it('should evict cache items according to LFU strategy', () => {
+            // Create LFU strategy cache manager
             const lfuCache = new CacheManager({
                 strategy: CacheStrategy.LFU,
                 maxSize: 3,
             });
             
-            // 设置缓存项
+            // Set cache items
             lfuCache.set('key1', 'value1');
             lfuCache.set('key2', 'value2');
             lfuCache.set('key3', 'value3');
             
-            // 多次访问key1和key3
+            // Access key1 and key3 multiple times
             lfuCache.get('key1');
             lfuCache.get('key1');
             lfuCache.get('key3');
             
-            // 设置第4个缓存项，应该淘汰访问次数最少的key2
+            // Set 4th cache item, should evict least frequently used key2
             lfuCache.set('key4', 'value4');
             
-            // 检查结果
+            // Check results
             expect(lfuCache.get('key1')).toBe('value1');
             expect(lfuCache.get('key2')).toBeUndefined();
             expect(lfuCache.get('key3')).toBe('value3');
@@ -116,18 +116,18 @@ describe('CacheManager', () => {
         });
     });
     
-    describe('缓存过期测试', () => {
-        it('应该自动清除过期的缓存项', () => {
-            // 创建短过期时间的缓存管理器
+    describe('Cache Expiry Tests', () => {
+        it('should automatically clear expired cache items', () => {
+            // Create cache manager with short expiry time
             const cache = new CacheManager({
-                defaultExpiry: 100, // 100毫秒过期
+                defaultExpiry: 100, // 100ms expiry
             });
             
-            // 设置缓存
+            // Set cache
             cache.set('test-key', 'test-value');
             expect(cache.get('test-key')).toBe('test-value');
             
-            // 等待缓存过期
+            // Wait for cache to expire
             return new Promise<void>((resolve) => {
                 setTimeout(() => {
                     expect(cache.get('test-key')).toBeUndefined();
@@ -136,18 +136,18 @@ describe('CacheManager', () => {
             });
         });
         
-        it('应该支持自定义过期时间', () => {
-            // 设置100毫秒过期的缓存项
+        it('should support custom expiry time', () => {
+            // Set cache item with 100ms expiry
             cacheManager.set('short-expiry', 'short-value', 100);
-            // 设置1秒过期的缓存项
+            // Set cache item with 1s expiry
             cacheManager.set('long-expiry', 'long-value', 1000);
             
-            // 等待150毫秒
+            // Wait for 150ms
             return new Promise<void>((resolve) => {
                 setTimeout(() => {
-                    // 短过期时间的缓存应该已过期
+                    // Short expiry cache should be expired
                     expect(cacheManager.get('short-expiry')).toBeUndefined();
-                    // 长过期时间的缓存应该仍然有效
+                    // Long expiry cache should still be valid
                     expect(cacheManager.get('long-expiry')).toBe('long-value');
                     resolve();
                 }, 150);
@@ -155,24 +155,24 @@ describe('CacheManager', () => {
         });
     });
     
-    describe('缓存统计测试', () => {
-        it('应该正确记录缓存统计信息', () => {
-            // 初始统计信息
+    describe('Cache Statistics Tests', () => {
+        it('should correctly record cache statistics', () => {
+            // Initial statistics
             const initialStats = cacheManager.getStats();
             expect(initialStats.hits).toBe(0);
             expect(initialStats.misses).toBe(0);
             expect(initialStats.size).toBe(0);
             
-            // 设置缓存
+            // Set cache
             cacheManager.set('test-key', 'test-value');
             
-            // 获取缓存（命中）
+            // Get cache (hit)
             cacheManager.get('test-key');
             
-            // 获取不存在的缓存（未命中）
+            // Get non-existent cache (miss)
             cacheManager.get('non-existent-key');
             
-            // 检查统计信息
+            // Check statistics
             const stats = cacheManager.getStats();
             expect(stats.hits).toBe(1);
             expect(stats.misses).toBe(1);
@@ -182,70 +182,70 @@ describe('CacheManager', () => {
         });
     });
     
-    describe('线程安全测试', () => {
-        it('应该支持线程安全的getSafe方法', async () => {
-            // 模拟异步获取数据的函数
+    describe('Thread Safety Tests', () => {
+        it('should support thread-safe getSafe method', async () => {
+            // Mock async data fetching function
             const fetchFn = jest.fn().mockResolvedValue('fetched-value');
             
-            // 多次并发调用getSafe
+            // Multiple concurrent calls to getSafe
             const promises = [
                 cacheManager.getSafe('async-key', fetchFn),
                 cacheManager.getSafe('async-key', fetchFn),
                 cacheManager.getSafe('async-key', fetchFn),
             ];
             
-            // 等待所有promise完成
+            // Wait for all promises to complete
             const results = await Promise.all(promises);
             
-            // 所有调用应该返回相同的结果
+            // All calls should return the same result
             results.forEach(result => {
                 expect(result).toBe('fetched-value');
             });
             
-            // fetchFn应该只被调用一次（缓存击穿防护）
+            // fetchFn should only be called once (cache breakdown protection)
             expect(fetchFn).toHaveBeenCalledTimes(1);
         });
     });
     
-    describe('缓存穿透防护测试', () => {
-        it('应该支持缓存穿透防护', async () => {
-            // 模拟返回null的获取函数
+    describe('Cache Penetration Protection Tests', () => {
+        it('should support cache penetration protection', async () => {
+            // Mock fetch function that returns null
             const fetchFn = jest.fn().mockResolvedValue(null);
             
-            // 使用缓存穿透防护获取数据
+            // Get data with penetration protection
             const result = await cacheManager.getWithPenetrationProtection('null-key', fetchFn, 'default-value');
             
-            // 应该返回默认值
+            // Should return default value
             expect(result).toBe('default-value');
             
-            // 再次调用，应该从缓存获取，不再调用fetchFn
+            // Call again, should get from cache without calling fetchFn
             const result2 = await cacheManager.getWithPenetrationProtection('null-key', fetchFn, 'default-value');
             expect(result2).toBe('default-value');
             expect(fetchFn).toHaveBeenCalledTimes(1);
         });
     });
     
-    describe('脏数据处理测试', () => {
-        it('应该能够标记和获取脏数据', () => {
-            // 设置缓存项
+    describe('Dirty Data Handling Tests', () => {
+        it('should be able to mark and get dirty data', () => {
+            // Set cache items
             cacheManager.set('clean-key', 'clean-value');
             cacheManager.set('dirty-key', 'dirty-value', undefined, true);
             
-            // 标记clean-key为脏数据
+            // Mark clean-key as dirty
             cacheManager.markAsDirty('clean-key');
             
-            // 获取所有脏数据
+            // Get all dirty data
             const dirtyData = cacheManager.getDirtyData();
             
-            // 检查结果
+            // Check results
             expect(dirtyData.size).toBe(2);
             expect(dirtyData.get('clean-key')).toBe('clean-value');
             expect(dirtyData.get('dirty-key')).toBe('dirty-value');
             
-            // 标记clean-key为干净数据
+            // Mark clean-key as clean
             cacheManager.markAsClean('clean-key');
             
-            // 再次获取脏数据
+            // Get dirty data again
             const dirtyData2 = cacheManager.getDirtyData();
             expect(dirtyData2.size).toBe(1);
             expect(dirtyData2.get('dirty-key')).toBe('dirty-value');
