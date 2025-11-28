@@ -1,4 +1,5 @@
 # expo-liteDataStore 
+[中文](README.md) | [English](https://github.com/QinIndexCode/expo-liteDataStore/blob/main/README.en.md)
 
 [![npm version](https://img.shields.io/npm/v/expo-lite-db-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-db-store) [![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-liteDataStore)](https://github.com/QinIndexCode/expo-liteDataStore/blob/main/LICENSE)
 
