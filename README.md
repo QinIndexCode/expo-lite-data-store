@@ -1,4 +1,6 @@
-# expo-liteDataStore [![npm version](https://img.shields.io/npm/v/expo-lite-data-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-data-store) [![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-liteDataStore)](./LICENSE)
+# expo-liteDataStore 
+
+[![npm version](https://img.shields.io/npm/v/expo-lite-db-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-db-store) [![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-liteDataStore)](https://github.com/QinIndexCode/expo-liteDataStore/blob/main/LICENSE)
 
 超轻量、零配置、纯 TypeScript 编写的 Expo 本地数据库  
 专为 React Native + Expo 项目设计，无需任何 native 依赖。
