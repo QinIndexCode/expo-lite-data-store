@@ -63,4 +63,9 @@ export type StorageErrorCode =
   | "MIGRATION_FAILED" //迁移失败
   | "WRITTEN_COUNT_MISMATCH" //写入数量不匹配
   | "BULK_OPERATION_FAILED" //批量操作失败
+  // transaction part error codes
+  | "TRANSACTION_IN_PROGRESS" //事务已在进行中
+  | "NO_TRANSACTION_IN_PROGRESS" //没有事务在进行中
+  | "TRANSACTION_COMMIT_FAILED" //事务提交失败
+  | "TRANSACTION_ROLLBACK_FAILED" //事务回滚失败
   ;

@@ -9,7 +9,10 @@ const META_FILE = new File(ROOT, "meta.ldb");
 const CURRENT_VERSION = "1.0.0";
 
 export interface ColumnSchema {
-    [field: string]: "string" | "number" | "boolean" | "date" | "blob";
+    [field: string]: "string" | "number" | "boolean" | "date" | "blob" | {
+        type: "string" | "number" | "boolean" | "date" | "blob";
+        isHighRisk?: boolean;
+    };
 }
 
 export interface TableSchema {
@@ -23,6 +26,8 @@ export interface TableSchema {
     updatedAt: number;
     columns: ColumnSchema;
     indexes?: Record<string, "unique" | "normal">;
+    isHighRisk?: boolean;
+    highRiskFields?: string[];
 }
 
 export interface DatabaseMeta {
@@ -41,9 +46,10 @@ export class MetadataManager {
     private dirty = false;
     private writing = false;        // 防止并发写冲突
     private saveTimer: any = null;  // 防抖定时器
+    private loadPromise: Promise<void> | null = null; // 用于跟踪load方法的执行状态
 
     constructor() {
-        this.load(); // 异步加载，不阻塞启动
+        this.loadPromise = this.load(); // 异步加载，不阻塞启动，但保存promise以便外部等待
     }
 
     // 加载元数据（损坏自动重建）
@@ -57,14 +63,11 @@ export class MetadataManager {
 
             // check version
             if (parsed.version !== CURRENT_VERSION) {
-                console.warn(`Metadata version mismatch: ${parsed.version} → ${CURRENT_VERSION}, will migrate`);
-                //future : this place can add migration logic to upgrade the metadata version
+                // future: add migration logic to upgrade the metadata version
             }
 
             this.cache = parsed;
-            console.log("Metadata loaded:", Object.keys(this.cache.tables).length, "tables");
         } catch (error) {
-            console.warn("Metadata corrupted or missing, rebuilding empty one...", error);
             this.cache = {
                 version: CURRENT_VERSION,
                 generatedAt: Date.now(),
@@ -73,6 +76,30 @@ export class MetadataManager {
             this.dirty = true;
             await this.save();
         }
+    }
+
+    // 等待加载完成（用于测试）
+    async waitForLoad(): Promise<void> {
+        if (this.loadPromise) {
+            await this.loadPromise;
+        }
+    }
+
+    // 清理资源（用于测试）
+    cleanup(): void {
+        if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = null;
+        }
+    }
+
+    // 立即保存元数据（用于测试）
+    async saveImmediately(): Promise<void> {
+        if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = null;
+        }
+        await this.save();
     }
 
     // Lock Save (Prevent Concurrent Write) 
@@ -86,9 +113,8 @@ export class MetadataManager {
             this.cache.generatedAt = Date.now();
             await META_FILE.write(JSON.stringify(this.cache, null, 2));
             this.dirty = false;
-            console.log("Metadata saved");
         } catch (error) {
-            throw new StorageError("Metadata write failed", "META_FILE_WRITE_ERROR", error);
+            throw new StorageError("Metadata write failed", "META_FILE_WRITE_ERROR", { cause: error });
         } finally {
             this.writing = false;
         }

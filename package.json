@@ -2,20 +2,25 @@
   "name": "expo-litedatastore",
   "main": "expo-router/entry",
   "version": "1.0.0",
-
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "eslint src/**/*.{js,jsx,ts,tsx}",
+    "test": "jest --config jest.simple.config.js",
+    "test:watch": "jest --config jest.simple.config.js --watch",
+    "test:coverage": "jest --config jest.simple.config.js --coverage",
+    "test:expo": "jest"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
+    "@types/bcryptjs": "^2.4.6",
+    "bcryptjs": "^3.0.3",
     "crypto-js": "^4.2.0",
     "expo": "~54.0.23",
     "expo-constants": "~18.0.10",
@@ -43,10 +48,16 @@
   },
   "devDependencies": {
     "@types/crypto-js": "^4.2.2",
+    "@types/jest": "^30.0.0",
     "@types/node": "^24.10.1",
     "@types/react": "~19.1.0",
+    "@typescript-eslint/parser": "^8.48.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
+    "jest": "^30.2.0",
+    "jest-expo": "^54.0.13",
+    "react-test-renderer": "^19.2.0",
+    "ts-jest": "^29.4.5",
     "ts-node": "^10.9.2",
     "tslib": "^2.8.1",
     "typescript": "~5.9.2"
