@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/expo-lite-db-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-db-store) [![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-liteDataStore)](https://github.com/QinIndexCode/expo-liteDataStore/blob/main/LICENSE)
 
+
 Ultra-lightweight, zero-configuration, pure TypeScript Expo local database  
 Designed for React Native + Expo projects, no native dependencies required.
 
