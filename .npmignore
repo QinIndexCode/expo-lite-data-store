@@ -1,0 +1,25 @@
+# 源码和测试
+src/
+__mocks__/
+**/__tests__/
+**/*.test.*
+coverage/
+
+# 开发配置
+jest*.js
+tsconfig*.json
+eslint.config.js
+expo-env.d.ts
+.npmignore
+
+# 工具和文档
+scripts/
+app/
+*.tsbuildinfo
+*.md
+!README.md
+
+# 其他
+.gitignore
+test*.*
+*.log

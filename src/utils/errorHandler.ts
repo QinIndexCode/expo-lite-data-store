@@ -8,6 +8,11 @@ import { StorageError } from '../types/storageErrorInfc';
 export class ErrorHandler {
     /**
      * 创建表相关错误
+     * @param operation 操作类型（create、delete、update、read等）
+     * @param tableName 表名
+     * @param cause 原始错误（可选）
+     * @param details 详细错误信息（可选）
+     * @returns StorageError 格式化后的存储错误对象
      */
     static createTableError(
         operation: string,
@@ -28,6 +33,11 @@ export class ErrorHandler {
 
     /**
      * 创建文件相关错误
+     * @param operation 操作类型（write、read、delete、move等）
+     * @param resource 资源路径或名称
+     * @param cause 原始错误（可选）
+     * @param details 详细错误信息（可选）
+     * @returns StorageError 格式化后的存储错误对象
      */
     static createFileError(
         operation: string,
@@ -48,6 +58,11 @@ export class ErrorHandler {
 
     /**
      * 创建查询相关错误
+     * @param operation 操作类型（findOne、findMany等）
+     * @param tableName 表名
+     * @param cause 原始错误（可选）
+     * @param details 详细错误信息（可选）
+     * @returns StorageError 格式化后的存储错误对象
      */
     static createQueryError(
         operation: string,
@@ -68,6 +83,10 @@ export class ErrorHandler {
 
     /**
      * 创建事务相关错误
+     * @param operation 操作类型（begin、commit、rollback等）
+     * @param cause 原始错误（可选）
+     * @param details 详细错误信息（可选）
+     * @returns StorageError 格式化后的存储错误对象
      */
     static createTransactionError(
         operation: string,
@@ -87,6 +106,12 @@ export class ErrorHandler {
 
     /**
      * 创建通用错误
+     * @param message 错误消息
+     * @param code 错误代码
+     * @param cause 原始错误（可选）
+     * @param details 详细错误信息（可选）
+     * @param suggestion 错误解决建议（可选）
+     * @returns StorageError 格式化后的存储错误对象
      */
     static createGeneralError(
         message: string,
@@ -108,6 +133,8 @@ export class ErrorHandler {
 
     /**
      * 获取表操作错误的建议
+     * @param operation 操作类型
+     * @returns string 错误解决建议
      */
     private static getTableErrorSuggestion(operation: string): string {
         switch (operation.toLowerCase()) {
@@ -126,6 +153,8 @@ export class ErrorHandler {
 
     /**
      * 获取文件操作错误的建议
+     * @param operation 操作类型
+     * @returns string 错误解决建议
      */
     private static getFileErrorSuggestion(operation: string): string {
         switch (operation.toLowerCase()) {
@@ -146,6 +175,8 @@ export class ErrorHandler {
 
     /**
      * 获取事务操作错误的建议
+     * @param operation 操作类型
+     * @returns string 错误解决建议
      */
     private static getTransactionErrorSuggestion(operation: string): string {
         switch (operation.toLowerCase()) {
@@ -162,6 +193,10 @@ export class ErrorHandler {
 
     /**
      * 处理异步操作错误，确保所有异步操作都返回统一的错误格式
+     * @param operation 异步操作函数
+     * @param errorCreator 错误创建函数
+     * @returns Promise<T> 操作结果
+     * @throws StorageError 格式化后的存储错误
      */
     static async handleAsyncError<T>(
         operation: () => Promise<T>,
@@ -176,6 +211,10 @@ export class ErrorHandler {
 
     /**
      * 处理同步操作错误，确保所有同步操作都返回统一的错误格式
+     * @param operation 同步操作函数
+     * @param errorCreator 错误创建函数
+     * @returns T 操作结果
+     * @throws StorageError 格式化后的存储错误
      */
     static handleSyncError<T>(
         operation: () => T,
@@ -190,6 +229,8 @@ export class ErrorHandler {
 
     /**
      * 格式化错误信息，使其更易读
+     * @param error 错误对象
+     * @returns string 格式化后的错误字符串
      */
     static formatError(error: unknown): string {
         if (error instanceof StorageError) {

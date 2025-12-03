@@ -170,6 +170,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     
     /**
      * 预处理数据，将数据分成多个块，每个块不超过指定大小
+     * 优化：使用更高效的内存管理和智能分块算法
      * @param data 原始数据
      * @param chunkSize 块大小限制
      * @returns 分块后的数据数组
@@ -182,32 +183,80 @@ export class ChunkedFileHandler extends FileHandlerBase {
         let currentChunk: Record<string, any>[] = [];
         let currentSize = 0;
         
+        // 优化：批量处理，减少JSON序列化次数
+        const encoder = new TextEncoder();
+        const overhead = 200; // JSON结构和哈希的预估开销
+        
+        // 优化：预计算数据项大小，避免重复计算
+        const itemSizes: number[] = [];
+        const validItems: Record<string, any>[] = [];
+        
+        // 第一步：验证和预计算大小
         for (const item of data) {
             try {
-                // 验证单个数据项的有效性
                 if (!this.validateDataItem(item)) {
                     continue;
                 }
                 
-                // 估算单个数据项的大小
-                const itemSize = 
-                    new TextEncoder().encode(JSON.stringify(item))
-                        .byteLength + 200; // 200字节是JSON结构和哈希的预估开销
-                
-                // 如果当前块加上新项超过限制，将当前块添加到结果中
-                if (currentSize + itemSize > chunkSize && currentChunk.length > 0) {
+                // 估算单个数据项的大小（优化：只序列化一次）
+                const itemSize = encoder.encode(JSON.stringify(item)).byteLength + overhead;
+                itemSizes.push(itemSize);
+                validItems.push(item);
+            } catch (err) {
+                console.warn(`skip error data item:`, item, err);
+            }
+        }
+        
+        // 第二步：智能分块算法改进
+        // 1. 统计数据项大小分布，优化分块策略
+        const sizeStats = {
+            min: Math.min(...itemSizes),
+            max: Math.max(...itemSizes),
+            avg: itemSizes.reduce((sum, size) => sum + size, 0) / itemSizes.length
+        };
+        
+        // 2. 根据数据分布动态调整块大小（不超过配置的chunkSize）
+        const dynamicChunkSize = Math.min(
+            chunkSize,
+            Math.max(sizeStats.avg * 100, chunkSize * 0.8) // 确保每个块至少包含一定数量的数据项
+        );
+        
+        // 3. 智能分块，尽量填满每个块，同时考虑数据项大小分布
+        for (let i = 0; i < validItems.length; i++) {
+            const item = validItems[i];
+            const itemSize = itemSizes[i];
+            
+            // 如果单个项就超过块大小，单独成块
+            if (itemSize > dynamicChunkSize) {
+                // 如果当前块有数据，先保存
+                if (currentChunk.length > 0) {
                     chunks.push(currentChunk);
                     currentChunk = [];
                     currentSize = 0;
                 }
-                
-                // 添加到当前块
-                currentChunk.push(item);
-                currentSize += itemSize;
-            } catch (err) {
-                // 单个数据项处理失败，记录警告并继续处理后续数据
-                console.warn(`skip error data item:`, item, err);
+                // 大项单独成块
+                chunks.push([item]);
+                continue;
             }
+            
+            // 智能判断：如果当前块加上新项接近块大小（90%以上），则直接保存当前块
+            const fillRatio = (currentSize + itemSize) / dynamicChunkSize;
+            if (fillRatio > 0.9 && currentChunk.length > 0) {
+                chunks.push(currentChunk);
+                currentChunk = [];
+                currentSize = 0;
+            }
+            
+            // 如果当前块加上新项超过限制，将当前块添加到结果中
+            if (currentSize + itemSize > dynamicChunkSize && currentChunk.length > 0) {
+                chunks.push(currentChunk);
+                currentChunk = [];
+                currentSize = 0;
+            }
+            
+            // 添加到当前块
+            currentChunk.push(item);
+            currentSize += itemSize;
         }
         
         // 添加最后一个块
@@ -218,48 +267,6 @@ export class ChunkedFileHandler extends FileHandlerBase {
         return chunks;
     }
     
-    /**
-     * 批量处理数据，减少内存占用
-     */
-    private async appendBatch(
-        batch: Record<string, any>[],
-        chunkIndex: number,
-        currentChunk: Record<string, any>[],
-        currentSize: number,
-        chunkSize: number
-    ): Promise<void> {
-        // 使用更高效的内存管理方式
-        let tempChunk: Record<string, any>[] = [];
-        let tempSize = 0;
-        
-        for (const item of batch) {
-            const itemSize = 
-                new TextEncoder().encode(JSON.stringify(item))
-                    .byteLength + 200; // 预估开销
-
-            if (
-                tempSize + itemSize > chunkSize &&
-                tempChunk.length > 0
-            ) {
-                // 写入当前临时块
-                await this.writeChunk(chunkIndex, tempChunk);
-                chunkIndex++;
-                // 直接创建新数组，让垃圾回收器处理旧数组
-                tempChunk = [];
-                tempSize = 0;
-            }
-
-            tempChunk.push(item);
-            tempSize += itemSize;
-        }
-        
-        // 将剩余数据合并到currentChunk
-        if (tempChunk.length > 0) {
-            currentChunk.push(...tempChunk);
-            currentSize += tempSize;
-        }
-    }
-
     private async writeChunk(index: number, data: Record<string, any>[]) {
         const file = this.getChunkFile(index);
         try {
@@ -319,6 +326,87 @@ export class ChunkedFileHandler extends FileHandlerBase {
         }
     }
 
+    /**
+     * 分块预加载缓存
+     */
+    private chunkCache = new Map<number, Record<string, any>[]>();
+    private readonly maxCacheSize = 10; // 最多缓存10个分块
+    
+    /**
+     * 预加载分块到缓存
+     */
+    async preloadChunks(chunkIndices: number[]): Promise<void> {
+        const chunkFiles = await this.getChunkFiles();
+        const filesToLoad = chunkIndices
+            .map(index => chunkFiles.find(f => {
+                const fileIndex = parseInt(f.name.replace(CHUNK_EXT, ""), 10);
+                return fileIndex === index;
+            }))
+            .filter((f): f is File => f !== undefined && !this.chunkCache.has(parseInt(f.name.replace(CHUNK_EXT, ""), 10)));
+        
+        // 限制并行加载数量
+        const parallelLimit = 4;
+        for (let i = 0; i < filesToLoad.length; i += parallelLimit) {
+            const batch = filesToLoad.slice(i, i + parallelLimit);
+            await Promise.all(batch.map(async (file) => {
+                try {
+                    const chunkIndex = parseInt(file.name.replace(CHUNK_EXT, ""), 10);
+                    const data = await this.readChunkFile(file);
+                    if (data.length > 0) {
+                        // 限制缓存大小
+                        if (this.chunkCache.size >= this.maxCacheSize) {
+                            // 删除最旧的缓存项
+                            const firstKey = this.chunkCache.keys().next().value;
+                            if (firstKey !== undefined) {
+                                this.chunkCache.delete(firstKey);
+                            }
+                        }
+                        this.chunkCache.set(chunkIndex, data);
+                    }
+                } catch (e) {
+                    console.warn(`Preload chunk ${file.name} failed`, e);
+                }
+            }));
+        }
+    }
+    
+    /**
+     * 读取单个分块文件
+     */
+    private async readChunkFile(file: File): Promise<Record<string, any>[]> {
+        const text = await withTimeout(
+            file.text(),
+            10000,
+            `READ CHUNK ${file.name} CONTENT`
+        );
+
+        const parsed = JSON.parse(text);
+
+        if (!parsed || typeof parsed !== "object") {
+            console.warn(`CHUNK ${file.name} FORMAT_ERROR：not valid JSON object`);
+            return [];
+        }
+
+        if (!Array.isArray(parsed.data) || parsed.hash === undefined) {
+            console.warn(`CHUNK ${file.name} FORMAT_ERROR：missing data array or hash field`);
+            return [];
+        }
+
+        if (!(await this.verifyHash(parsed.data, parsed.hash))) {
+            console.warn(`CHUNK ${file.name} CORRUPTED：hash mismatch`);
+            return [];
+        }
+
+        return parsed.data;
+    }
+    
+    /**
+     * 清除分块缓存
+     */
+    clearChunkCache(): void {
+        this.chunkCache.clear();
+    }
+    
     async readAll(): Promise<Record<string, any>[]> {
         // 1. 获取所有分片文件信息
         const chunkFiles = await this.getChunkFiles();
@@ -327,42 +415,47 @@ export class ChunkedFileHandler extends FileHandlerBase {
             return [];
         }
         
-        // 2. 并行读取所有分片文件，限制并行数为6，避免过多I/O操作
-        const parallelLimit = 6;
+        // 2. 优化：先检查缓存，只读取未缓存的分片
         const allChunkData: Record<string, any>[][] = [];
+        const filesToRead: File[] = [];
+        const cachedIndices: number[] = [];
+        
+        for (const file of chunkFiles) {
+            const chunkIndex = parseInt(file.name.replace(CHUNK_EXT, ""), 10);
+            if (this.chunkCache.has(chunkIndex)) {
+                cachedIndices.push(chunkIndex);
+            } else {
+                filesToRead.push(file);
+            }
+        }
+        
+        // 添加缓存的数据
+        cachedIndices.sort((a, b) => a - b);
+        for (const index of cachedIndices) {
+            const cached = this.chunkCache.get(index);
+            if (cached) {
+                allChunkData.push(cached);
+            }
+        }
+        
+        // 3. 并行读取未缓存的分片文件，限制并行数为6，避免过多I/O操作
+        const parallelLimit = 6;
         
         // 分批次并行读取
-        for (let i = 0; i < chunkFiles.length; i += parallelLimit) {
-            const batchFiles = chunkFiles.slice(i, i + parallelLimit);
+        for (let i = 0; i < filesToRead.length; i += parallelLimit) {
+            const batchFiles = filesToRead.slice(i, i + parallelLimit);
             
             const batchPromises = batchFiles.map(async (file) => {
                 try {
-                    const text = await withTimeout(
-                        file.text(),
-                        10000,
-                        `READ CHUNK ${file.name} CONTENT`
-                    );
-
-                    const parsed = JSON.parse(text);
-
-                    // 增强防御性编程
-                    if (!parsed || typeof parsed !== "object") {
-                        console.warn(`CHUNK ${file.name} FORMAT_ERROR：not valid JSON object`);
-                        return [];
+                    const chunkIndex = parseInt(file.name.replace(CHUNK_EXT, ""), 10);
+                    const data = await this.readChunkFile(file);
+                    
+                    // 缓存读取的分片
+                    if (data.length > 0 && this.chunkCache.size < this.maxCacheSize) {
+                        this.chunkCache.set(chunkIndex, data);
                     }
-
-                    if (!Array.isArray(parsed.data) || parsed.hash === undefined) {
-                        console.warn(`CHUNK ${file.name} FORMAT_ERROR：missing data array or hash field`);
-                        return [];
-                    }
-
-                    // 使用基类的哈希验证方法
-                    if (!(await this.verifyHash(parsed.data, parsed.hash))) {
-                        console.warn(`CHUNK ${file.name} CORRUPTED：hash mismatch`);
-                        return [];
-                    }
-
-                    return parsed.data;
+                    
+                    return data;
                 } catch (e) {
                     console.warn(`READ CHUNK ${file.name} FAILED`, e);
                     return [];
@@ -374,7 +467,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
             allChunkData.push(...batchResults);
         }
         
-        // 3. 合并结果
+        // 4. 合并结果（保持顺序）
         return allChunkData.flat();
     }
 
@@ -445,7 +538,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
         const allChunkFiles = await this.getChunkFiles();
         
         // 2. 过滤出指定范围的分片文件
-        const rangeChunkFiles = allChunkFiles.filter((file, index) => {
+        const rangeChunkFiles = allChunkFiles.filter((file) => {
             const fileIndex = parseInt(file.name.replace(CHUNK_EXT, ""), 10);
             return fileIndex >= startIndex && fileIndex <= endIndex;
         });

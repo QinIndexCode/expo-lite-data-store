@@ -185,15 +185,67 @@ export class TaskQueue {
     start(): void {
         if (!this.isRunning) {
             this.isRunning = true;
-            this.processNext();
+            // 测试环境也设置isRunning为true，但不自动处理任务，允许手动控制
+            if (!(typeof process !== 'undefined' && process.env.NODE_ENV === 'test')) {
+                this.processNext();
+            }
         }
     }
     
     /**
      * 停止任务队列
+     * @param options 停止选项
+     * @param options.force 是否强制停止，默认false（等待正在运行的任务完成）
+     * @param options.timeout 等待超时时间（毫秒），默认30000
      */
-    stop(): void {
+    async stop(options: { force?: boolean; timeout?: number } = {}): Promise<void> {
+        const { force = false, timeout = 30000 } = options;
+        
+        // 设置队列状态为停止
         this.isRunning = false;
+        
+        if (force) {
+            // 强制停止，清理所有运行中的任务
+            this.runningTasks.clear();
+            return;
+        }
+        
+        // 等待正在运行的任务完成
+        const startTime = Date.now();
+        while (this.runningTasks.size > 0) {
+            // 检查是否超时
+            if (Date.now() - startTime > timeout) {
+                console.warn(`TaskQueue stop timed out after ${timeout}ms, forcing stop`);
+                this.runningTasks.clear();
+                return;
+            }
+            
+            // 等待一段时间后再次检查
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+    }
+    
+    /**
+     * 清理所有任务和资源（用于测试）
+     */
+    async cleanup(): Promise<void> {
+        // 停止队列
+        await this.stop({ force: true });
+        
+        // 清理所有任务和回调
+        this.queue = [];
+        this.runningTasks.clear();
+        this.taskCallbacks.clear();
+    }
+    
+    /**
+     * 在测试环境中手动处理下一个任务
+     * 用于测试环境中手动控制任务执行
+     */
+    processNextInTest(): void {
+        if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
+            this.processNext();
+        }
     }
     
     /**
@@ -310,17 +362,28 @@ export class TaskQueue {
         }
         
         // 处理任务
+        const timeout = task.timeout || this.config.defaultTimeout;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
         const timeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(() => {
-                reject(new Error(`Task timed out after ${task.timeout}ms`));
-            }, task.timeout);
+            timeoutId = setTimeout(() => {
+                reject(new Error(`Task timed out after ${timeout}ms`));
+            }, timeout);
         });
         
         Promise.race([processor.process(task), timeoutPromise])
             .then(result => {
+                // 清理超时定时器
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                }
                 this.completeTask(task, { status: TaskStatus.COMPLETED, result });
             })
             .catch(error => {
+                // 清理超时定时器
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                }
+                
                 if (task.retryCount < task.maxRetries) {
                     // 重试任务
                     task.retryCount++;

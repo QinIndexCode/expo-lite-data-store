@@ -1,6 +1,8 @@
 // src/core/api/RateLimiter.ts
 // API限流机制，基于令牌桶算法
 
+import { RATE_LIMIT } from "../constants";
+
 /**
  * 限流配置接口
  */
@@ -10,7 +12,7 @@ export interface RateLimitConfig {
      */
     rate: number;
     
-    /**
+    /** 
      * 令牌桶容量
      */
     capacity: number;
@@ -81,8 +83,8 @@ export class RateLimiter {
      */
     constructor(config: Partial<RateLimitConfig> = {}) {
         this.config = {
-            rate: config.rate || 100, // 默认每秒100个请求
-            capacity: config.capacity || 200, // 默认令牌桶容量200
+            rate: config.rate || RATE_LIMIT.DEFAULT_RATE, // 默认每秒请求数
+            capacity: config.capacity || RATE_LIMIT.DEFAULT_CAPACITY, // 默认令牌桶容量
             enabled: config.enabled !== false // 默认启用限流
         };
     }

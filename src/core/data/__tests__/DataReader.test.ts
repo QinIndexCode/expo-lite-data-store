@@ -12,7 +12,6 @@ describe('DataReader', () => {
     let metadataManager: MetadataManager;
     let cacheManager: CacheManager;
     let indexManager: IndexManager;
-    let fileOperationManager: FileOperationManager;
     const testTableName = 'test_table';
     
     beforeEach(() => {
@@ -27,17 +26,33 @@ describe('DataReader', () => {
             enableAvalancheProtection: true,
         });
         indexManager = new IndexManager(metadataManager);
-        fileOperationManager = new FileOperationManager(8 * 1024 * 1024, metadataManager);
         
         dataReader = new DataReader(
             metadataManager,
             indexManager,
             cacheManager,
-            fileOperationManager
         );
         
         // 清除测试表元数据
         metadataManager.delete(testTableName);
+    });
+    
+    afterEach((done) => {
+        // 清理定时器，防止测试挂起
+        console.log('[DataReader.test] afterEach: 开始清理');
+        if (cacheManager) {
+            console.log('[DataReader.test] afterEach: 清理 CacheManager');
+            cacheManager.cleanup();
+        }
+        if (metadataManager) {
+            console.log('[DataReader.test] afterEach: 清理 MetadataManager');
+            metadataManager.cleanup();
+        }
+        // 使用 process.nextTick 而不是 setTimeout，避免阻塞
+        process.nextTick(() => {
+            console.log('[DataReader.test] afterEach: 清理完成');
+            done();
+        });
     });
     
     describe('read', () => {

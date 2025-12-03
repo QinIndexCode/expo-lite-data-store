@@ -1,14 +1,14 @@
 // src/core/api/RestController.ts
 // RESTful API控制器，用于优化API设计和批量操作
 
-import { ApiWrapper } from "./ApiWrapper";
-import { ApiResponse, ApiResponseStatus } from "../../types/apiResponse";
+import { ApiResponse } from "../../types/apiResponse";
 import type {
     CreateTableOptions,
     ReadOptions,
     WriteOptions,
     WriteResult
 } from "../../types/storageTypes";
+import { ApiWrapper } from "./ApiWrapper";
 
 /**
  * RESTful API控制器类，用于优化API设计和批量操作
@@ -90,18 +90,20 @@ export class RestController {
             }
             
             return {
-                status: ApiResponseStatus.SUCCESS,
+                success: true,
                 data: { exists: exists.data || false, count },
+                error: undefined,
                 meta: {
                     requestId,
                     timestamp: Date.now(),
                     version: apiVersion,
-                    processingTime: Date.now() - startTime
+                    duration: Date.now() - startTime
                 }
             };
         } catch (error) {
             return {
-                status: ApiResponseStatus.ERROR,
+                success: false,
+                data: undefined,
                 error: {
                     code: "UNKNOWN",
                     message: error instanceof Error ? error.message : "An unknown error occurred",
@@ -112,7 +114,7 @@ export class RestController {
                     requestId,
                     timestamp: Date.now(),
                     version: apiVersion,
-                    processingTime: Date.now() - startTime
+                    duration: Date.now() - startTime
                 }
             };
         }
@@ -218,7 +220,8 @@ export class RestController {
         
         if (!existingRecord.data) {
             return {
-                status: ApiResponseStatus.ERROR,
+                success: false,
+                data: undefined,
                 error: {
                     code: "RECORD_NOT_FOUND",
                     message: `Record with id ${request.id} not found`,
@@ -229,7 +232,7 @@ export class RestController {
                     requestId: this.generateRequestId(),
                     timestamp: Date.now(),
                     version: request.version || "1.0.0",
-                    processingTime: Date.now() - 0
+                    duration: Date.now() - 0
                 }
             };
         }

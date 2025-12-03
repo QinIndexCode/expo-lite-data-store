@@ -155,10 +155,10 @@ export class TransactionManager {
         const tableMeta = this.metadataManager.get(tableName);
         if (tableMeta) {
           if (tableMeta.mode === "chunked") {
-                const handler = new ChunkedFileHandler(tableName);
-                await withTimeout(handler.clear(), 10000, `clear chunked table ${tableName}`);
-                await withTimeout(handler.append(snapshot), 10000, `restore chunked table ${tableName}`);
-            } else {
+                    const handler = new ChunkedFileHandler(tableName, this.metadataManager);
+                    await withTimeout(handler.clear(), 10000, `clear chunked table ${tableName}`);
+                    await withTimeout(handler.append(snapshot), 10000, `restore chunked table ${tableName}`);
+                } else {
                 // 创建文件路径
                 const filePath = `${ROOT}/${tableName}.ldb`;
                 // 创建File对象，根据expo-file-system的API，File构造函数接受路径字符串
@@ -205,9 +205,13 @@ export class TransactionManager {
    * 保存数据快照
    * @param tableName 表名
    * @param data 数据快照
+   * 注意：每个表只保存一次快照，避免重复保存占用内存
    */
   saveSnapshot(tableName: string, data: Record<string, any>[]): void {
-    this.transactionSnapshots.set(tableName, data);
+    // 只在第一次调用时保存快照，避免重复保存占用内存
+    if (!this.transactionSnapshots.has(tableName)) {
+      this.transactionSnapshots.set(tableName, data);
+    }
   }
   
   /**

@@ -18,7 +18,13 @@ export const countTable = db.count.bind(db);
 
 // 查询方法
 export const findOne = db.findOne.bind(db);
-export const findMany = db.findMany.bind(db);
+export const findMany = (tableName: string, filter?: Record<string, any>, options?: {
+    skip?: number;
+    limit?: number;
+    sortBy?: string | string[];
+    order?: "asc" | "desc" | ("asc" | "desc")[];
+    sortAlgorithm?: "default" | "fast" | "counting" | "merge" | "slow";
+}) => db.findMany(tableName, filter, options);
 
 // 删除数据
 export const remove = db.delete.bind(db);
@@ -45,32 +51,29 @@ export async function update(
   data: Record<string, any>,
   where: Record<string, any>
 ): Promise<number> {
-  // 先查询匹配的数据
-  const matchedData = await db.findMany(tableName, where);
-  if (matchedData.length === 0) {
-    return 0;
-  }
-  
-  // 更新每条数据
-  const updatedData = matchedData.map((item: Record<string, any>) => ({ ...item, ...data }));
-  
-  // 读取所有数据
+  // 只读取一次所有数据，减少文件I/O操作
   const allData = await db.read(tableName);
   
-  // 替换匹配的数据
+  let updatedCount = 0;
   const finalData = allData.map((item: Record<string, any>) => {
     // 检查是否匹配where条件
     const matches = Object.entries(where).every(([key, value]) => item[key] === value);
     if (matches) {
-      // 返回更新后的数据
+      // 更新匹配的数据
+      updatedCount++;
       return { ...item, ...data };
     }
     return item;
   });
   
-  // 使用覆盖模式写入数据
+  // 如果没有数据被更新，直接返回0，避免不必要的写入操作
+  if (updatedCount === 0) {
+    return 0;
+  }
+  
+  // 只写入一次更新后的数据
   await db.write(tableName, finalData, { mode: "overwrite" });
-  return updatedData.length;
+  return updatedCount;
 }
 
 // 导出类型
@@ -100,4 +103,4 @@ export default {
   migrateToChunked,
   clearTable,
   update
-}
+} as const

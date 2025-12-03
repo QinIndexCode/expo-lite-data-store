@@ -38,6 +38,11 @@ export class StorageError extends Error {
      * 错误发生时间
      */
     public readonly timestamp: number;
+
+    /**
+     * 原始错误原因
+     */
+    public readonly cause?: Error;
     
     constructor(
         message: string,
@@ -53,7 +58,7 @@ export class StorageError extends Error {
         super(message);
         this.name = "StorageError";
         this.timestamp = Date.now();
-        this.cause = options?.cause;
+        this.cause = options?.cause instanceof Error ? options.cause : undefined;
         this.details = options?.details;
         this.suggestion = options?.suggestion;
         this.category = this.getCategoryFromCode(code);

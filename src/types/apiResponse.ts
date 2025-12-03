@@ -14,15 +14,15 @@ export enum ApiResponseStatus {
  */
 export interface ApiResponse<T = any> {
     /**
-     * 响应状态
+     * 操作是否成功
      */
-    status: ApiResponseStatus;
-    
+    success: boolean;
+
     /**
      * 响应数据（成功时返回）
      */
     data?: T;
-    
+
     /**
      * 错误信息（失败时返回）
      */
@@ -31,28 +31,28 @@ export interface ApiResponse<T = any> {
          * 错误码
          */
         code: string;
-        
+
         /**
          * 错误消息
          */
         message: string;
-        
+
         /**
          * 错误详情
          */
         details?: string;
-        
+
         /**
          * 错误建议
          */
         suggestion?: string;
-        
+
         /**
          * 原始错误
          */
         cause?: any;
     };
-    
+
     /**
      * 响应元数据
      */
@@ -61,22 +61,32 @@ export interface ApiResponse<T = any> {
          * 请求ID
          */
         requestId: string;
-        
+
         /**
          * 响应时间戳
          */
         timestamp: number;
-        
+
         /**
          * API版本
          */
         version: string;
-        
+
         /**
          * 处理时间（毫秒）
          */
+        duration?: number;
+
+        /**
+         * 处理时间（毫秒）- 兼容旧版本
+         */
         processingTime?: number;
     };
+
+    /**
+     * 响应状态（字符串格式）
+     */
+    status?: string;
 }
 
 /**
@@ -130,14 +140,15 @@ export function createSuccessResponse<T>(data: T, options?: {
     processingTime?: number;
 }): ApiResponse<T> {
     return {
-        status: ApiResponseStatus.SUCCESS,
+        success: true,
         data,
         meta: {
             requestId: options?.requestId || generateRequestId(),
             timestamp: Date.now(),
             version: "1.0.0",
-            processingTime: options?.processingTime
-        }
+            duration: options?.processingTime
+        },
+        status: "success"
     };
 }
 
@@ -158,14 +169,16 @@ export function createErrorResponse(error: {
     processingTime?: number;
 }): ApiResponse {
     return {
-        status: ApiResponseStatus.ERROR,
+        success: false,
+        data: null,
         error,
         meta: {
             requestId: options?.requestId || generateRequestId(),
             timestamp: Date.now(),
             version: "1.0.0",
-            processingTime: options?.processingTime
-        }
+            duration: options?.processingTime
+        },
+        status: "error"
     };
 }
 

@@ -35,10 +35,16 @@ export type ReadOptions = {
      * @param skip number of records to skip
      * @param limit number of records to read
      * @param filter filter condition
+     * @param sortBy sort field(s)
+     * @param order sort order(s)
+     * @param sortAlgorithm sort algorithm to use
      */
   skip?: number; // 跳过的记录数 / number of records to skip
   limit?: number; // 读取的记录数 / number of records to read
   filter?: FilterCondition; // 过滤条件 / filter condition
+  sortBy?: string | string[]; // 排序字段 / sort field(s)
+  order?: "asc" | "desc" | ("asc" | "desc")[]; // 排序方向 / sort order(s)
+  sortAlgorithm?: "default" | "fast" | "counting" | "merge" | "slow"; // 排序算法 / sort algorithm
 };
 
 export type CreateTableOptions = {

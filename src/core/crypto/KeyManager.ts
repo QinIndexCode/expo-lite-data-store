@@ -9,8 +9,6 @@ import { generateMasterKey } from "../../utils/crypto.js";
  */
 export enum KeyType {
     AES = "aes",
-    RSA_PUBLIC = "rsa_public",
-    RSA_PRIVATE = "rsa_private",
     HMAC = "hmac",
     MASTER = "master"
 }

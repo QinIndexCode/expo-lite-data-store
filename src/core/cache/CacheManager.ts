@@ -1,5 +1,7 @@
 // src/core/cache/CacheManager.ts
 
+import { CACHE } from "../constants";
+
 /**
  * 缓存策略枚举
  */
@@ -201,6 +203,11 @@ export class CacheManager {
     private mutex = new Map<string, Promise<void>>();
     
     /**
+     * 清理定时器引用
+     */
+    private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+    
+    /**
      * 构造函数
      * 
      * @param config 缓存配置
@@ -209,13 +216,13 @@ export class CacheManager {
         // 默认配置
         this.config = {
             strategy: CacheStrategy.LRU,
-            maxSize: 1000,
-            defaultExpiry: 3600000, // 1小时
+            maxSize: CACHE.DEFAULT_MAX_SIZE,
+            defaultExpiry: CACHE.DEFAULT_EXPIRY, // 1小时
             enablePenetrationProtection: true,
             enableBreakdownProtection: true,
             enableAvalancheProtection: true,
-            avalancheRandomExpiry: [0, 300000], // 0-5分钟
-            memoryThreshold: 0.8, // 默认80%阈值
+            avalancheRandomExpiry: CACHE.AVALANCHE_PROTECTION_RANGE, // 0-5分钟
+            memoryThreshold: CACHE.MEMORY_THRESHOLD, // 默认80%阈值
             ...config
         };
         
@@ -224,7 +231,22 @@ export class CacheManager {
         this.stats.maxMemoryUsage = this.config.maxMemoryUsage || 0;
         
         // 定期清理过期缓存
+        // 在测试环境中，定时器会被 afterEach 中的 cleanup() 清理
         this.startCleanupTimer();
+    }
+    
+    /**
+     * 清理资源，停止定时器和锁
+     */
+    cleanup(): void {
+        if (this.cleanupTimer) {
+            clearInterval(this.cleanupTimer);
+            this.cleanupTimer = null;
+        }
+
+        // 清理所有锁
+        this.mutex.clear();
+
     }
     
     /**
@@ -347,10 +369,14 @@ export class CacheManager {
      * 启动定期清理过期缓存的定时器
      */
     private startCleanupTimer(): void {
+        // 如果已有定时器，先清理
+        if (this.cleanupTimer) {
+            clearInterval(this.cleanupTimer);
+        }
         // 每5分钟清理一次过期缓存
-        setInterval(() => {
+        this.cleanupTimer = setInterval(() => {
             this.cleanupExpired();
-        }, 300000);
+        }, CACHE.CLEANUP_INTERVAL);
     }
     
     /**
@@ -460,9 +486,16 @@ export class CacheManager {
     
     /**
      * 根据缓存策略淘汰缓存项
+     * @param force 是否强制淘汰（用于内存清理，即使缓存未满也淘汰）
      */
-    private evictItem(): void {
-        if (this.cache.size <= this.config.maxSize) {
+    private evictItem(force: boolean = false): void {
+        // 如果不是强制淘汰且缓存未满，直接返回
+        if (!force && this.cache.size <= this.config.maxSize) {
+            return;
+        }
+
+        // 如果缓存为空，无法淘汰
+        if (this.cache.size === 0) {
             return;
         }
         
@@ -516,7 +549,7 @@ export class CacheManager {
         
         // 开始清理，直到达到目标使用量或缓存为空
         while (this.stats.memoryUsage > targetUsage && this.cache.size > 0) {
-            this.evictItem();
+            this.evictItem(true); // 强制淘汰用于内存清理
         }
     }
     

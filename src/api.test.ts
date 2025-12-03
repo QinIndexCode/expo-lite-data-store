@@ -183,6 +183,89 @@ describe('Public API Tests', () => {
       const users = await findMany(TEST_TABLE, {});
       expect(users.length).toBe(TEST_DATA.length);
     });
+
+  describe('Sorting API', () => {
+    const SORT_TABLE = 'sort_test_table';
+    const SORT_TEST_DATA = [
+      { id: 1, name: 'Charlie', age: 35, score: 85.5, active: true },
+      { id: 2, name: 'Alice', age: 25, score: 92.0, active: true },
+      { id: 3, name: 'Bob', age: 30, score: 78.3, active: false },
+      { id: 4, name: 'Diana', age: 20, score: 88.7, active: true },
+    ];
+
+    beforeEach(async () => {
+      if (await hasTable(SORT_TABLE)) {
+        await deleteTable(SORT_TABLE);
+      }
+      await createTable(SORT_TABLE);
+      await insert(SORT_TABLE, SORT_TEST_DATA);
+    });
+
+    afterEach(async () => {
+      if (await hasTable(SORT_TABLE)) {
+        await deleteTable(SORT_TABLE);
+      }
+    });
+
+      it('should sort by single field ascending', async () => {
+        const users = await findMany(SORT_TABLE, {}, { sortBy: 'age', order: 'asc' });
+        expect(users[0].age).toBe(20); // Diana
+        expect(users[1].age).toBe(25); // Alice
+        expect(users[2].age).toBe(30); // Bob
+        expect(users[3].age).toBe(35); // Charlie
+      });
+
+      it('should sort by single field descending', async () => {
+        const users = await findMany(SORT_TABLE, {}, { sortBy: 'age', order: 'desc' });
+        expect(users[0].age).toBe(35); // Charlie
+        expect(users[1].age).toBe(30); // Bob
+        expect(users[2].age).toBe(25); // Alice
+        expect(users[3].age).toBe(20); // Diana
+      });
+
+      it('should sort by string field', async () => {
+        const users = await findMany(SORT_TABLE, {}, { sortBy: 'name', order: 'asc' });
+        expect(users[0].name).toBe('Alice');
+        expect(users[1].name).toBe('Bob');
+        expect(users[2].name).toBe('Charlie');
+        expect(users[3].name).toBe('Diana');
+      });
+
+      it('should sort by number field', async () => {
+        const users = await findMany(SORT_TABLE, {}, { sortBy: 'score', order: 'desc' });
+        expect(users[0].score).toBe(92.0); // Alice
+        expect(users[1].score).toBe(88.7); // Diana
+        expect(users[2].score).toBe(85.5); // Charlie
+        expect(users[3].score).toBe(78.3); // Bob
+      });
+
+      it('should sort with filtering', async () => {
+        const users = await findMany(SORT_TABLE, { active: true }, { sortBy: 'age', order: 'desc' });
+        expect(users).toHaveLength(3);
+        expect(users[0].age).toBe(35); // Charlie
+        expect(users[1].age).toBe(25); // Alice
+        expect(users[2].age).toBe(20); // Diana
+      });
+
+      it('should sort with pagination', async () => {
+        const users = await findMany(SORT_TABLE, {}, { sortBy: 'age', order: 'asc', limit: 2 });
+        expect(users).toHaveLength(2);
+        expect(users[0].age).toBe(20); // Diana
+        expect(users[1].age).toBe(25); // Alice
+      });
+
+      it('should use default sorting when no algorithm specified', async () => {
+        const users = await findMany(SORT_TABLE, {}, { sortBy: 'name' });
+        expect(users[0].name).toBe('Alice');
+        expect(users[3].name).toBe('Diana');
+      });
+
+      it('should support custom sort algorithm', async () => {
+        const users = await findMany(SORT_TABLE, {}, { sortBy: 'name', sortAlgorithm: 'merge' });
+        expect(users[0].name).toBe('Alice');
+        expect(users[3].name).toBe('Diana');
+      });
+    });
   });
 
   describe('Update and Delete API', () => {

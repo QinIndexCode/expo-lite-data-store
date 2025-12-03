@@ -12,13 +12,15 @@ import type {
     WriteResult
 } from "../../types/storageTypes";
 import { FileOperationManager } from "../FileOperationManager";
-import { CacheManager, CacheStrategy } from "../cache/CacheManager";
+import { CacheConfig, CacheManager, CacheStrategy } from "../cache/CacheManager";
+import { CACHE } from "../constants";
 import { DataReader } from "../data/DataReader";
 import { DataWriter } from "../data/DataWriter";
 import { IndexManager } from "../index/IndexManager";
-import { meta } from "../meta/MetadataManager";
+import { MetadataManager } from "../meta/MetadataManager";
+import { CacheMonitor } from "../monitor/CacheMonitor";
+import { performanceMonitor } from "../monitor/PerformanceMonitor";
 import { CacheService } from "../service/CacheService";
-import { FileService } from "../service/FileService";
 import { TransactionService } from "../service/TransactionService";
 
 export class FileSystemStorageAdapter implements StorageAdapterInfc {
@@ -27,42 +29,60 @@ export class FileSystemStorageAdapter implements StorageAdapterInfc {
     private fileOperationManager: FileOperationManager;
     private cacheManager: CacheManager;
     private cacheService: CacheService;
-    private fileService: FileService;
     private transactionService: TransactionService;
     private dataReader: DataReader;
     private dataWriter: DataWriter;
+    private cacheMonitor: CacheMonitor;
 
     /**
      * 构造函数，接受元数据管理器实例
-     * @param metadataManager 元数据管理器实例，默认为全局meta单例
+     * @param metadataManager 元数据管理器实例，如果未提供则创建新实例（保持向后兼容）
+     * @param options 可选配置项
      */
-    constructor(metadataManager: MetadataManagerInfc = meta) {
-        this.metadataManager = metadataManager;
+    constructor(metadataManager?: MetadataManagerInfc, options?: {
+        cacheConfig?: Partial<CacheConfig>;
+    }) {
+        // 使用依赖注入，如果没有提供则创建新实例（保持向后兼容）
+        this.metadataManager = metadataManager || new MetadataManager();
         
         // 初始化核心组件
         this.indexManager = new IndexManager(this.metadataManager);
         this.fileOperationManager = new FileOperationManager(config.chunkSize, this.metadataManager);
         
-        // 初始化服务
-        this.cacheManager = new CacheManager({
+        // 初始化服务，支持自定义缓存配置
+        const defaultCacheConfig: CacheConfig = {
             strategy: CacheStrategy.LRU,
-            maxSize: 1000,
-            defaultExpiry: 3600000, // 1小时
+            maxSize: CACHE.DEFAULT_MAX_SIZE,
+            defaultExpiry: CACHE.DEFAULT_EXPIRY, // 1小时
             enablePenetrationProtection: true,
             enableBreakdownProtection: true,
-            enableAvalancheProtection: true
+            enableAvalancheProtection: true,
+            maxMemoryUsage: 50 * 1024 * 1024, // 默认50MB内存限制
+            memoryThreshold: CACHE.MEMORY_THRESHOLD, // 80%阈值触发清理
+            avalancheRandomExpiry: CACHE.AVALANCHE_PROTECTION_RANGE // 0-5分钟随机过期
+        };
+        
+        this.cacheManager = new CacheManager({
+            ...defaultCacheConfig,
+            ...options?.cacheConfig
         });
         
         this.cacheService = new CacheService(this.cacheManager);
-        this.fileService = new FileService(this.fileOperationManager);
-        this.transactionService = new TransactionService(this.metadataManager, this.indexManager);
+        this.transactionService = new TransactionService();
+        
+        // 初始化性能监控（仅在非测试环境启动）
+        this.cacheMonitor = new CacheMonitor(this.cacheManager);
+        // 默认启动缓存监控，每分钟记录一次
+        // 测试环境中不自动启动，避免影响测试性能
+        if (!(typeof process !== 'undefined' && process.env.NODE_ENV === 'test')) {
+            this.cacheMonitor.startMonitoring(60000); // 每分钟记录一次
+        }
         
         // 初始化数据访问组件
         this.dataReader = new DataReader(
             this.metadataManager,
             this.indexManager,
-            this.cacheManager,
-            this.fileOperationManager
+            this.cacheManager
         );
         
         this.dataWriter = new DataWriter(
@@ -74,6 +94,8 @@ export class FileSystemStorageAdapter implements StorageAdapterInfc {
         
         // 初始化任务队列
         this._initializeTaskQueue();
+        
+        // 测试环境下的特殊处理已在_initializeTaskQueue中处理
     }
     
     /**
@@ -82,7 +104,27 @@ export class FileSystemStorageAdapter implements StorageAdapterInfc {
     private _initializeTaskQueue(): void {
         const storageTaskProcessor = new StorageTaskProcessor(this);
         taskQueue.addProcessor(storageTaskProcessor);
-        taskQueue.start();
+        // 在测试环境中不自动启动任务队列，避免测试挂起
+        if (typeof process === 'undefined' || process.env.NODE_ENV !== 'test') {
+            taskQueue.start();
+        }
+    }
+    
+    /**
+     * 清理资源（用于测试）
+     */
+    async cleanup(): Promise<void> {
+        // 停止任务队列
+        await taskQueue.stop({ force: true });
+        await taskQueue.cleanup();
+        // 清理缓存监控
+        if (this.cacheMonitor) {
+            this.cacheMonitor.stopMonitoring();
+        }
+        // 清理缓存管理器
+        if (this.cacheManager) {
+            this.cacheManager.cleanup();
+        }
     }
 
     // ==================== 表管理 ====================
@@ -120,9 +162,16 @@ export class FileSystemStorageAdapter implements StorageAdapterInfc {
         data: Record<string, any> | Record<string, any>[],
         options?: WriteOptions & { directWrite?: boolean }
     ): Promise<WriteResult> {
-        // 事务处理逻辑
-        if (this.transactionService.isInTransaction()) {
-            // 保存数据快照（如果还没有保存），用于事务回滚
+        const startTime = Date.now();
+        const dataSize = Array.isArray(data) ? data.length : 1;
+        
+        try {
+            // 事务处理逻辑
+            if (this.transactionService.isInTransaction()) {
+            // 保存数据快照（只在第一次操作该表时保存），用于事务回滚
+            // 检查是否已经保存过该表的快照
+            // 注意：这里通过检查operations中是否已有该表的操作来判断，避免直接访问事务服务的内部状态
+            // 实际实现中，TransactionService.saveSnapshot方法已经确保每个表只保存一次快照
             const currentData = await this.read(tableName);
             this.transactionService.saveSnapshot(tableName, currentData);
             
@@ -143,8 +192,31 @@ export class FileSystemStorageAdapter implements StorageAdapterInfc {
             };
         }
 
-        // 不在事务中，直接执行写入操作
-        return this.dataWriter.write(tableName, data, options);
+            // 不在事务中，直接执行写入操作
+            const result = await this.dataWriter.write(tableName, data, options);
+            
+            // 记录性能指标
+            performanceMonitor.record({
+                operation: 'write',
+                duration: Date.now() - startTime,
+                timestamp: Date.now(),
+                success: true,
+                dataSize
+            });
+            
+            return result;
+        } catch (error) {
+            // 记录失败的性能指标
+            performanceMonitor.record({
+                operation: 'write',
+                duration: Date.now() - startTime,
+                timestamp: Date.now(),
+                success: false,
+                dataSize,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+        }
     }
 
     async read(
@@ -169,7 +241,13 @@ export class FileSystemStorageAdapter implements StorageAdapterInfc {
     async findMany(
         tableName: string,
         filter?: Record<string, any>,
-        options?: { skip?: number; limit?: number }
+        options?: {
+            skip?: number;
+            limit?: number;
+            sortBy?: string | string[];
+            order?: "asc" | "desc" | ("asc" | "desc")[];
+            sortAlgorithm?: "default" | "fast" | "counting" | "merge" | "slow";
+        }
     ): Promise<Record<string, any>[]> {
         return this.dataReader.findMany(tableName, filter, options);
     }
@@ -181,7 +259,7 @@ export class FileSystemStorageAdapter implements StorageAdapterInfc {
     ): Promise<number> {
         // 事务处理逻辑
         if (this.transactionService.isInTransaction()) {
-            // 保存数据快照（如果还没有保存），用于事务回滚
+            // 保存数据快照（只在第一次操作该表时保存），用于事务回滚
             const currentData = await this.read(tableName);
             this.transactionService.saveSnapshot(tableName, currentData);
             
@@ -210,7 +288,7 @@ export class FileSystemStorageAdapter implements StorageAdapterInfc {
     ): Promise<WriteResult> {
         // 如果在事务中，将操作添加到事务队列
         if (this.transactionService.isInTransaction()) {
-            // 保存数据快照（如果还没有保存）
+            // 保存数据快照（只在第一次操作该表时保存）
             const currentData = await this.read(tableName);
             this.transactionService.saveSnapshot(tableName, currentData);
             
@@ -231,44 +309,76 @@ export class FileSystemStorageAdapter implements StorageAdapterInfc {
         }
         
         // 直接执行批量操作，不使用任务队列，避免无限递归
-        let currentData = await this.read(tableName);
+        // 优化：支持分批次处理大数据集，减少内存占用
+        
+        // 配置：每批次处理的数据量
+        const BATCH_SIZE = 1000;
+        
+        // 读取当前数据
+        const currentData = await this.read(tableName);
+        let finalData = [...currentData];
         let writtenCount = 0;
         
-        for (const op of operations) {
-            const items = Array.isArray(op.data) ? op.data : [op.data];
+        // 批量处理操作，按批次处理
+        for (let i = 0; i < operations.length; i += BATCH_SIZE) {
+            const batchOperations = operations.slice(i, i + BATCH_SIZE);
             
-            switch (op.type) {
-                case "insert":
-                    currentData.push(...items);
-                    writtenCount += items.length;
-                    break;
-                case "update":
-                    for (const item of items) {
-                        if (item.id) {
-                            const index = currentData.findIndex(d => d.id === item.id);
-                            if (index !== -1) {
-                                currentData[index] = { ...currentData[index], ...item };
+            // 优化：使用Map提高查找性能，减少O(n)查找操作
+            const dataMap = new Map<string | number, Record<string, any>>();
+            
+            // 将现有数据转换为Map，提高查找效率
+            finalData.forEach((item: Record<string, any>) => {
+                if (item.id !== undefined) {
+                    dataMap.set(item.id, item);
+                }
+            });
+            
+            // 处理当前批次的操作
+            for (const op of batchOperations) {
+                const items = Array.isArray(op.data) ? op.data : [op.data];
+                
+                switch (op.type) {
+                    case "insert":
+                        items.forEach((item: Record<string, any>) => {
+                            if (item.id !== undefined) {
+                                dataMap.set(item.id, item);
+                            }
+                            writtenCount++;
+                        });
+                        break;
+                    case "update":
+                        items.forEach((item: Record<string, any>) => {
+                            if (item.id !== undefined) {
+                                const existing = dataMap.get(item.id);
+                                if (existing) {
+                                    dataMap.set(item.id, { ...existing, ...item });
+                                    writtenCount++;
+                                }
+                            }
+                        });
+                        break;
+                    case "delete":
+                        items.forEach((item: Record<string, any>) => {
+                            if (item.id !== undefined && dataMap.has(item.id)) {
+                                dataMap.delete(item.id);
                                 writtenCount++;
                             }
-                        }
-                    }
-                    break;
-                case "delete":
-                    for (const item of items) {
-                        if (item.id) {
-                            const initialLength = currentData.length;
-                            currentData = currentData.filter(d => d.id !== item.id);
-                            if (currentData.length < initialLength) {
-                                writtenCount++;
-                            }
-                        }
-                    }
-                    break;
+                        });
+                        break;
+                }
             }
+            
+            // 将Map转换回数组，合并有id和无id的数据
+            const mapData = Array.from(dataMap.values());
+            // 保留没有id的数据
+            const itemsWithoutId = finalData.filter((item: Record<string, any>) => item.id === undefined);
+            
+            // 更新finalData，准备处理下一批次
+            finalData = [...mapData, ...itemsWithoutId];
         }
         
         // 写入更新后的数据
-        const result = await this.write(tableName, currentData, { mode: "overwrite" });
+        const result = await this.write(tableName, finalData, { mode: "overwrite" });
         
         return {
             ...result,
@@ -321,18 +431,105 @@ export class FileSystemStorageAdapter implements StorageAdapterInfc {
             );
         }
         
-        // 删除原表
-        await this.deleteTable(tableName);
+        // 生成临时表名，避免与原表冲突
+        const tempTableName = `${tableName}_temp_${Date.now()}`;
         
-        // 创建新的分片表
-        await this.createTable(tableName, {
-            mode: "chunked",
-            initialData: data,
-            isHighRisk: tableMeta.isHighRisk,
-            highRiskFields: tableMeta.highRiskFields
-        });
+        try {
+            // 1. 创建临时分片表
+            await this.createTable(tempTableName, {
+                mode: "chunked",
+                initialData: data,
+                isHighRisk: tableMeta.isHighRisk,
+                highRiskFields: tableMeta.highRiskFields
+            });
+            
+            // 2. 验证临时表数据完整性
+            const tempTableData = await this.read(tempTableName);
+            if (tempTableData.length !== data.length) {
+                throw new StorageError(
+                    `Data integrity check failed during migration`,
+                    "DATA_INCOMPLETE", // 数据不完整
+                    {
+                        details: `Failed to migrate table ${tableName} to chunked mode: data count mismatch`,
+                        suggestion: "Try migrating again or check if there's enough storage space"
+                    }
+                );
+            }
+            
+            // 3. 删除原表
+            await this.deleteTable(tableName);
+            
+            // 4. 创建新的分片表，使用原表名
+            await this.createTable(tableName, {
+                mode: "chunked",
+                initialData: tempTableData,
+                isHighRisk: tableMeta.isHighRisk,
+                highRiskFields: tableMeta.highRiskFields
+            });
+            
+            // 5. 验证新表数据完整性
+            const newTableData = await this.read(tableName);
+            if (newTableData.length !== data.length) {
+                throw new StorageError(
+                    `Data integrity check failed after migration`,
+                    "DATA_INCOMPLETE", // 数据不完整
+                    {
+                        details: `Failed to migrate table ${tableName} to chunked mode: final data count mismatch`,
+                        suggestion: "Try migrating again or check if there's enough storage space"
+                    }
+                );
+            }
+            
+            // 6. 清理临时表
+            await this.deleteTable(tempTableName);
+        } catch (error) {
+            // 如果迁移过程中发生错误，尝试恢复原表
+            if (await this.hasTable(tempTableName)) {
+                // 验证临时表是否存在且数据完整
+                const tempTableData = await this.read(tempTableName);
+                if (tempTableData.length === data.length) {
+                    // 如果原表已删除但新表创建失败，尝试从临时表恢复
+                    if (!(await this.hasTable(tableName))) {
+                        await this.createTable(tableName, {
+                            mode: tableMeta.mode || "single",
+                            initialData: tempTableData,
+                            isHighRisk: tableMeta.isHighRisk,
+                            highRiskFields: tableMeta.highRiskFields
+                        });
+                    }
+                }
+                // 清理临时表
+                await this.deleteTable(tempTableName);
+            }
+            
+            // 重新抛出错误
+            throw error;
+        }
     }
 }
 
-const storage = new FileSystemStorageAdapter();
+// 全局存储实例（延迟初始化，避免在测试环境中自动启动任务队列）
+let storageInstance: FileSystemStorageAdapter | null = null;
+
+function getStorageInstance(): FileSystemStorageAdapter {
+    if (!storageInstance) {
+        storageInstance = new FileSystemStorageAdapter();
+    }
+    return storageInstance;
+}
+
+// 导出默认实例（延迟创建，使用 getter 函数）
+const storage = (() => {
+    // 在测试环境中，返回一个可以延迟创建的代理对象
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
+        return new Proxy({} as FileSystemStorageAdapter, {
+            get(_, prop) {
+                return getStorageInstance()[prop as keyof FileSystemStorageAdapter];
+            }
+        });
+    }
+    // 生产环境直接创建
+    return getStorageInstance();
+})();
+
 export default storage;

@@ -1,201 +1,126 @@
 // src/core/cache/CacheController.ts
 import { CacheManager } from "./CacheManager";
 
-/**
- * 缓存事件类型
- */
 type CacheEventType = "create" | "update" | "delete" | "clear" | "bulk_write";
 
-/**
- * 缓存事件接口
- */
 interface CacheEvent {
     type: CacheEventType;
     tableName: string;
-    keys?: string[];
-    filter?: any;
+    affectedIds?: (string | number)[];
 }
 
 export class CacheController {
+    private static readonly MAX_TRACKED_KEYS = 300; // 每表最多追踪 300 个查询缓存
     private cacheManager: CacheManager;
-    private cacheEventListeners: Map<string, Set<(event: CacheEvent) => void>>;
+    private listeners: Map<string, Set<(event: CacheEvent) => void>> = new Map();
 
     constructor(cacheManager: CacheManager) {
         this.cacheManager = cacheManager;
-        this.cacheEventListeners = new Map();
-        this.initializeEventListeners();
+        this.listeners.set("*", new Set());
     }
 
-    /**
-     * 初始化事件监听器
-     */
-    private initializeEventListeners(): void {
-        // 监听所有表的缓存事件
-        this.cacheEventListeners.set("*", new Set());
-    }
+    // 记录缓存键（带 LRU 自动清理）
+    recordCacheKey(tableName: string, cacheKey: string): void {
+        const keysKey = `${tableName}_cache_keys`;
+        let keys = (this.cacheManager.get(keysKey) as string[]) || [];
 
-    /**
-     * 清除与特定表相关的所有缓存条目
-     * @param tableName 表名
-     */
-    clearTableCache(tableName: string): void {
-        // 生成缓存键列表
-        const tableCacheKeysKey = `${tableName}_cache_keys`;
-        const tableCacheKeys = this.cacheManager.get(tableCacheKeysKey) as string[] || [];
-        
-        // 删除所有相关缓存条目
-        for (const key of tableCacheKeys) {
-            this.cacheManager.delete(key);
+        // 去重 + 最近使用前置
+        keys = keys.filter(k => k !== cacheKey);
+        keys.unshift(cacheKey);
+
+        // 超出限制，删除最老的缓存
+        if (keys.length > CacheController.MAX_TRACKED_KEYS) {
+            const removed = keys.splice(CacheController.MAX_TRACKED_KEYS);
+            removed.forEach(k => this.cacheManager.delete(k));
         }
-        
-        // 清除缓存键列表
-        this.cacheManager.delete(tableCacheKeysKey);
-        
-        // 触发缓存清除事件
-        this.emitCacheEvent({
-            type: "clear",
-            tableName
-        });
+
+        this.cacheManager.set(keysKey, keys);
     }
 
-    /**
-     * 清除特定查询的缓存
-     * @param tableName 表名
-     * @param filter 查询过滤条件
-     */
-    clearQueryCache(tableName: string, filter?: any): void {
-        // 生成缓存键列表
-        const tableCacheKeysKey = `${tableName}_cache_keys`;
-        const tableCacheKeys = this.cacheManager.get(tableCacheKeysKey) as string[] || [];
-        
-        // 如果提供了过滤条件，只清除匹配的查询缓存
-        if (filter) {
-            const filterStr = JSON.stringify(filter);
-            for (const key of tableCacheKeys) {
-                // 检查缓存键是否包含过滤条件
-                if (key.includes(filterStr)) {
-                    this.cacheManager.delete(key);
-                }
+    // 精准失效：根据 affectedIds 删除包含这些 id 的查询缓存
+    private invalidateByIds(tableName: string, ids: (string | number)[]) {
+        if (ids.length === 0) return;
+        const idSet = new Set(ids.map(String));
+        const keysKey = `${tableName}_cache_keys`;
+        const keys = (this.cacheManager.get(keysKey) as string[]) || [];
+        const stillValid: string[] = [];
+
+        for (const key of keys) {
+            const data = this.cacheManager.get(key) as any[];
+            if (!Array.isArray(data)) {
+                this.cacheManager.delete(key);
+                continue;
             }
-        } else {
-            // 否则清除所有与该表相关的缓存
-            this.clearTableCache(tableName);
-        }
-        
-        // 触发缓存清除事件
-        this.emitCacheEvent({
-            type: "update",
-            tableName,
-            filter
-        });
-    }
 
-    /**
-     * 记录表的缓存键，用于后续清除缓存
-     * @param tableName 表名
-     * @param cacheKey 缓存键
-     */
-    recordTableCacheKey(tableName: string, cacheKey: string): void {
-        const tableCacheKeysKey = `${tableName}_cache_keys`;
-        const tableCacheKeys = this.cacheManager.get(tableCacheKeysKey) as string[] || [];
-        if (!tableCacheKeys.includes(cacheKey)) {
-            tableCacheKeys.push(cacheKey);
-            this.cacheManager.set(tableCacheKeysKey, tableCacheKeys);
+            const shouldDelete = data.some(item => item?.id != null && idSet.has(String(item.id)));
+            if (shouldDelete) {
+                this.cacheManager.delete(key);
+            } else {
+                stillValid.push(key);
+            }
+        }
+
+        if (stillValid.length < keys.length) {
+            this.cacheManager.set(keysKey, stillValid);
         }
     }
 
-    /**
-     * 获取缓存管理器实例
-     */
-    getCacheManager(): CacheManager {
-        return this.cacheManager;
+    // 全表缓存失效
+    clearTableCache(tableName: string): void {
+        const keysKey = `${tableName}_cache_keys`;
+        const keys = (this.cacheManager.get(keysKey) as string[]) || [];
+        keys.forEach(k => this.cacheManager.delete(k));
+        this.cacheManager.delete(keysKey);
+        this.emit({ type: "clear", tableName });
     }
 
-    /**
-     * 清除所有缓存
-     */
-    clearAllCache(): void {
-        this.cacheManager.clear();
-        
-        // 触发全局缓存清除事件
-        this.emitCacheEvent({
-            type: "clear",
-            tableName: "*"
-        });
-    }
-
-    /**
-     * 注册缓存事件监听器
-     * @param tableName 表名，"*"表示监听所有表
-     * @param listener 事件监听器
-     */
-    onCacheEvent(tableName: string, listener: (event: CacheEvent) => void): void {
-        if (!this.cacheEventListeners.has(tableName)) {
-            this.cacheEventListeners.set(tableName, new Set());
-        }
-        this.cacheEventListeners.get(tableName)?.add(listener);
-    }
-
-    /**
-     * 移除缓存事件监听器
-     * @param tableName 表名
-     * @param listener 事件监听器
-     */
-    offCacheEvent(tableName: string, listener: (event: CacheEvent) => void): void {
-        this.cacheEventListeners.get(tableName)?.delete(listener);
-    }
-
-    /**
-     * 触发缓存事件
-     * @param event 缓存事件
-     */
-    private emitCacheEvent(event: CacheEvent): void {
-        // 触发特定表的事件监听器
-        if (this.cacheEventListeners.has(event.tableName)) {
-            this.cacheEventListeners.get(event.tableName)?.forEach(listener => {
-                listener(event);
-            });
-        }
-        
-        // 触发全局事件监听器
-        this.cacheEventListeners.get("*")?.forEach(listener => {
-            listener(event);
-        });
-    }
-
-    /**
-     * 处理数据写入事件，智能清除相关缓存
-     * @param tableName 表名
-     * @param operationType 操作类型
-     * @param keys 受影响的键
-     * @param filter 过滤条件
-     */
-    handleDataWriteEvent(
+    // 主入口：所有写操作都走这里
+    handleDataWrite(
         tableName: string,
-        operationType: CacheEventType,
-        keys?: string[],
-        filter?: any
+        operation: CacheEventType,
+        affectedIds?: (string | number)[]
     ): void {
-        switch (operationType) {
+        switch (operation) {
             case "create":
-            case "update":
-            case "delete":
             case "bulk_write":
-                // 对于写入操作，清除相关查询缓存
-                this.clearQueryCache(tableName, filter);
-                break;
             case "clear":
-                // 对于清空操作，清除所有相关缓存
                 this.clearTableCache(tableName);
                 break;
+            case "update":
+            case "delete":
+                if (affectedIds && affectedIds.length > 0) {
+                    this.invalidateByIds(tableName, affectedIds);
+                } else {
+                    this.clearTableCache(tableName); // 防御性回退
+                }
+                break;
         }
-        
-        // 触发缓存事件
-        this.emitCacheEvent({
-            type: operationType,
-            tableName,
-            keys,
-            filter
+
+        this.emit({ type: operation, tableName, affectedIds });
+    }
+
+    // 事件系统
+    on(tableName: string, listener: (e: CacheEvent) => void) {
+        if (!this.listeners.has(tableName)) this.listeners.set(tableName, new Set());
+        this.listeners.get(tableName)!.add(listener);
+    }
+
+    off(tableName: string, listener: (e: CacheEvent) => void) {
+        this.listeners.get(tableName)?.delete(listener);
+    }
+
+    private emit(event: CacheEvent) {
+        [event.tableName, "*"].forEach(t => {
+            this.listeners.get(t)?.forEach(l => l(event));
         });
+    }
+
+    clearAll() {
+        this.cacheManager.clear();
+        this.emit({ type: "clear", tableName: "*" });
+    }
+
+    getCacheManager() {
+        return this.cacheManager;
     }
 }

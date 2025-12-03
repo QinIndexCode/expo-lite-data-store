@@ -2,6 +2,8 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    "declaration": true,
+    "declarationDir": "dist/types",
     "paths": {
       "@/*": [
         "./*"
@@ -13,5 +15,13 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "exclude": [
+    "**/__tests__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "dist/**",
+    "coverage/**",
+    "__mocks__/**"
   ]
 }

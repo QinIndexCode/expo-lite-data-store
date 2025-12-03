@@ -589,33 +589,4 @@ export class DataWriter {
         this.cacheManager.delete(tableCacheKeysKey);
     }
 
-    /**
-     * 合并相同类型的操作，减少内存操作次数
-     */
-    private mergeOperations(
-        operations: Array<{
-            type: "insert" | "update" | "delete";
-            data: Record<string, any> | Record<string, any>[];
-        }>
-    ): Array<{
-        type: "insert" | "update" | "delete";
-        data: Record<string, any>[];
-    }> {
-        const merged = new Map<"insert" | "update" | "delete", Record<string, any>[]>();
-        
-        for (const op of operations) {
-            const items = Array.isArray(op.data) ? op.data : [op.data];
-            
-            if (merged.has(op.type)) {
-                merged.get(op.type)?.push(...items);
-            } else {
-                merged.set(op.type, items);
-            }
-        }
-        
-        return Array.from(merged.entries()).map(([type, data]) => ({
-            type,
-            data
-        }));
-    }
 }

@@ -18,6 +18,20 @@ describe('CacheManager Performance', () => {
         });
     });
     
+    afterEach((done) => {
+        // 清理定时器，防止测试挂起
+        console.log('[CachePerformance.test] afterEach: 开始清理');
+        if (cacheManager) {
+            console.log('[CachePerformance.test] afterEach: 清理主 CacheManager');
+            cacheManager.cleanup();
+        }
+        // 使用 process.nextTick 而不是 setTimeout，避免阻塞
+        process.nextTick(() => {
+            console.log('[CachePerformance.test] afterEach: 清理完成');
+            done();
+        });
+    });
+    
     it('should be able to quickly handle large number of cache items', () => {
         const startTime = Date.now();
         const itemCount = 10000;
@@ -121,5 +135,10 @@ describe('CacheManager Performance', () => {
         // Both strategies should complete within reasonable time
         expect(lruTime).toBeLessThan(1500);
         expect(lfuTime).toBeLessThan(1500);
+        
+        // 清理临时创建的 CacheManager 实例
+        console.log('[CachePerformance.test] 清理临时 CacheManager 实例');
+        lruCache.cleanup();
+        lfuCache.cleanup();
     });
 });

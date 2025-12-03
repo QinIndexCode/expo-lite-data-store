@@ -1,6 +1,14 @@
 // src/core/query/QueryEngine.ts
 
 import type { FilterCondition } from "../../types/storageTypes";
+import {
+    sortByColumn,
+    sortByColumnCounting,
+    sortByColumnFast,
+    sortByColumnMerge,
+    sortByColumnSlow
+} from "../../utils/sortingTools";
+import { QUERY } from "../constants";
 
 /**
  * 查询操作符类型
@@ -55,11 +63,6 @@ const QueryPlan = {
     AndPlan: "and",
     OperatorPlan: "operator"
 } as const;
-
-/**
- * 查询计划类型
- */
-type QueryPlanType = typeof QueryPlan;
 
 /**
  * 查询计划接口
@@ -227,24 +230,120 @@ export class QueryEngine {
     }
 
     /**
-     * 排序数据
+     * 获取排序函数
+     * 根据算法类型返回对应的排序函数
      */
-    static sort<T extends Record<string, any>>(data: T[], sortBy?: string | string[], order?: "asc" | "desc" | ("asc" | "desc")[]): T[] {
-        if (!sortBy) return data;
-        
+    private static getSortFunction(algorithm: string = "default"): Function {
+        switch (algorithm) {
+            case "fast":
+                return sortByColumnFast;
+            case "counting":
+                return sortByColumnCounting;
+            case "merge":
+                return sortByColumnMerge;
+            case "slow":
+                return sortByColumnSlow;
+            case "default":
+            default:
+                return sortByColumn;
+        }
+    }
+
+    /**
+     * 智能选择排序算法
+     * 根据数据特征自动选择最合适的排序算法
+     */
+    private static selectSortAlgorithm(
+        requestedAlgorithm: string | undefined,
+        data: any[],
+        sortBy: string | string[]
+    ): string {
+        // 如果用户指定了算法，直接使用
+        if (requestedAlgorithm && requestedAlgorithm !== "default") {
+            return requestedAlgorithm;
+        }
+
+        // 智能选择算法
+        const dataSize = data.length;
         const sortFields = Array.isArray(sortBy) ? sortBy : [sortBy];
-        const sortOrder = Array.isArray(order) ? order : [order || "asc"];
-        
-        return [...data].sort((a, b) => {
-            for (let i = 0; i < sortFields.length; i++) {
-                const field = sortFields[i];
-                const dir = sortOrder[i] || "asc";
-                
-                if (a[field] < b[field]) return dir === "asc" ? -1 : 1;
-                if (a[field] > b[field]) return dir === "asc" ? 1 : -1;
+
+        // 小数据集使用默认算法
+        if (dataSize < QUERY.COUNTING_SORT_THRESHOLD) {
+            return "default";
+        }
+
+        // 大数据集使用归并排序（稳定且高效）
+        if (dataSize > QUERY.MERGE_SORT_THRESHOLD) {
+            return "merge";
+        }
+
+        // 检查是否适合计数排序（字段值范围有限）
+        if (sortFields.length === 1 && this.isSuitableForCountingSort(data, sortFields[0])) {
+            return "counting";
+        }
+
+        // 默认使用归并排序（平衡稳定性和性能）
+        return "merge";
+    }
+
+    /**
+     * 判断字段是否适合计数排序
+     */
+    private static isSuitableForCountingSort(data: any[], field: string): boolean {
+        if (data.length === 0) return false;
+
+        const values = new Set();
+        let uniqueCount = 0;
+
+        // 收集唯一值，限制检查数量以提高性能
+        const sampleSize = Math.min(data.length, 1000);
+        for (let i = 0; i < sampleSize && uniqueCount < 50; i++) {
+            const value = data[i][field];
+            if (value !== null && value !== undefined) {
+                if (!values.has(value)) {
+                    values.add(value);
+                    uniqueCount++;
+                }
             }
-            return 0;
-        });
+        }
+
+        // 如果唯一值数量少于总数的10%，且绝对数量小于阈值，适合计数排序
+        return uniqueCount < Math.min(data.length * 0.1, QUERY.COUNTING_SORT_THRESHOLD);
+    }
+
+    /**
+     * 排序数据
+     * 支持多种排序算法和多字段排序
+     */
+    static sort<T extends Record<string, any>>(
+        data: T[],
+        sortBy?: string | string[],
+        order?: "asc" | "desc" | ("asc" | "desc")[],
+        algorithm?: string
+    ): T[] {
+        if (!sortBy || data.length === 0) return data;
+
+        // 选择排序算法
+        const selectedAlgorithm = this.selectSortAlgorithm(algorithm, data, sortBy);
+        const sortFunction = this.getSortFunction(selectedAlgorithm);
+
+        // 处理多字段排序
+        if (Array.isArray(sortBy)) {
+            const sortOrders = Array.isArray(order) ? order : new Array(sortBy.length).fill(order || "asc");
+
+            // 递归应用排序，从最后一个字段开始向前排序
+            let sortedData = [...data];
+            for (let i = sortBy.length - 1; i >= 0; i--) {
+                const field = sortBy[i];
+                const fieldOrder = sortOrders[i] || "asc";
+                sortedData = sortFunction(sortedData, field, fieldOrder);
+            }
+            return sortedData;
+        } else {
+            // 单字段排序
+            const sortOrder = Array.isArray(order) ? order[0] : (order || "asc");
+            return sortFunction(data, sortBy, sortOrder);
+        }
     }
 
     /**

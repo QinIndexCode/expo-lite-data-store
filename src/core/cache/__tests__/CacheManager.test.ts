@@ -3,6 +3,9 @@
 
 import { CacheManager, CacheStrategy } from '../CacheManager';
 
+// 全局数组，用于跟踪需要清理的临时CacheManager实例
+const tempCacheManagers: CacheManager[] = [];
+
 describe('CacheManager', () => {
     let cacheManager: CacheManager;
     
@@ -15,6 +18,27 @@ describe('CacheManager', () => {
             enablePenetrationProtection: true,
             enableBreakdownProtection: true,
             enableAvalancheProtection: true,
+        });
+    });
+    
+    afterEach((done) => {
+        // 清理主CacheManager实例
+        if (cacheManager) {
+            console.log('[CacheManager.test] afterEach: 清理 CacheManager');
+            cacheManager.cleanup();
+        }
+
+        // 清理所有临时CacheManager实例
+        console.log(`[CacheManager.test] afterEach: 清理 ${tempCacheManagers.length} 个临时CacheManager实例`);
+        tempCacheManagers.forEach((tempCache) => {
+            tempCache.cleanup();
+        });
+        tempCacheManagers.length = 0; // 清空数组
+
+        // 使用 process.nextTick 而不是 setTimeout，避免阻塞
+        process.nextTick(() => {
+            console.log('[CacheManager.test] afterEach: 清理完成');
+            done();
         });
     });
     
@@ -71,6 +95,7 @@ describe('CacheManager', () => {
                 maxSize: 3,
                 enableAvalancheProtection: false,
             });
+            tempCacheManagers.push(lruCache); // 添加到清理列表
             
             // Set cache items exceeding capacity
             lruCache.set('key1', 'value1');
@@ -94,6 +119,7 @@ describe('CacheManager', () => {
                 strategy: CacheStrategy.LFU,
                 maxSize: 3,
             });
+            tempCacheManagers.push(lfuCache); // 添加到清理列表
             
             // Set cache items
             lfuCache.set('key1', 'value1');
@@ -122,6 +148,7 @@ describe('CacheManager', () => {
             const cache = new CacheManager({
                 defaultExpiry: 100, // 100ms expiry
             });
+            tempCacheManagers.push(cache); // 添加到清理列表
             
             // Set cache
             cache.set('test-key', 'test-value');

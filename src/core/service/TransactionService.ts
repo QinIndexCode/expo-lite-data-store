@@ -1,8 +1,5 @@
 // src/core/service/TransactionService.ts
 
-import { MetadataManagerInfc } from "../../types/metadataManagerInfc";
-import { IndexManager } from "../index/IndexManager";
-
 export interface Operation {
     tableName: string;
     type: "write" | "delete" | "bulkWrite";
@@ -19,15 +16,8 @@ export class TransactionService {
     private _isInTransaction = false;
     private operations: Operation[] = [];
     private snapshots: Map<string, Snapshot> = new Map();
-    private metadataManager: MetadataManagerInfc;
-    private indexManager: IndexManager;
 
-    constructor(
-        metadataManager: MetadataManagerInfc,
-        indexManager: IndexManager
-    ) {
-        this.metadataManager = metadataManager;
-        this.indexManager = indexManager;
+    constructor() {
     }
 
     /**

@@ -123,7 +123,9 @@ export class MetadataManager {
     private triggerSave() {
         this.dirty = true; 
         if (this.saveTimer) clearTimeout(this.saveTimer);
-        this.saveTimer = setTimeout(() => this.save(), 200);
+        // 在测试环境中使用更短的延迟，避免测试挂起
+        const delay = (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') ? 10 : 200;
+        this.saveTimer = setTimeout(() => this.save(), delay);
     }
 
     // 获取单表元数据

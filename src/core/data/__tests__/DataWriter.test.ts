@@ -40,6 +40,24 @@ describe('DataWriter', () => {
         metadataManager.delete(testTableName);
     });
     
+    afterEach((done) => {
+        // 清理定时器，防止测试挂起
+        console.log('[DataWriter.test] afterEach: 开始清理');
+        if (cacheManager) {
+            console.log('[DataWriter.test] afterEach: 清理 CacheManager');
+            cacheManager.cleanup();
+        }
+        if (metadataManager) {
+            console.log('[DataWriter.test] afterEach: 清理 MetadataManager');
+            metadataManager.cleanup();
+        }
+        // 使用 process.nextTick 而不是 setTimeout，避免阻塞
+        process.nextTick(() => {
+            console.log('[DataWriter.test] afterEach: 清理完成');
+            done();
+        });
+    });
+    
     describe('createTable', () => {
         it('should be able to create new table', async () => {
             await dataWriter.createTable(testTableName, {

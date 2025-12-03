@@ -11,26 +11,21 @@ import withTimeout from "../../utils/withTimeout";
 import { CacheManager } from "../cache/CacheManager";
 import { ChunkedFileHandler } from "../file/ChunkedFileHandler";
 import { SingleFileHandler } from "../file/SingleFileHandler";
-import { FileOperationManager } from "../FileOperationManager";
 import { IndexManager } from "../index/IndexManager";
 import { QueryEngine } from "../query/QueryEngine";
 export class DataReader {
-    private chunkSize = config.chunkSize;
     private indexManager: IndexManager;
     private metadataManager: MetadataManagerInfc;
     private cacheManager: CacheManager;
-    private fileOperationManager: FileOperationManager;
 
     constructor(
         metadataManager: MetadataManagerInfc,
         indexManager: IndexManager,
-        cacheManager: CacheManager,
-        fileOperationManager: FileOperationManager
+        cacheManager: CacheManager
     ) {
         this.metadataManager = metadataManager;
         this.indexManager = indexManager;
         this.cacheManager = cacheManager;
-        this.fileOperationManager = fileOperationManager;
     }
 
     private getSingleFile(tableName: string): SingleFileHandler {
@@ -126,9 +121,14 @@ export class DataReader {
                 data = QueryEngine.filter(data, options.filter);
             }
             
+            // 应用排序
+            if (options?.sortBy) {
+                data = QueryEngine.sort(data, options.sortBy, options.order, options.sortAlgorithm);
+            }
+
             // 应用分页
             data = QueryEngine.paginate(data, options?.skip, options?.limit);
-            
+
             // 只有非高危数据才存入缓存
             if (!shouldBypassCache) {
                 // 生成缓存键
@@ -164,7 +164,13 @@ export class DataReader {
     async findMany(
         tableName: string,
         filter?: Record<string, any>,
-        options?: { skip?: number; limit?: number }
+        options?: {
+            skip?: number;
+            limit?: number;
+            sortBy?: string | string[];
+            order?: "asc" | "desc" | ("asc" | "desc")[];
+            sortAlgorithm?: "default" | "fast" | "counting" | "merge" | "slow";
+        }
     ): Promise<Record<string, any>[]> {
         return ErrorHandler.handleAsyncError(async () => {
             // 直接复用read方法，确保两种模式都能正确处理
