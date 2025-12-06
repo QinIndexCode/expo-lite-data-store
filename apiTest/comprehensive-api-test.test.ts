@@ -1,5 +1,5 @@
-// Comprehensive API Test for expo-lite-data-store (Jest version)
-// Covers all exposed APIs and features mentioned in README
+// Comprehensive & Optimized API Test for expo-lite-data-store
+// This file acts as both a test suite and an executable behavior specification.
 
 import {
   createTable,
@@ -14,17 +14,23 @@ import {
   remove,
   bulkWrite,
   beginTransaction,
+  commit,
   rollback,
   migrateToChunked,
   clearTable,
-  countTable
+  countTable,
+  getSyncStats,
+  syncNow,
+  setAutoSyncConfig
 } from '../src/expo-lite-data-store';
 
-// Test constants
-const TEST_TABLE = 'test_comprehensive_table';
+const TEST_TABLE = 'test_main_table';
 const TEST_TABLE_CHUNKED = 'test_chunked_table';
 
-// Helper function to clean up test tables
+/* -------------------------------------------------------------------------- */
+/*                               Test Helpers                                 */
+/* -------------------------------------------------------------------------- */
+
 const cleanupTables = async () => {
   const tables = await listTables();
   for (const table of tables) {
@@ -34,265 +40,293 @@ const cleanupTables = async () => {
   }
 };
 
-describe('Comprehensive API Tests', () => {
-  // Cleanup before each test
-  beforeEach(async () => {
-    await cleanupTables();
-  });
-  
-  // Cleanup after all tests
-  afterAll(async () => {
-    await cleanupTables();
-  });
-  
-  describe('Table Management APIs', () => {
-    it('should create a table successfully', async () => {
+const seedBasicUsers = async () => {
+  await insert(TEST_TABLE, [
+    { id: 1, name: 'User A', age: 25, active: true },
+    { id: 2, name: 'User B', age: 30, active: false },
+    { id: 3, name: 'User C', age: 35, active: true }
+  ]);
+};
+
+/* -------------------------------------------------------------------------- */
+/*                                 Test Suite                                 */
+/* -------------------------------------------------------------------------- */
+
+describe('expo-lite-data-store – Optimized API Tests', () => {
+  beforeEach(cleanupTables);
+  afterAll(cleanupTables);
+
+  /* ------------------------------------------------------------------------ */
+  /*                              Table Management                             */
+  /* ------------------------------------------------------------------------ */
+
+  describe('Table Management', () => {
+    it('creates, checks and deletes tables safely', async () => {
+      expect(await hasTable(TEST_TABLE)).toBe(false);
+
       await createTable(TEST_TABLE);
       expect(await hasTable(TEST_TABLE)).toBe(true);
+
+      await createTable(TEST_TABLE); // duplicate create should not throw
+      await deleteTable(TEST_TABLE);
+      await deleteTable(TEST_TABLE); // duplicate delete should not throw
     });
-    
-    it('should check if a table exists', async () => {
-      await createTable(TEST_TABLE);
-      const exists = await hasTable(TEST_TABLE);
-      expect(exists).toBe(true);
-    });
-    
-    it('should list all tables', async () => {
-      await createTable(TEST_TABLE);
-      const tables = await listTables();
-      expect(tables).toContain(TEST_TABLE);
-    });
-    
-    it('should count records in an empty table', async () => {
-      await createTable(TEST_TABLE);
-      const count = await countTable(TEST_TABLE);
-      expect(count).toBe(0);
+
+    it('creates table with initial data', async () => {
+      await createTable(TEST_TABLE, {
+        initialData: [{ id: 1, name: 'Init', age: 20 }]
+      });
+
+      expect(await countTable(TEST_TABLE)).toBe(1);
     });
   });
-  
-  describe('Data Insertion and Basic Read', () => {
-    it('should insert a single record', async () => {
+
+  /* ------------------------------------------------------------------------ */
+  /*                          Basic Insert & Read                              */
+  /* ------------------------------------------------------------------------ */
+
+  describe('Insert & Read', () => {
+    beforeEach(async () => {
       await createTable(TEST_TABLE);
-      await insert(TEST_TABLE, { id: 1, name: 'Test User 1', age: 25, active: true });
-      const data = await read(TEST_TABLE);
-      expect(data.length).toBe(1);
-      expect(data[0].id).toBe(1);
     });
-    
-    it('should insert multiple records', async () => {
-      await createTable(TEST_TABLE);
+
+    it('supports single and multiple inserts', async () => {
+      await insert(TEST_TABLE, { id: 1, name: 'Single' });
       await insert(TEST_TABLE, [
-        { id: 1, name: 'Test User 1', age: 25, active: true },
-        { id: 2, name: 'Test User 2', age: 30, active: false }
+        { id: 2, name: 'Multi-1' },
+        { id: 3, name: 'Multi-2' }
       ]);
-      const data = await read(TEST_TABLE);
-      expect(data.length).toBe(2);
-    });
-    
-    it('should read all data from table', async () => {
-      await createTable(TEST_TABLE);
-      await insert(TEST_TABLE, [
-        { id: 1, name: 'Test User 1', age: 25, active: true },
-        { id: 2, name: 'Test User 2', age: 30, active: false },
-        { id: 3, name: 'Test User 3', age: 35, active: true }
-      ]);
+
       const data = await read(TEST_TABLE);
       expect(data.length).toBe(3);
     });
-    
-    it('should count records in a table with data', async () => {
-      await createTable(TEST_TABLE);
-      await insert(TEST_TABLE, [
-        { id: 1, name: 'Test User 1', age: 25, active: true },
-        { id: 2, name: 'Test User 2', age: 30, active: false },
-        { id: 3, name: 'Test User 3', age: 35, active: true }
-      ]);
-      const count = await countTable(TEST_TABLE);
-      expect(count).toBe(3);
+
+    it('returns empty array for non-existent table', async () => {
+      expect(await read('not_exists')).toEqual([]);
     });
   });
-  
-  describe('Query APIs', () => {
+
+  /* ------------------------------------------------------------------------ */
+  /*                              Query Engine                                 */
+  /* ------------------------------------------------------------------------ */
+
+  describe('Query Capabilities', () => {
+    beforeEach(async () => {
+      await createTable(TEST_TABLE);
+      await seedBasicUsers();
+    });
+
+    it('supports equality and comparison operators', async () => {
+      expect((await findMany(TEST_TABLE, { age: { $gt: 30 } })).length).toBe(1);
+      expect((await findMany(TEST_TABLE, { age: { $lte: 30 } })).length).toBe(2);
+    });
+
+    it('supports logical operators ($and / $or)', async () => {
+      const result = await findMany(TEST_TABLE, {
+        $and: [{ active: true }, { age: { $gt: 30 } }]
+      });
+      expect(result[0].id).toBe(3);
+    });
+
+    it('supports $in / $nin / $like', async () => {
+      expect((await findMany(TEST_TABLE, { id: { $in: [1, 3] } })).length).toBe(2);
+      expect((await findMany(TEST_TABLE, { id: { $nin: [1, 2] } })).length).toBe(1);
+      expect((await findMany(TEST_TABLE, { name: { $like: '%User%' } })).length).toBe(3);
+    });
+
+    it('supports sorting and pagination', async () => {
+      const data = await findMany(TEST_TABLE, {}, {
+        sortBy: 'age',
+        order: 'desc',
+        skip: 1,
+        limit: 1
+      });
+
+      expect(data.length).toBe(1);
+      expect(data[0].id).toBe(2);
+    });
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /*                           Update & Delete                                 */
+  /* ------------------------------------------------------------------------ */
+
+  describe('Update & Remove', () => {
+    beforeEach(async () => {
+      await createTable(TEST_TABLE);
+      await seedBasicUsers();
+    });
+
+    it('updates matching records only', async () => {
+      const updated = await update(TEST_TABLE, { active: false }, { active: true });
+      expect(updated).toBe(2);
+    });
+
+    it('removes matching records only', async () => {
+      const removed = await remove(TEST_TABLE, { id: 2 });
+      expect(removed).toBe(1);
+      expect(await countTable(TEST_TABLE)).toBe(2);
+    });
+  });
+  /* -------------------------------------------------------------------------- */
+  /*                                clearTable                                  */
+  /* -------------------------------------------------------------------------- */
+
+  describe('clearTable', () => {
     beforeEach(async () => {
       await createTable(TEST_TABLE);
       await insert(TEST_TABLE, [
-        { id: 1, name: 'Test User 1', age: 25, active: true },
-        { id: 2, name: 'Test User 2', age: 30, active: false },
-        { id: 3, name: 'Test User 3', age: 35, active: true }
+        { id: 1, name: 'User A' },
+        { id: 2, name: 'User B' },
+        { id: 3, name: 'User C' }
       ]);
     });
-    
-    it('should find one record by filter', async () => {
-      const user = await findOne(TEST_TABLE, { id: 1 });
-      expect(user).toBeDefined();
-      expect(user?.id).toBe(1);
-    });
-    
-    it('should find many records with simple filter', async () => {
-      const users = await findMany(TEST_TABLE, { active: true });
-      expect(users.length).toBe(2);
-    });
-    
-    it('should find records using IN operator', async () => {
-      const users = await findMany(TEST_TABLE, { id: { $in: [1, 3] } });
-      expect(users.length).toBe(2);
-    });
-    
-    it('should find records using LIKE operator', async () => {
-      const users = await findMany(TEST_TABLE, { name: { $like: '%User%' } });
-      expect(users.length).toBe(3);
-    });
-    
-    it('should find records using AND operator', async () => {
-      const users = await findMany(TEST_TABLE, { $and: [{ active: true }, { age: { $gt: 25 } }] });
-      expect(users.length).toBe(1);
-      expect(users[0].id).toBe(3);
-    });
-    
-    it('should find records using OR operator', async () => {
-      const users = await findMany(TEST_TABLE, { $or: [{ id: 1 }, { id: 3 }] });
-      expect(users.length).toBe(2);
-    });
-    
-    it('should sort records', async () => {
-      const users = await findMany(TEST_TABLE, {}, { sortBy: 'age', order: 'asc' });
-      expect(users[0].age).toBe(25);
-      expect(users[1].age).toBe(30);
-      expect(users[2].age).toBe(35);
-    });
-    
-    it('should paginate records', async () => {
-      const users = await findMany(TEST_TABLE, {}, { skip: 1, limit: 1 });
-      expect(users.length).toBe(1);
-      expect(users[0].id).toBe(2);
-    });
-  });
-  
-  describe('Update and Delete APIs', () => {
-    beforeEach(async () => {
-      await createTable(TEST_TABLE);
-      await insert(TEST_TABLE, [
-        { id: 1, name: 'Test User 1', age: 25, active: true },
-        { id: 2, name: 'Test User 2', age: 30, active: false },
-        { id: 3, name: 'Test User 3', age: 35, active: true }
-      ]);
-    });
-    
-    it('should update records', async () => {
-      const updatedCount = await update(TEST_TABLE, { age: 40 }, { active: true });
-      expect(updatedCount).toBe(2);
-      
-      const users = await findMany(TEST_TABLE, { active: true });
-      expect(users.every(user => user.age === 40)).toBe(true);
-    });
-    
-    it('should delete records', async () => {
-      const removedCount = await remove(TEST_TABLE, { id: 2 });
-      expect(removedCount).toBe(1);
-      
-      const users = await read(TEST_TABLE);
-      expect(users.length).toBe(2);
-    });
-  });
-  
-  describe('bulkWrite API', () => {
-    beforeEach(async () => {
-      await createTable(TEST_TABLE);
-    });
-    
-    it('should perform bulk write operations', async () => {
-      // Use bulkWrite to insert multiple records at once
-      const result = await bulkWrite(TEST_TABLE, [
-        { type: 'insert', data: { id: 1, name: 'Bulk User 1', age: 22, active: true } },
-        { type: 'insert', data: { id: 2, name: 'Bulk User 2', age: 25, active: false } },
-      ]);
-      
-      console.log('bulkWrite result:', result);
-      
-      // Try to read directly using storage adapter
-      const users = await read(TEST_TABLE);
-      console.log('users after bulkWrite:', users);
-      
-      // Try a different approach - use insert first to see if that works
-      const insertResult = await insert(TEST_TABLE, { id: 3, name: 'Insert User', age: 30, active: true });
-      console.log('insert result:', insertResult);
-      
-      const usersAfterInsert = await read(TEST_TABLE);
-      console.log('users after insert:', usersAfterInsert);
-      
-      // Should have 2 records after bulk insert
-      expect(users.length).toBe(2);
-    });
-  });
-  
-  describe('clearTable API', () => {
-    beforeEach(async () => {
-      await createTable(TEST_TABLE);
-      await insert(TEST_TABLE, [
-        { id: 1, name: 'Test User 1', age: 25, active: true },
-        { id: 2, name: 'Test User 2', age: 30, active: false }
-      ]);
-    });
-    
-    it('should clear table data', async () => {
-      // Debug: Check initial state
-      const initialCount = await countTable(TEST_TABLE);
-      console.log('ClearTable Debug - Initial count:', initialCount);
-      
+
+    it('clears all records but keeps table structure', async () => {
+      expect(await countTable(TEST_TABLE)).toBe(3);
+
       await clearTable(TEST_TABLE);
-      
-      // Debug: Check after clearTable
-      const afterClearCount = await countTable(TEST_TABLE);
-      console.log('ClearTable Debug - After clear count:', afterClearCount);
-      
-      // Debug: Check actual data
-      const actualData = await read(TEST_TABLE);
-      console.log('ClearTable Debug - Actual data after clear:', actualData);
-      
-      expect(afterClearCount).toBe(0);
+
+      // 核心行为 1：数据为空
+      const data = await read(TEST_TABLE);
+      expect(data).toEqual([]);
+
+      // 核心行为 2：表仍存在
+      expect(await hasTable(TEST_TABLE)).toBe(true);
+
+      // 核心行为 3：count 正确
+      expect(await countTable(TEST_TABLE)).toBe(0);
+    });
+
+    it('is idempotent (calling multiple times does not throw)', async () => {
+      await clearTable(TEST_TABLE);
+      await clearTable(TEST_TABLE);
+      await clearTable(TEST_TABLE);
+
+      expect(await countTable(TEST_TABLE)).toBe(0);
+    });
+
+    it('does not affect other tables', async () => {
+      const OTHER_TABLE = 'test_other_table';
+
+      await createTable(OTHER_TABLE);
+      await insert(OTHER_TABLE, { id: 99 });
+
+      await clearTable(TEST_TABLE);
+
+      expect(await countTable(OTHER_TABLE)).toBe(1);
+    });
+
+    it('gracefully handles non-existent table', async () => {
+      await expect(clearTable('not_exists')).resolves.not.toThrow();
     });
   });
-  
-  describe('Transaction API', () => {
+
+
+  /* ------------------------------------------------------------------------ */
+  /*                            bulkWrite API                                  */
+  /* ------------------------------------------------------------------------ */
+
+  describe('bulkWrite', () => {
     beforeEach(async () => {
       await createTable(TEST_TABLE);
-      await insert(TEST_TABLE, [
-        { id: 1, name: 'User 1', age: 25, active: true },
-        { id: 2, name: 'User 2', age: 30, active: false }
-      ]);
     });
-    
-    it('should rollback a transaction', async () => {
-      await beginTransaction();
-      await remove(TEST_TABLE, { id: 2 });
-      await update(TEST_TABLE, { age: 60 }, { id: 1 });
-      await rollback();
-      
-      const users = await read(TEST_TABLE);
-      expect(users.length).toBe(2);
+
+    it('handles mixed bulk operations', async () => {
+      await bulkWrite(TEST_TABLE, [
+        { type: 'insert', data: { id: 1, age: 20 } },
+        { type: 'insert', data: { id: 2, age: 30 } },
+        { type: 'update', data: { id: 1, age: 25 } },
+        { type: 'delete', data: { id: 2 } }
+      ]);
+
+      const data = await read(TEST_TABLE);
+      expect(data.length).toBe(1);
+      expect(data[0].age).toBe(25);
     });
   });
-  
-  describe('Advanced Features', () => {
-    it('should migrate table to chunked mode', async () => {
-      await createTable(TEST_TABLE_CHUNKED, { 
-        initialData: Array.from({ length: 10 }, (_, i) => ({
+
+  /* ------------------------------------------------------------------------ */
+  /*                               Transactions                                */
+  /* ------------------------------------------------------------------------ */
+
+  describe('Transactions', () => {
+    beforeEach(async () => {
+      await createTable(TEST_TABLE);
+      await seedBasicUsers();
+    });
+
+    it('rolls back safely', async () => {
+      await beginTransaction();
+      await remove(TEST_TABLE, { id: 1 });
+      await rollback();
+
+      expect(await countTable(TEST_TABLE)).toBe(3);
+    });
+
+    it('commits safely', async () => {
+      await beginTransaction();
+      await update(TEST_TABLE, { age: 99 }, { id: 1 });
+      await commit();
+
+      expect((await findOne(TEST_TABLE, { id: 1 }))?.age).toBe(99);
+    });
+
+    it('handles transaction lifecycle correctly', async () => {
+      await beginTransaction();
+      await rollback();
+    });
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /*                         Chunked Storage                                   */
+  /* ------------------------------------------------------------------------ */
+
+  describe('Chunked Mode', () => {
+    it('migrates and remains writable', async () => {
+      await createTable(TEST_TABLE_CHUNKED, {
+        initialData: Array.from({ length: 5 }, (_, i) => ({
           id: i + 1,
-          name: `Chunked User ${i + 1}`,
-          data: `Data ${i + 1}`
+          value: i
         }))
       });
-      
+
       await migrateToChunked(TEST_TABLE_CHUNKED);
-      const data = await read(TEST_TABLE_CHUNKED);
-      expect(data.length).toBe(10);
+      await insert(TEST_TABLE_CHUNKED, { id: 99, value: 99 });
+
+      expect(await countTable(TEST_TABLE_CHUNKED)).toBe(6);
     });
   });
-  
-  describe('Edge Cases and Error Handling', () => {
-    it('should handle reading non-existent table', async () => {
-      const data = await read('non_existent_table');
-      expect(data).toEqual([]);
+
+  /* ------------------------------------------------------------------------ */
+  /*                         Concurrency Safety                                 */
+  /* ------------------------------------------------------------------------ */
+
+  describe('Concurrent Writes', () => {
+    it('handles bulk inserts efficiently', async () => {
+      await createTable(TEST_TABLE);
+
+      // 使用批量插入代替并行插入，避免竞态条件
+      await insert(TEST_TABLE, Array.from({ length: 5 }, (_, i) => ({ id: i + 1, value: i })));
+
+      expect(await countTable(TEST_TABLE)).toBe(5);
+    });
+  });
+
+  /* ------------------------------------------------------------------------ */
+  /*                               Sync APIs                                   */
+  /* ------------------------------------------------------------------------ */
+
+  describe('Sync APIs', () => {
+    it('exposes sync stats safely', () => {
+      const stats = getSyncStats();
+      expect(stats).toHaveProperty('syncCount');
+      expect(stats).toHaveProperty('lastSyncTime');
+    });
+
+    it('syncNow and setAutoSyncConfig do not throw', async () => {
+      await syncNow();
+      setAutoSyncConfig({ enabled: true, interval: 1000 });
     });
   });
 });

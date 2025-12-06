@@ -9,17 +9,6 @@
 
 专为 React Native + Expo 项目设计，无需任何 native 依赖。提供完整的 CRUD 操作、事务支持、索引优化和智能排序功能。
 
-## 📋 项目结构
-
-项目采用清晰的模块化设计，TypeScript 和 JavaScript 版本保持一致的目录结构：
-
-- **主入口文件**：`src/expo-lite-data-store.ts`（推荐）或 `src/index.ts`（向后兼容别名）
-- **编译输出**：`dist/js/` 目录包含完整的 JavaScript 编译版本
-- **类型定义**：`dist/types/` 目录包含完整的 TypeScript 类型声明文件
-- **统一结构**：JS 和 TS 版本的目录结构完全一致，便于维护和调试
-
----
-
 ## ✨ 核心特性
 
 | 特性                       | 描述                                           |
@@ -34,8 +23,6 @@
 | 🎯 **智能排序**            | 5种排序算法，自动选择最优性能                  |
 | ⏰ **自动同步**            | 定期将缓存中的脏数据同步到磁盘，确保数据持久化 |
 
----
-
 ## 📦 安装
 
 ```bash
@@ -47,23 +34,6 @@ pnpm add expo-lite-data-store
 
 **注意**：包名是 `expo-lite-data-store`（注意是 `data-store` 而不是 `db-store`）
 
-### 📦 构建版本
-
-项目提供 TypeScript 和 JavaScript 双版本：
-
-```bash
-# 构建所有版本
-npm run build:all
-
-# 仅构建 JavaScript 版本
-npm run build:js
-
-# 仅构建 TypeScript 类型定义
-npm run build:types
-```
-
----
-
 ## 🚀 快速开始
 
 ### TypeScript 版本 (推荐)
@@ -72,21 +42,8 @@ npm run build:types
 // 方式1：默认导入（推荐，自动选择最佳版本）
 import { createTable, insert, findOne, findMany, update, remove } from 'expo-lite-data-store';
 
-// 方式2：使用 TypeScript 源码（完整类型支持）
-import { findMany } from 'expo-lite-data-store/ts';
-
-// 方式3：直接导入主文件（明确指定）
-import { findMany } from 'expo-lite-data-store/ts/main';
-
 // 创建用户表
-await createTable('users', {
-  columns: {
-    id: 'number',
-    name: 'string',
-    age: 'number',
-    email: 'string',
-  },
-});
+await createTable('users');
 
 // 插入数据
 await insert('users', [
@@ -95,36 +52,29 @@ await insert('users', [
   { id: 3, name: '王五', age: 35, email: 'wangwu@example.com' },
 ]);
 
-// 查询数据 - 支持排序
-const users = await findMany(
-  'users',
-  {},
-  {
-    sortBy: 'age',
-    order: 'desc',
-    limit: 10,
-  }
-);
+// 查询单条数据
+const user = await findOne('users', { id: 1 });
+console.log(user); // { id: 1, name: '张三', age: 25, email: 'zhangsan@example.com' }
 
-console.log(users);
-// 输出: 王五(35), 李四(30), 张三(25)
+// 查询多条数据
+const users = await findMany('users', { age: { $gte: 30 } });
+console.log(users); // 返回年龄 >= 30 的用户
 
-// 条件查询
-const activeUsers = await findMany('users', { age: { $gte: 30 } });
-console.log(activeUsers); // 返回年龄 >= 30 的用户
+// 更新数据
+await update('users', { age: 26 }, { id: 1 });
+
+// 删除数据
+await remove('users', { id: 2 });
 ```
 
 ### JavaScript 版本
 
 ```javascript
-// CommonJS 导入（自动使用编译后的 JS 版本）
+// CommonJS 导入
 const { createTable, insert, findMany } = require('expo-lite-data-store');
 
-// ES6 导入（自动使用编译后的 JS 版本）
-import { findMany } from 'expo-lite-data-store';
-
-// 明确指定使用 JavaScript 编译版本
-import { findMany } from 'expo-lite-data-store/js';
+// ES6 导入
+import { createTable, insert, findMany } from 'expo-lite-data-store';
 
 // 使用方式与 TypeScript 版本完全一致
 await createTable('users');
@@ -134,60 +84,15 @@ await insert('users', [
   { id: 2, name: 'Bob', age: 30 },
 ]);
 
-// 排序查询
-const users = await findMany(
-  'users',
-  {},
-  {
-    sortBy: 'age',
-    order: 'desc',
-  }
-);
+const users = await findMany('users', {}, {
+  sortBy: 'age',
+  order: 'desc',
+});
 
 console.log(users);
 ```
 
-### 版本选择
-
-所有版本都从dist目录获取，确保生产环境的稳定性和一致性：
-
-| 导入路径                    | 类型支持      | 适用场景         | 文件来源                                     |
-| --------------------------- | ------------- | ---------------- | -------------------------------------------- |
-| `'expo-lite-data-store'`    | ✅ 自动选择   | 推荐使用（默认） | `dist/js/index.js` + `dist/types/index.d.ts` |
-| `'expo-lite-data-store/js'` | ✅ TypeScript | JavaScript环境   | `dist/js/index.js` + `dist/types/index.d.ts` |
-| `'expo-lite-data-store/ts'` | ✅ TypeScript | TypeScript环境   | `dist/js/index.js` + `dist/types/index.d.ts` |
-
-```ts
-import { createTable, insert, findOne, update, remove, findMany } from 'expo-lite-data-store';
-
-// 创建表
-await createTable('users');
-
-// 插入数据
-await insert('users', [
-  { id: 1, name: '张三', age: 25, active: true },
-  { id: 2, name: '李四', age: 30, active: false },
-  { id: 3, name: '王五', age: 35, active: true },
-]);
-
-// 查询单条数据
-const user = await findOne('users', { id: 1 });
-console.log(user); // { id: 1, name: '张三', age: 25, active: true }
-
-// 更新数据
-await update('users', { age: 26 }, { id: 1 });
-
-// 查询多条数据
-const activeUsers = await findMany('users', { active: true });
-console.log(activeUsers.length); // 2
-
-// 删除数据
-await remove('users', { id: 2 });
-```
-
----
-
-## 📚 API 参考
+## 📚 基础 API 参考
 
 ### 🗂️ 表管理
 
@@ -220,587 +125,61 @@ await remove('users', { id: 2 });
 | `commit`           | `() => Promise<void>` | 提交当前事务 |
 | `rollback`         | `() => Promise<void>` | 回滚当前事务 |
 
-### 🔧 高级功能
+## 📖 详细文档
 
-| 方法                | 签名                               | 说明                 |
-| ------------------- | ---------------------------------- | -------------------- |
-| `migrateToChunked`  | `(tableName) => Promise<void>`     | 迁移表到分块存储模式 |
-| `getSyncStats`      | `() => Promise<SyncStats>`         | 获取同步统计信息     |
-| `syncNow`           | `() => Promise<void>`              | 立即触发数据同步     |
-| `setAutoSyncConfig` | `(config: AutoSyncConfig) => void` | 更新自动同步配置     |
+完整的详细文档请查看 [WIKI 页面](https://github.com/QinIndexCode/expo-lite-data-store/wiki)，包含：
 
----
+- 🎯 **高级查询**：复杂条件查询、操作符、复合查询
+- 🎯 **智能排序**：多字段排序、算法选择、性能优化
+- 🎯 **事务管理**：ACID 事务、嵌套事务、最佳实践
+- 🎯 **自动同步**：配置、统计、手动触发
+- 🎯 **性能优化**：索引、批量操作、分页策略
+- 🎯 **安全性**：数据加密、密钥管理
+- 🎯 **故障排除**：常见问题、调试技巧
 
-## 🎯 高级用法
-
-### 🔄 事务操作
-
-确保数据一致性的最佳实践：
+## 🔧 配置
 
 ```typescript
-import { beginTransaction, commit, rollback, insert, update } from 'expo-lite-data-store';
-
-async function transferMoney(fromUserId: number, toUserId: number, amount: number) {
-  try {
-    // 开始事务
-    await beginTransaction();
-
-    // 检查发送者余额
-    const sender = await findOne('users', { id: fromUserId });
-    if (!sender || sender.balance < amount) {
-      throw new Error('Insufficient balance');
-    }
-
-    // 执行转账操作
-    await update('users', { balance: sender.balance - amount }, { id: fromUserId });
-    await update('users', { balance: { $inc: amount } }, { id: toUserId });
-
-    // 记录转账日志
-    await insert('transactions', {
-      id: Date.now(),
-      fromUserId,
-      toUserId,
-      amount,
-      timestamp: new Date().toISOString(),
-    });
-
-    // 提交事务
-    await commit();
-    console.log('Transfer completed successfully');
-  } catch (error) {
-    // 出错时回滚所有操作
-    await rollback();
-    console.error('Transfer failed:', error);
-    throw error;
-  }
-}
-```
-
-### 🔍 高级查询
-
-#### 条件查询操作符
-
-| 操作符  | 说明       | 示例                                |
-| ------- | ---------- | ----------------------------------- |
-| `$eq`   | 等于       | `{ age: { $eq: 25 } }`              |
-| `$ne`   | 不等于     | `{ status: { $ne: 'inactive' } }`   |
-| `$gt`   | 大于       | `{ age: { $gt: 18 } }`              |
-| `$gte`  | 大于等于   | `{ score: { $gte: 60 } }`           |
-| `$lt`   | 小于       | `{ price: { $lt: 100 } }`           |
-| `$lte`  | 小于等于   | `{ quantity: { $lte: 10 } }`        |
-| `$in`   | 在数组中   | `{ category: { $in: ['A', 'B'] } }` |
-| `$nin`  | 不在数组中 | `{ status: { $nin: ['deleted'] } }` |
-| `$like` | 模糊匹配   | `{ name: { $like: '张%' } }`        |
-
-#### 复合查询
-
-```typescript
-import { findMany } from 'expo-lite-data-store';
-
-// AND 查询
-const activeAdults = await findMany('users', {
-  $and: [{ age: { $gte: 18 } }, { active: true }, { role: { $in: ['user', 'admin'] } }],
-});
-
-// OR 查询
-const featuredOrNew = await findMany('products', {
-  $or: [{ featured: true }, { createdAt: { $gt: '2024-01-01' } }],
-});
-
-// 复杂嵌套查询
-const complexQuery = await findMany('orders', {
-  $and: [
-    { status: 'completed' },
-    {
-      $or: [{ total: { $gt: 1000 } }, { priority: 'high' }],
-    },
-    { createdAt: { $gte: '2024-01-01' } },
-  ],
-});
-```
-
-### 🎯 智能排序系统
-
-#### 基础排序
-
-```typescript
-// 单字段排序
-const usersByAge = await findMany(
-  'users',
-  {},
-  {
-    sortBy: 'age',
-    order: 'asc', // 'asc' | 'desc'
-  }
-);
-
-// 多字段排序（稳定排序）
-const usersSorted = await findMany(
-  'users',
-  {},
-  {
-    sortBy: ['department', 'name', 'age'],
-    order: ['asc', 'asc', 'desc'],
-  }
-);
-```
-
-#### 排序算法选择
-
-系统提供5种专业排序算法，自动选择最优：
-
-| 算法       | 适用场景                 | 性能特点           |
-| ---------- | ------------------------ | ------------------ |
-| `default`  | 小数据集 (< 100项)       | 平衡性能和功能     |
-| `fast`     | 大数据集，简单比较       | 最快，但功能简化   |
-| `merge`    | 大数据集，稳定排序       | 稳定，适合大数据   |
-| `counting` | 有限值域（如状态、等级） | O(n+k)，空间换时间 |
-| `slow`     | 需要完整localeCompare    | 支持中文、特殊字符 |
-
-```typescript
-// 自动选择算法（推荐）
-const users = await findMany('users', {}, { sortBy: 'score' });
-
-// 手动指定算法
-const users = await findMany(
-  'users',
-  {},
-  {
-    sortBy: 'name',
-    sortAlgorithm: 'slow', // 支持中文排序
-  }
-);
-
-// 大数据优化
-const largeDataset = await findMany(
-  'logs',
-  {},
-  {
-    sortBy: 'timestamp',
-    sortAlgorithm: 'merge', // 适合大数据
-  }
-);
-```
-
-#### 排序 + 过滤 + 分页
-
-```typescript
-// 完整查询示例
-const paginatedResults = await findMany(
-  'products',
-  // 过滤条件
-  {
-    $and: [{ price: { $gte: 50, $lte: 500 } }, { category: { $in: ['electronics', 'books'] } }, { inStock: true }],
-  },
-  // 查询选项
-  {
-    sortBy: ['rating', 'price', 'name'],
-    order: ['desc', 'asc', 'asc'],
-    skip: 20, // 跳过前20条
-    limit: 10, // 返回10条
-  }
-);
-```
-
-### ⏰ 自动同步机制
-
-自动同步机制会定期将缓存中的脏数据同步到磁盘，确保数据持久化。默认配置下每5秒同步一次。
-
-#### 配置自动同步
-
-```typescript
-import { setAutoSyncConfig, getSyncStats, syncNow } from 'expo-lite-data-store';
-
-// 获取当前同步统计信息
-const stats = await getSyncStats();
-console.log('同步统计:', stats);
-
-// 立即触发同步
-await syncNow();
-
-// 自定义自动同步配置
-setAutoSyncConfig({
-  enabled: true, // 启用自动同步
-  interval: 10000, // 10秒同步一次
-  minItems: 5, // 至少5个脏项才同步
-  batchSize: 200, // 每次最多同步200个项目
-});
-```
-
-#### 同步配置参数
-
-| 参数名      | 类型    | 默认值 | 描述             |
-| ----------- | ------- | ------ | ---------------- |
-| `enabled`   | boolean | `true` | 是否启用自动同步 |
-| `interval`  | number  | `5000` | 同步间隔（毫秒） |
-| `minItems`  | number  | `1`    | 最小同步项数量   |
-| `batchSize` | number  | `100`  | 批量大小限制     |
-
-#### 同步统计信息
-
-| 字段名             | 类型   | 描述                 |
-| ------------------ | ------ | -------------------- |
-| `syncCount`        | number | 总同步次数           |
-| `totalItemsSynced` | number | 总同步项数           |
-| `lastSyncTime`     | number | 上次同步时间         |
-| `avgSyncTime`      | number | 平均同步耗时（毫秒） |
-
-### 🔧 性能优化建议
-
-#### 索引优化
-
-```typescript
-// 为经常查询的字段创建索引
-// 注意：当前版本的索引功能正在开发中
-// 未来版本将支持：
-// await createIndex('users', 'email');
-// await createIndex('products', ['category', 'price']);
-```
-
-#### 批量操作优化
-
-```typescript
-// 使用bulkWrite进行批量操作，比多次单独操作更高效
-await bulkWrite('products', [
-  { type: 'insert', data: { id: 1, name: 'Product 1' } },
-  { type: 'update', data: { price: 29.99 }, where: { id: 2 } },
-  { type: 'delete', where: { id: 3 } },
-]);
-```
-
-#### 分页查询优化
-
-```typescript
-// 对于大数据集，使用分页避免一次性加载过多数据
-const pageSize = 50;
-let page = 0;
-
-while (true) {
-  const results = await findMany(
-    'largeTable',
-    {},
-    {
-      skip: page * pageSize,
-      limit: pageSize,
-      sortBy: 'id',
-    }
-  );
-
-  if (results.length === 0) break;
-
-  // 处理当前页数据
-  processPageData(results);
-
-  page++;
-}
-```
-
----
-
-## 🔄 TypeScript 与 JavaScript 双版本支持
-
-项目同时提供 TypeScript 和 JavaScript 两种版本，满足不同开发环境的需求。
-
-### 📁 文件结构
-
-```
-expo-lite-data-store/
-├── src/                              # TypeScript 源码目录
-│   ├── index.ts                      # 主入口（向后兼容别名）
-│   ├── expo-lite-data-store.ts       # 主入口文件（推荐使用）
-│   ├── core/                         # 核心功能模块
-│   │   ├── adapter/                  # 存储适配器
-│   │   ├── api/                      # API 路由和控制器
-│   │   ├── cache/                    # 缓存管理
-│   │   ├── data/                     # 数据读写层
-│   │   ├── file/                     # 文件操作
-│   │   ├── index/                    # 索引管理
-│   │   ├── meta/                     # 元数据管理
-│   │   ├── monitor/                  # 性能监控
-│   │   ├── query/                    # 查询引擎
-│   │   ├── service/                  # 业务服务层
-│   │   └── strategy/                 # 存储策略
-│   ├── types/                        # TypeScript 类型定义
-│   ├── utils/                        # 工具函数
-│   ├── taskQueue/                    # 任务队列
-│   └── liteStore.config.js           # 配置文件
-├── dist/                             # 编译输出目录
-│   ├── js/                           # JavaScript 编译输出
-│   │   ├── index.js                  # JS 主入口
-│   │   ├── expo-lite-data-store.js   # JS 主入口（与 TS 对应）
-│   │   ├── core/                     # JS 核心模块（完整目录结构）
-│   │   ├── types/                    # JS 类型定义
-│   │   ├── utils/                    # JS 工具函数
-│   │   ├── taskQueue/                # JS 任务队列
-│   │   └── liteStore.config.js       # 配置文件副本
-│   └── types/                        # TypeScript 类型定义（.d.ts）
-│       ├── index.d.ts                # 主入口类型声明
-│       ├── expo-lite-data-store.d.ts # 主入口类型声明（与 TS 对应）
-│       └── [完整的类型定义结构]      # 与 src/ 目录结构一致
-├── coverage/                         # 测试覆盖率报告
-├── __mocks__/                        # Jest 模拟文件
-└── [配置文件]                         # package.json, tsconfig.json 等
-```
-
-### 📦 导入路径说明
-
-所有导入路径都指向dist目录，确保生产环境的稳定性：
-
-| 导入方式             | 路径                        | 说明                       | 推荐度     |
-| -------------------- | --------------------------- | -------------------------- | ---------- |
-| **默认导入**         | `'expo-lite-data-store'`    | 自动使用编译后的版本       | ⭐⭐⭐⭐⭐ |
-| **显式指定 JS 版本** | `'expo-lite-data-store/js'` | 使用编译后的 JS 版本       | ⭐⭐⭐⭐   |
-| **显式指定 TS 版本** | `'expo-lite-data-store/ts'` | 使用编译后的 JS + 类型定义 | ⭐⭐⭐⭐   |
-
-**注意**：所有版本都使用相同的编译后的JavaScript代码，仅在导入方式上有所不同，确保一致的运行时行为。
-
-### 🛠️ 版本差异
-
-| 特性           | 所有版本                          |
-| -------------- | --------------------------------- |
-| **类型检查**   | ✅ 完整类型支持（通过dist/types） |
-| **IDE 支持**   | ✅ 智能提示（通过dist/types）     |
-| **调试体验**   | ⚠️ 编译后调试                     |
-| **文件大小**   | 🔸 编译后优化大小                 |
-| **运行时性能** | ✅ 最佳性能                       |
-| **开发体验**   | ⭐⭐⭐⭐⭐                        |
-
-### 🔧 开发环境配置
-
-#### TypeScript 项目
-
-```json
-// tsconfig.json
-{
-  "compilerOptions": {
-    "moduleResolution": "node",
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true
-  }
-}
-```
-
-```typescript
-// 直接导入，支持完整类型检查
-import { createTable, findMany } from 'expo-lite-data-store';
-
-const users = await findMany(
-  'users',
-  {},
-  {
-    sortBy: 'age', // ✅ 类型检查
-    order: 'desc', // ✅ 自动补全
-  }
-);
-```
-
-#### JavaScript 项目
-
-```json
-// package.json
-{
-  "type": "commonjs", // 或 "module"
-  "engines": {
-    "node": ">=14.0.0"
-  }
-}
-```
-
-```javascript
-// CommonJS
-const { createTable, findMany } = require('expo-lite-data-store');
-
-// ES6 Modules
-import { findMany } from 'expo-lite-data-store';
-
-const users = await findMany(
-  'users',
-  {},
-  {
-    sortBy: 'age', // ⚠️ 无类型检查
-    order: 'desc', // ⚠️ 无自动补全
-  }
-);
-```
-
-### 📦 打包工具集成
-
-#### Webpack
-
-```javascript
-// webpack.config.js
+// liteStore.config.js
 module.exports = {
-  resolve: {
-    extensions: ['.js', '.ts', '.tsx'],
-    alias: {
-      'expo-lite-data-store': 'expo-lite-data-store/dist/js',
-    },
+  // 加密配置
+  encryption: {
+    cacheTimeout: 30000, // 缓存超时时间（毫秒）
+    maxCacheSize: 100,    // 最大缓存表数量
+    // 其他加密配置...
   },
+  // 性能配置
+  performance: {
+    enableQueryOptimization: true, // 启用查询优化
+    enableBatchOptimization: true,  // 启用批量操作优化
+    // 其他性能配置...
+  },
+  // 其他配置...
 };
 ```
 
-#### Rollup
+## 🐛 常见问题
 
-```javascript
-// rollup.config.js
-export default {
-  external: ['expo-lite-data-store'],
-  plugins: [
-    // 其他插件
-  ],
-};
-```
+### Q: 如何切换不同版本？
+A: 所有版本都从dist目录获取，确保生产环境的稳定性：
+- `import { ... } from 'expo-lite-data-store'` - 推荐使用（自动选择）
+- `import { ... } from 'expo-lite-data-store/js'` - JavaScript环境
+- `import { ... } from 'expo-lite-data-store/ts'` - TypeScript环境
 
-#### Metro (React Native)
-
-```javascript
-// metro.config.js
-const { getDefaultConfig } = require('expo/metro-config');
-
-module.exports = getDefaultConfig(__dirname, {
-  resolver: {
-    alias: {
-      'expo-lite-data-store': 'expo-lite-data-store/dist/js',
-    },
-  },
+### Q: 如何处理中文排序？
+A: 使用 `sortAlgorithm: 'slow'` 以获得完整的中文支持：
+```typescript
+const users = await findMany('users', {}, {
+  sortBy: 'name',
+  sortAlgorithm: 'slow',
 });
 ```
 
----
-
-## ⚙️ 配置和类型定义
-
-### ReadOptions 接口
-
-```typescript
-interface ReadOptions {
-  // 分页选项
-  skip?: number; // 跳过的记录数
-  limit?: number; // 返回的记录数上限
-
-  // 过滤选项
-  filter?: FilterCondition; // 查询条件
-
-  // 排序选项
-  sortBy?: string | string[]; // 排序字段
-  order?: 'asc' | 'desc' | ('asc' | 'desc')[]; // 排序方向
-  sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow'; // 排序算法
-}
-```
-
-### FilterCondition 类型
-
-```typescript
-type FilterCondition =
-  | ((item: Record<string, any>) => boolean) // 函数条件
-  | Partial<Record<string, any>> // 简单对象条件
-  | {
-      // 高级条件
-      $or?: FilterCondition[];
-      $and?: FilterCondition[];
-      [key: string]: any;
-    };
-```
-
-### WriteResult 接口
-
-```typescript
-interface WriteResult {
-  written: number; // 写入的字节数
-  totalAfterWrite: number; // 写入后的总字节数
-  chunked: boolean; // 是否使用了分块写入
-  chunks?: number; // 分块数量（分块写入时）
-}
-```
-
----
-
-## 📊 性能基准
-
-### 排序算法性能对比
-
-| 算法     | 小数据集 (<100) | 中等数据集 (100-10K) | 大数据集 (>10K) | 内存使用 | 稳定性 |
-| -------- | --------------- | -------------------- | --------------- | -------- | ------ |
-| default  | ⭐⭐⭐⭐⭐      | ⭐⭐⭐               | ⭐⭐            | 低       | 高     |
-| fast     | ⭐⭐⭐⭐⭐      | ⭐⭐⭐⭐⭐           | ⭐⭐⭐          | 低       | 中     |
-| merge    | ⭐⭐⭐⭐        | ⭐⭐⭐⭐⭐           | ⭐⭐⭐⭐⭐      | 中       | 高     |
-| counting | ⭐⭐⭐          | ⭐⭐⭐⭐⭐           | ⭐⭐⭐⭐⭐      | 高\*     | 高     |
-| slow     | ⭐⭐            | ⭐⭐                 | ⭐⭐            | 低       | 高     |
-
-\*计数排序在值域有限时内存效率很高
-
-### 推荐使用场景
-
-- **实时搜索结果排序**: 使用 `fast` 算法
-- **大数据分析**: 使用 `merge` 算法
-- **状态/等级排序**: 使用 `counting` 算法
-- **中文内容排序**: 使用 `slow` 算法
-- **通用场景**: 不指定算法，自动选择
-
----
-
-## 🔒 安全性和加密
-
-### 数据加密
-
-```typescript
-// 注意：加密功能需要在项目初始化时启用
-// 当前版本的加密功能正在开发中，敬请期待
-
-// 未来版本的使用方式：
-// import { enableEncryption, setEncryptionKey } from 'expo-lite-data-store';
-//
-// // 启用加密
-// await enableEncryption();
-//
-// // 设置加密密钥（请妥善保管）
-// await setEncryptionKey('your-secure-key-here');
-//
-// // 加密后的数据将自动处理，无需额外代码
-```
-
-### 安全最佳实践
-
-1. **密钥管理**: 加密密钥请妥善保管，避免硬编码
-2. **敏感数据**: 对包含敏感信息的数据启用加密
-3. **备份安全**: 加密数据的备份也需要保护
-4. **密钥轮换**: 定期更换加密密钥
-
----
-
-## 🐛 故障排除
-
-### 常见问题
-
-#### Q: 排序后数据顺序不正确？
-
-A: 检查排序字段是否存在 null/undefined 值，这些值会被排到末尾。
-
-#### Q: 查询性能慢？
-
-A: 尝试使用更适合的数据量的排序算法，或启用分页查询。
-
-#### Q: 内存使用过高？
-
-A: 对于超大数据集，考虑使用分页查询或 `fast` 排序算法。
-
-#### Q: 中文排序不正确？
-
-A: 使用 `sortAlgorithm: 'slow'` 以获得完整的中文支持。
-
-#### Q: 如何在纯JavaScript项目中使用？
-
-A: 导入时会自动使用JavaScript版本，无需特殊配置。
-
-#### Q: TypeScript版本和JavaScript版本有什么区别？
-
-A: TypeScript版本提供完整的类型检查和IDE支持；JavaScript版本轻量化但无类型检查。
-
-#### Q: 如何构建自己的版本？
-
-A: 运行 `npm run build:all` 来构建完整的TypeScript和JavaScript版本。
-
----
+### Q: 如何提高查询性能？
+A: 对于大数据集，建议使用：
+- 分页查询
+- 合适的排序算法
+- 批量操作
 
 ## 📞 支持与反馈
 
@@ -813,9 +192,5 @@ A: 运行 `npm run build:all` 来构建完整的TypeScript和JavaScript版本。
 MIT © QinIndex Qin
 
 ---
-
-## 🙏 致谢
-
-感谢所有为这个项目贡献代码和建议的开发者！
 
 喜欢的话别忘了点个 ⭐ Star，让更多人发现这个项目！

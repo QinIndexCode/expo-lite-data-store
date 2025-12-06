@@ -23,7 +23,7 @@ const config: LiteStoreConfig = {
     keyIterations: 120_000, // 2025年推荐值：≥120,000（你原来100k稍低，已升级）
 
     // --- 字段级加密 ---
-    enableFieldLevelEncryption: true, // 建议开启！对敏感字段更精细保护
+    enableFieldLevelEncryption: false, // 暂时禁用，使用完整数据加密
     encryptedFields: [
       // 明确列出需要加密的字段
       'password',

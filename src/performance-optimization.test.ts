@@ -6,18 +6,25 @@ import config from './liteStore.config';
 
 describe('Performance Optimization Tests', () => {
   let adapter: EncryptedStorageAdapter;
-  const tableName = 'performance_test';
 
   beforeAll(async () => {
     adapter = new EncryptedStorageAdapter();
-    await adapter.createTable(tableName);
   });
 
   afterAll(async () => {
-    await adapter.deleteTable(tableName);
+    // 清理所有测试表
+    const tables = await adapter.listTables();
+    for (const table of tables) {
+      if (table.startsWith('test_')) {
+        await adapter.deleteTable(table);
+      }
+    }
   });
 
   test('缓存机制应该正常工作', async () => {
+    const tableName = 'test_cache';
+    await adapter.createTable(tableName);
+    
     // 写入测试数据
     const testData = { id: 1, name: 'test', value: 'cached' };
     await adapter.write(tableName, testData);
@@ -40,6 +47,9 @@ describe('Performance Optimization Tests', () => {
   });
 
   test('索引优化应该提升查询性能', async () => {
+    const tableName = 'test_index';
+    await adapter.createTable(tableName);
+    
     // 准备大量测试数据
     const testData = Array.from({ length: 100 }, (_, i) => ({
       id: i + 1,
@@ -70,6 +80,9 @@ describe('Performance Optimization Tests', () => {
   });
 
   test('批量操作性能应该得到优化', async () => {
+    const tableName = 'test_batch';
+    await adapter.createTable(tableName);
+    
     const batchData = Array.from({ length: 50 }, (_, i) => ({
       id: 200 + i,
       name: `batch_user${i}`,
@@ -84,7 +97,13 @@ describe('Performance Optimization Tests', () => {
     console.log(`批量插入50条数据: ${batchTime}ms`);
 
     // 验证数据是否正确写入
+    const allData = await adapter.read(tableName);
+    console.log('Debug - All data in table:', allData.length, 'items');
+    if (allData.length > 0) {
+      console.log('Debug - All data sample:', allData.slice(0, 3));
+    }
     const verifyData = await adapter.findMany(tableName, { type: 'batch_test' });
+    console.log('Debug - Verify data:', verifyData.length, 'items');
     expect(verifyData.length).toBe(50);
   });
 

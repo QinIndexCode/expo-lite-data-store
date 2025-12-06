@@ -43,42 +43,65 @@ export class QueryEngine {
     
     // 简单条件
     return data.filter(item => {
+      let matches = true;
+      
       for (const [key, value] of Object.entries(condition)) {
         const itemValue = item[key];
         
-        if (itemValue === undefined) {
-          return false;
-        }
-        
         // 操作符条件
         if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-          let matches = true;
-          
           for (const [op, opValue] of Object.entries(value)) {
             switch (op) {
               case '$eq':
-                if (itemValue !== opValue) matches = false;
+                // 处理null和undefined的特殊情况
+                if (itemValue === null || itemValue === undefined) {
+                  if (itemValue !== opValue) {
+                    matches = false;
+                  }
+                } else if (itemValue !== opValue) {
+                  matches = false;
+                }
                 break;
               case '$ne':
-                if (itemValue === opValue) matches = false;
+                // 处理null和undefined的特殊情况
+                if (itemValue === null || itemValue === undefined) {
+                  if (itemValue === opValue) {
+                    matches = false;
+                  }
+                } else if (itemValue === opValue) {
+                  matches = false;
+                }
                 break;
               case '$gt':
-                if (typeof itemValue === 'number' && typeof opValue === 'number' && itemValue <= opValue) matches = false;
+                if (typeof itemValue === 'number' && typeof opValue === 'number' && itemValue <= opValue) {
+                  matches = false;
+                }
                 break;
               case '$gte':
-                if (typeof itemValue === 'number' && typeof opValue === 'number' && itemValue < opValue) matches = false;
+                if (typeof itemValue === 'number' && typeof opValue === 'number' && itemValue < opValue) {
+                  matches = false;
+                }
                 break;
               case '$lt':
-                if (typeof itemValue === 'number' && typeof opValue === 'number' && itemValue >= opValue) matches = false;
+                if (typeof itemValue === 'number' && typeof opValue === 'number' && itemValue >= opValue) {
+                  matches = false;
+                }
                 break;
               case '$lte':
-                if (typeof itemValue === 'number' && typeof opValue === 'number' && itemValue > opValue) matches = false;
+                if (typeof itemValue === 'number' && typeof opValue === 'number' && itemValue > opValue) {
+                  matches = false;
+                }
                 break;
               case '$in':
                 if (!Array.isArray(opValue)) {
                   matches = false;
                 } else {
-                  if (Array.isArray(itemValue)) {
+                  // 处理null和undefined的特殊情况
+                  if (itemValue === null || itemValue === undefined) {
+                    if (!opValue.includes(itemValue)) {
+                      matches = false;
+                    }
+                  } else if (Array.isArray(itemValue)) {
                     if (!itemValue.some(item => opValue.includes(item))) {
                       matches = false;
                     }
@@ -93,7 +116,12 @@ export class QueryEngine {
                 if (!Array.isArray(opValue)) {
                   matches = false;
                 } else {
-                  if (Array.isArray(itemValue)) {
+                  // 处理null和undefined的特殊情况
+                  if (itemValue === null || itemValue === undefined) {
+                    if (opValue.includes(itemValue)) {
+                      matches = false;
+                    }
+                  } else if (Array.isArray(itemValue)) {
                     if (itemValue.some(item => opValue.includes(item))) {
                       matches = false;
                     }
@@ -121,16 +149,23 @@ export class QueryEngine {
             
             if (!matches) break;
           }
-          
-          if (!matches) return false;
         } 
         // 简单值比较
-        else if (itemValue !== value) {
-          return false;
+        else {
+          // 处理null和undefined的特殊情况
+          if (itemValue === null || itemValue === undefined) {
+            if (itemValue !== value) {
+              matches = false;
+            }
+          } else if (itemValue !== value) {
+            matches = false;
+          }
         }
+        
+        if (!matches) break;
       }
       
-      return true;
+      return matches;
     });
   }
 

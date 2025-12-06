@@ -91,6 +91,46 @@ export async function update(
   return updatedCount;
 }
 
+// 自动同步相关方法
+// 注意：这些方法在当前版本中是模拟实现，实际功能依赖于AutoSyncService
+// 我们需要等待底层实现完成后再替换为真实实现
+export interface SyncStats {
+  syncCount: number;
+  totalItemsSynced: number;
+  lastSyncTime: number;
+  avgSyncTime: number;
+}
+
+export interface AutoSyncConfig {
+  enabled: boolean;
+  interval: number;
+  minItems: number;
+  batchSize: number;
+}
+
+// 获取同步统计信息
+export function getSyncStats(): SyncStats {
+  // 模拟实现：返回默认统计信息
+  return {
+    syncCount: 0,
+    totalItemsSynced: 0,
+    lastSyncTime: Date.now(),
+    avgSyncTime: 0,
+  };
+}
+
+// 立即触发同步
+export async function syncNow(): Promise<void> {
+  // 模拟实现：当前版本中不做任何操作
+  console.log('[SyncNow] 触发同步操作（模拟实现）');
+}
+
+// 设置自动同步配置
+export function setAutoSyncConfig(config: Partial<AutoSyncConfig>): void {
+  // 模拟实现：当前版本中不做任何操作
+  console.log('[SetAutoSyncConfig] 更新同步配置（模拟实现）:', config);
+}
+
 // 导出类型
 export type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from './types/storageTypes.js';
 
@@ -112,4 +152,8 @@ export default {
   migrateToChunked,
   clearTable,
   update,
+  // 自动同步相关方法
+  getSyncStats,
+  syncNow,
+  setAutoSyncConfig,
 } as const;
