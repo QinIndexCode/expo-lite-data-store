@@ -25,17 +25,17 @@ import config from './liteStore.config.js';
 const TEST_CONFIG = {
   // 数据规模
   payloadSizes: {
-    tiny: 50,              // ~50B    → 短文本（如 token、手机号）
-    small: 512,            // ~512B   → 典型用户资料字段
-    medium: 5 * 1024,      // ~5KB    → 聊天记录单条/表单数据
-    large: 50 * 1024,      // ~50KB   → 富文本笔记、图片元数据
-    huge: 200 * 1024,      // ~200KB  → 大型 JSON（如离线缓存）
+    tiny: 50, // ~50B    → 短文本（如 token、手机号）
+    small: 512, // ~512B   → 典型用户资料字段
+    medium: 5 * 1024, // ~5KB    → 聊天记录单条/表单数据
+    large: 50 * 1024, // ~50KB   → 富文本笔记、图片元数据
+    huge: 200 * 1024, // ~200KB  → 大型 JSON（如离线缓存）
   },
   // 测试轮数（增加统计稳定性）
   iterations: {
-    single: 100,           // 单条操作重复次数（用于计算平均值）
-    bulk: 50,              // 批量测试组数
-    bulkItems: 100,        // 每组批量条数
+    single: 100, // 单条操作重复次数（用于计算平均值）
+    bulk: 50, // 批量测试组数
+    bulkItems: 100, // 每组批量条数
   },
   // 预热轮数（避免首次冷启动偏差）
   warmupIterations: 20,
@@ -56,7 +56,6 @@ describe('🔐 加密机制安全性与性能综合评估（生产级）', () =>
 
   // ==================== 安全性评估 ====================
   describe('🛡️ 安全性评估', () => {
-
     test('1. 加密算法与参数强度符合当前安全标准', () => {
       // AES-256-CTR 是当前推荐的对称加密模式（NIST SP 800-38A）
       // CTR 模式无需 padding，支持并行加密，适合移动端
@@ -124,7 +123,10 @@ describe('🔐 加密机制安全性与性能综合评估（生产级）', () =>
       const issues: Array<{ level: 'critical' | 'high' | 'medium' | 'low' | 'info'; message: string }> = [];
 
       if (config.encryption.keyIterations < 100_000) {
-        issues.push({ level: 'medium', message: `PBKDF2 迭代次数仅 ${config.encryption.keyIterations}，建议 ≥100,000（2025年标准）` });
+        issues.push({
+          level: 'medium',
+          message: `PBKDF2 迭代次数仅 ${config.encryption.keyIterations}，建议 ≥100,000（2025年标准）`,
+        });
       }
       if (config.encryption.hmacAlgorithm !== 'SHA-512') {
         issues.push({ level: 'low', message: 'HMAC 使用 SHA-256，建议升级至 SHA-512（更抗长度扩展）' });
@@ -173,7 +175,13 @@ describe('🔐 加密机制安全性与性能综合评估（生产级）', () =>
     test('1. 单条记录加密/解密性能（不同数据量级）', async () => {
       console.log('\n📊 单条记录性能测试（平均值基于', TEST_CONFIG.iterations.single, '次）\n');
 
-      const results: Array<{ size: string; bytes: number; encryptMs: number; decryptMs: number; throughputMBs: number }> = [];
+      const results: Array<{
+        size: string;
+        bytes: number;
+        encryptMs: number;
+        decryptMs: number;
+        throughputMBs: number;
+      }> = [];
 
       for (const [sizeName, bytes] of Object.entries(TEST_CONFIG.payloadSizes)) {
         const payload = '█'.repeat(bytes); // 使用全角字符避免压缩优化影响
@@ -199,7 +207,7 @@ describe('🔐 加密机制安全性与性能综合评估（生产级）', () =>
         }
         const avgDecrypt = decryptTotal / TEST_CONFIG.iterations.single;
 
-        const throughput = (bytes / (avgEncrypt / 1000)) / (1024 * 1024); // MB/s
+        const throughput = bytes / (avgEncrypt / 1000) / (1024 * 1024); // MB/s
 
         results.push({
           size: sizeName,
@@ -214,14 +222,20 @@ describe('🔐 加密机制安全性与性能综合评估（生产级）', () =>
       console.log('   Size     |   Bytes   | Encrypt (ms) | Decrypt (ms) | Throughput (MB/s)');
       console.log('   ---------|-----------|--------------|--------------|------------------');
       results.forEach(r => {
-        console.log(`   ${r.size.padEnd(8)} | ${r.bytes.toLocaleString().padStart(9)} | ${String(r.encryptMs).padStart(11)}  | ${String(r.decryptMs).padStart(11)}  | ${String(r.throughputMBs).padStart(12)}`);
+        console.log(
+          `   ${r.size.padEnd(8)} | ${r.bytes.toLocaleString().padStart(9)} | ${String(r.encryptMs).padStart(11)}  | ${String(r.decryptMs).padStart(11)}  | ${String(r.throughputMBs).padStart(12)}`
+        );
       });
     });
 
     test('2. 批量操作性能对比', async () => {
-      console.log(`\n📊 批量操作性能测试（${TEST_CONFIG.iterations.bulk} 组 × ${TEST_CONFIG.iterations.bulkItems} 条）`);
+      console.log(
+        `\n📊 批量操作性能测试（${TEST_CONFIG.iterations.bulk} 组 × ${TEST_CONFIG.iterations.bulkItems} 条）`
+      );
 
-      const singleItems = Array(TEST_CONFIG.iterations.bulkItems).fill(null).map((_, i) => `批量消息 ${i} - ${Math.random()}`);
+      const singleItems = Array(TEST_CONFIG.iterations.bulkItems)
+        .fill(null)
+        .map((_, i) => `批量消息 ${i} - ${Math.random()}`);
 
       // 逐条加密（基准线）
       const singleStart = performance.now();
@@ -241,7 +255,9 @@ describe('🔐 加密机制安全性与性能综合评估（生产级）', () =>
       const bulkDecryptTotal = performance.now() - bulkDecryptStart;
 
       console.log(`   逐条加密总耗时      : ${singleTotal.toFixed(2)} ms`);
-      console.log(`   批量加密总耗时      : ${bulkEncryptTotal.toFixed(2)} ms  → 加速 ${(singleTotal / bulkEncryptTotal).toFixed(2)}x`);
+      console.log(
+        `   批量加密总耗时      : ${bulkEncryptTotal.toFixed(2)} ms  → 加速 ${(singleTotal / bulkEncryptTotal).toFixed(2)}x`
+      );
       console.log(`   批量解密总耗时      : ${bulkDecryptTotal.toFixed(2)} ms`);
       console.log(`   单条平均（批量方式） : ${(bulkEncryptTotal / TEST_CONFIG.iterations.bulkItems).toFixed(3)} ms`);
     });
@@ -249,23 +265,27 @@ describe('🔐 加密机制安全性与性能综合评估（生产级）', () =>
     test('3. 字段级加密性能（典型用户对象）', async () => {
       const userObject = {
         id: 12345,
-        username: "alice_2025",
-        email: "alice@example.com",
-        phone: "+86 138 0013 8000",
-        passwordHash: "pbkdf2_sha256$...", // 假设已哈希
-        bio: "█".repeat(1024), // 模拟长文本
-        settings: { theme: "dark", notifications: true },
-        sensitiveData: "银行卡/身份证等超敏感信息"
+        username: 'alice_2025',
+        email: 'alice@example.com',
+        phone: '+86 138 0013 8000',
+        passwordHash: 'pbkdf2_sha256$...', // 假设已哈希
+        bio: '█'.repeat(1024), // 模拟长文本
+        settings: { theme: 'dark', notifications: true },
+        sensitiveData: '银行卡/身份证等超敏感信息',
       };
 
       const fieldConfig = {
         fields: ['email', 'phone', 'passwordHash', 'sensitiveData'] as const,
-        masterKey
+        masterKey,
       };
 
       const encrypted = await encryptFields(userObject, { ...fieldConfig, fields: [...fieldConfig.fields] });
-      const fieldEncryptTime = await measure('字段级加密（4个敏感字段）', () => encryptFields(userObject, { ...fieldConfig, fields: [...fieldConfig.fields] as string[] }));
-      const fieldDecryptTime = await measure('字段级解密（4个敏感字段）', () => decryptFields(encrypted, { ...fieldConfig, fields: [...fieldConfig.fields] as string[] }));
+      const fieldEncryptTime = await measure('字段级加密（4个敏感字段）', () =>
+        encryptFields(userObject, { ...fieldConfig, fields: [...fieldConfig.fields] as string[] })
+      );
+      const fieldDecryptTime = await measure('字段级解密（4个敏感字段）', () =>
+        decryptFields(encrypted, { ...fieldConfig, fields: [...fieldConfig.fields] as string[] })
+      );
 
       console.log(`   平均字段级加密耗时 : ${fieldEncryptTime.toFixed(3)} ms`);
       console.log(`   平均字段级解密耗时 : ${fieldDecryptTime.toFixed(3)} ms`);

@@ -1,7 +1,7 @@
 /**
  * 配置文件可用性测试
  */
-import config from './liteStore.config.js';
+import config from './liteStore.config';
 
 describe('Configuration Tests', () => {
   test('配置文件应该正确加载', () => {
@@ -96,41 +96,41 @@ describe('Configuration Tests', () => {
     // 验证加密配置的完整性
     expect(config.encryption.hmacAlgorithm).toBeDefined();
     expect(['SHA-256', 'SHA-512']).toContain(config.encryption.hmacAlgorithm);
-    
+
     expect(config.encryption.useBulkOperations).toBeDefined();
     expect(typeof config.encryption.useBulkOperations).toBe('boolean');
-    
+
     expect(config.encryption.encryptedFields).toBeDefined();
     expect(Array.isArray(config.encryption.encryptedFields)).toBe(true);
-    
+
     expect(config.encryption.maxCacheSize).toBeDefined();
     expect(typeof config.encryption.maxCacheSize).toBe('number');
-    
+
     // 验证API配置的完整性
     expect(config.api.retry).toBeDefined();
     expect(typeof config.api.retry.maxAttempts).toBe('number');
     expect(config.api.retry.maxAttempts).toBeGreaterThan(0);
-    
+
     expect(typeof config.api.retry.backoffMultiplier).toBe('number');
     expect(config.api.retry.backoffMultiplier).toBeGreaterThan(0);
-    
+
     // 验证API限流配置的完整性
     expect(config.api.rateLimit.burstCapacity).toBeDefined();
     expect(typeof config.api.rateLimit.burstCapacity).toBe('number');
     expect(config.api.rateLimit.burstCapacity).toBeGreaterThan(0);
-    
+
     // 验证性能配置的完整性
     expect(config.performance.enableBatchOptimization).toBeDefined();
     expect(typeof config.performance.enableBatchOptimization).toBe('boolean');
-    
+
     // 验证缓存配置的完整性
     expect(config.cache.enableCompression).toBeDefined();
     expect(typeof config.cache.enableCompression).toBe('boolean');
-    
+
     expect(config.cache.cleanupInterval).toBeDefined();
     expect(typeof config.cache.cleanupInterval).toBe('number');
     expect(config.cache.cleanupInterval).toBeGreaterThan(0);
-    
+
     // 验证监控配置的完整性
     expect(config.monitoring.metricsRetention).toBeDefined();
     expect(typeof config.monitoring.metricsRetention).toBe('number');

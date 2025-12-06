@@ -13,28 +13,23 @@
  * 日期：2025-12-03
  */
 
-import {
-  encrypt, decrypt,
-  encryptBulk, decryptBulk,
-  encryptFields, decryptFields,
-  getMasterKey
-} from './utils/crypto';
+import { encrypt, decrypt, encryptBulk, decryptBulk, encryptFields, decryptFields, getMasterKey } from './utils/crypto';
 import config from './liteStore.config.js';
 
 // ==================== 测试配置（平衡精度与执行时间）===================
 const TEST_CONFIG = {
   payloadSizes: {
-    tiny: 100,        // 100B  → token、手机号
-    small: 2 * 1024,  // 2KB   → 用户资料
+    tiny: 100, // 100B  → token、手机号
+    small: 2 * 1024, // 2KB   → 用户资料
     medium: 20 * 1024, // 20KB  → 聊天记录、表单
     large: 100 * 1024, // 100KB → 富文本、离线缓存
   },
   iterations: {
-    single: 50,       // 单条操作重复次数（统计平均值）
-    bulk: 100,        // 批量测试条数
-    concurrent: 10,   // 并发测试数量
+    single: 50, // 单条操作重复次数（统计平均值）
+    bulk: 100, // 批量测试条数
+    concurrent: 10, // 并发测试数量
   },
-  warmup: 15,         // 预热轮次（避免 JIT 冷启动偏差）
+  warmup: 15, // 预热轮次（避免 JIT 冷启动偏差）
 } as const;
 
 // ==================== 数据生成器（避免字符串压缩优化影响）===================
@@ -88,7 +83,6 @@ describe('🔐 Expo LiteStore 加密机制完整评估（安全 + 性能）', ()
 
   // ==================== 安全性评估 ===================
   describe('🛡️ 安全性评估', () => {
-
     test('1. 加密算法强度符合 2025 年标准', () => {
       // 虽然 config 中未显式声明，但你的 crypto 实现一定是 AES-256-CTR
       // 我们通过实际行为验证（而不是依赖配置字段）
@@ -98,7 +92,7 @@ describe('🔐 Expo LiteStore 加密机制完整评估（安全 + 性能）', ()
       results.security.algorithm = {
         score: 98,
         details: 'AES-256-CTR + HMAC-SHA512 + PBKDF2 ≥100k',
-        risk: 'low'
+        risk: 'low',
       };
 
       console.log('✅ 加密算法强度：优秀（AES-256-CTR + SHA-512）');
@@ -140,13 +134,13 @@ describe('🔐 Expo LiteStore 加密机制完整评估（安全 + 性能）', ()
 
   // ==================== 性能基准测试 ===================
   describe('⚡ 性能基准测试（高精度）', () => {
-
     test('1. 单条加密/解密性能（不同数据量）', async () => {
       console.log('\n📊 单条操作性能测试（平均值基于 50 次）\n');
 
       for (const [sizeName, bytes] of Object.entries(TEST_CONFIG.payloadSizes)) {
         const data = generateRandomString(bytes);
-        let encryptTotal = 0, decryptTotal = 0;
+        let encryptTotal = 0,
+          decryptTotal = 0;
 
         for (let i = 0; i < TEST_CONFIG.iterations.single; i++) {
           encryptTotal += await measure(`加密 ${sizeName.padEnd(6)} (${bytes}B)`, () => encrypt(data, masterKey));
@@ -167,7 +161,9 @@ describe('🔐 Expo LiteStore 加密机制完整评估（安全 + 性能）', ()
     test('2. 批量操作加速比测试', async () => {
       console.log(`\n📊 批量操作性能（${TEST_CONFIG.iterations.bulk} 条小数据）\n`);
 
-      const items = Array(TEST_CONFIG.iterations.bulk).fill(null).map(() => generateRandomString(500));
+      const items = Array(TEST_CONFIG.iterations.bulk)
+        .fill(null)
+        .map(() => generateRandomString(500));
 
       // 逐条加密（基准）
       const singleStart = performance.now();
@@ -196,20 +192,24 @@ describe('🔐 Expo LiteStore 加密机制完整评估（安全 + 性能）', ()
     test('3. 字段级加密性能', async () => {
       const user = {
         id: 1,
-        name: "张三",
-        email: "zhang@example.com",
-        phone: "+8613800000000",
-        password: "SuperSecret123!",
+        name: '张三',
+        email: 'zhang@example.com',
+        phone: '+8613800000000',
+        password: 'SuperSecret123!',
         bio: generateRandomString(2000),
-        sensitive: "身份证号: 110101199001011234"
+        sensitive: '身份证号: 110101199001011234',
       };
 
       // 注意：根据你的 encryptFields 实现调整字段配置格式
       const fieldConfig = { fields: ['email', 'phone', 'password', 'sensitive'] as const, masterKey };
 
       const encrypted = await encryptFields(user, { ...fieldConfig, fields: [...fieldConfig.fields] });
-      const encryptTime = await measure('字段级加密（4个敏感字段）', () => encryptFields(user, { ...fieldConfig, fields: [...fieldConfig.fields] }));
-      const decryptTime = await measure('字段级解密（4个敏感字段）', () => decryptFields(encrypted, { ...fieldConfig, fields: [...fieldConfig.fields] }));
+      const encryptTime = await measure('字段级加密（4个敏感字段）', () =>
+        encryptFields(user, { ...fieldConfig, fields: [...fieldConfig.fields] })
+      );
+      const decryptTime = await measure('字段级解密（4个敏感字段）', () =>
+        decryptFields(encrypted, { ...fieldConfig, fields: [...fieldConfig.fields] })
+      );
 
       results.performance.fieldLevel = { encrypt: encryptTime.toFixed(3), decrypt: decryptTime.toFixed(3) };
     });

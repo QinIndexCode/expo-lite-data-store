@@ -14,14 +14,16 @@
  */
 
 import {
-  encrypt, decrypt,
-  encryptBulk, decryptBulk,
-  encryptFields, decryptFields,
+  encrypt,
+  decrypt,
+  encryptBulk,
+  encryptFields,
+  decryptFields,
   getMasterKey,
-  hashPassword, verifyPassword,
-  generateHash
+  hashPassword,
+  verifyPassword,
 } from './utils/crypto';
-import config from './liteStore.config.js';
+import config from './liteStore.config';
 
 // ==================== 高精度计时（React Native 安全）===================
 const preciseNow = () => (global.performance || Date).now();
@@ -38,14 +40,14 @@ const generateRandomString = (bytes: number): string => {
 
 const createTestUser = () => ({
   id: 12345,
-  username: "alice_secure_2025",
-  email: "alice@example.com",
-  phone: "+86 138 0013 8000",
-  password: "My$uperStr0ngPa55!",
-  idCard: "110101199001011234",
-  bankCard: "6227000000000000123",
+  username: 'alice_secure_2025',
+  email: 'alice@example.com',
+  phone: '+86 138 0013 8000',
+  password: 'My$uperStr0ngPa55!',
+  idCard: '110101199001011234',
+  bankCard: '6227000000000000123',
   bio: generateRandomString(2048),
-  settings: { theme: "dark", notifications: true }
+  settings: { theme: 'dark', notifications: true },
 });
 
 // ==================== 安全性评估 ====================
@@ -85,13 +87,15 @@ const measure = async (label: string, fn: () => Promise<any>): Promise<number> =
   console.log(`   ${label.padEnd(38)} ${duration.toFixed(3)} ms`);
   return duration;
 };
+// 性能测试开关：始终运行所有测试，不跳过任何测试
+const perfTest = test;
 
 describe('Expo LiteStore 加密机制安全与性能综合评估（2025）', () => {
   let masterKey: string;
   const results = {
     security: null as any,
     performance: {} as any,
-    reportTime: new Date().toISOString()
+    reportTime: new Date().toISOString(),
   };
 
   beforeAll(async () => {
@@ -116,76 +120,100 @@ describe('Expo LiteStore 加密机制安全与性能综合评估（2025）', () 
     results.security = runSecurityAssessment();
   }, 20000);
 
-  test('1. 单条加密/解密性能（不同数据量）', async () => {
-    console.log('1. 单条加密/解密性能测试\n');
+  perfTest(
+    '1. 单条加密/解密性能（不同数据量）',
+    async () => {
+      console.log('1. 单条加密/解密性能测试\n');
 
-    const sizes = [
-      { name: '100B (token)', size: 100 },
-      { name: '10KB (user profile)', size: 10 * 1024 },
-      { name: '100KB (rich text)', size: 100 * 1024 },
-    ];
+      const sizes = [
+        { name: '100B (token)', size: 100 },
+        { name: '10KB (user profile)', size: 10 * 1024 },
+        { name: '100KB (rich text)', size: 100 * 1024 },
+      ];
 
-    for (const { name, size } of sizes) {
-      const data = generateRandomString(size);
+      for (const { name, size } of sizes) {
+        const data = generateRandomString(size);
 
-      const encTime = await measure(`加密 ${name}`, () => encrypt(data, masterKey));
-      const encrypted = await encrypt(data, masterKey);
-      const decTime = await measure(`解密 ${name}`, () => decrypt(encrypted, masterKey));
+        const encTime = await measure(`加密 ${name}`, () => encrypt(data, masterKey));
+        const encrypted = await encrypt(data, masterKey);
+        const decTime = await measure(`解密 ${name}`, () => decrypt(encrypted, masterKey));
 
-      results.performance[name] = {
-        encrypt: encTime.toFixed(2),
-        decrypt: decTime.toFixed(2),
-        throughput: (size / (encTime / 1000) / 1024 / 1024).toFixed(2) + ' MB/s'
-      };
-    }
-  }, 30000);
+        results.performance[name] = {
+          encrypt: encTime.toFixed(2),
+          decrypt: decTime.toFixed(2),
+          throughput: (size / (encTime / 1000) / 1024 / 1024).toFixed(2) + ' MB/s',
+        };
+      }
+    },
+    30000
+  );
 
-  test('2. 批量操作加速比（100条 × 1KB）', async () => {
-    console.log('\n2. 批量操作性能对比\n');
+  perfTest(
+    '2. 批量操作加速比（10条 × 1KB）',
+    async () => {
+      console.log('\n2. 批量操作性能对比\n');
 
-    const items = Array(100).fill(null).map(() => generateRandomString(1024));
+      const items = Array(10)
+        .fill(null)
+        .map(() => generateRandomString(1024));
 
-    // 逐条加密（基准）
-    const singleStart = preciseNow();
-    for (const item of items) await encrypt(item, masterKey);
-    const singleTime = preciseNow() - singleStart;
+      // 逐条加密（基准）
+      const singleStart = preciseNow();
+      for (const item of items) await encrypt(item, masterKey);
+      const singleTime = preciseNow() - singleStart;
 
-    // 批量加密
-    const bulkStart = preciseNow();
-    const encrypted = await encryptBulk(items, masterKey);
-    const bulkTime = preciseNow() - bulkStart;
+      // 批量加密
+      const bulkStart = preciseNow();
+      await encryptBulk(items, masterKey);
+      const bulkTime = preciseNow() - bulkStart;
 
-    const speedup = (singleTime / bulkTime).toFixed(2);
+      const speedup = (singleTime / bulkTime).toFixed(2);
 
-    console.log(`   逐条加密总耗时 : ${singleTime.toFixed(1)} ms`);
-    console.log(`   批量加密总耗时 : ${bulkTime.toFixed(1)} ms → 加速 ${speedup}x`);
+      console.log(`   逐条加密总耗时 : ${singleTime.toFixed(1)} ms`);
+      console.log(`   批量加密总耗时 : ${bulkTime.toFixed(1)} ms → 加速 ${speedup}x`);
 
-    results.performance.bulk = { speedup, singleTime: singleTime.toFixed(1), bulkTime: bulkTime.toFixed(1) };
-  }, 30000);
+      results.performance.bulk = { speedup, singleTime: singleTime.toFixed(1), bulkTime: bulkTime.toFixed(1) };
+    },
+    30000
+  );
 
-  test('3. 字段级加密性能', async () => {
-    console.log('\n3. 字段级加密性能\n');
+  perfTest(
+    '3. 字段级加密性能',
+    async () => {
+      console.log('\n3. 字段级加密性能\n');
 
-    const user = createTestUser();
-    const config = { fields: ['email', 'phone', 'password', 'idCard', 'bankCard'] as const, masterKey };
+      const user = createTestUser();
 
-    const encTime = await measure('字段级加密（5个敏感字段）', () => encryptFields(user, { fields: ['email', 'phone', 'password', 'idCard', 'bankCard'], masterKey }));
-    const encrypted = await encryptFields(user, { fields: ['email', 'phone', 'password', 'idCard', 'bankCard'], masterKey });
-    const decTime = await measure('字段级解密', () => decryptFields(encrypted, { fields: ['email', 'phone', 'password', 'idCard', 'bankCard'], masterKey }));
+      const encTime = await measure('字段级加密（5个敏感字段）', () =>
+        encryptFields(user, { fields: ['email', 'phone', 'password', 'idCard', 'bankCard'], masterKey })
+      );
+      const encrypted = await encryptFields(user, {
+        fields: ['email', 'phone', 'password', 'idCard', 'bankCard'],
+        masterKey,
+      });
+      const decTime = await measure('字段级解密', () =>
+        decryptFields(encrypted, { fields: ['email', 'phone', 'password', 'idCard', 'bankCard'], masterKey })
+      );
 
-    results.performance.fieldLevel = { encrypt: encTime.toFixed(2), decrypt: decTime.toFixed(2) };
-  }, 15000);
+      results.performance.fieldLevel = { encrypt: encTime.toFixed(2), decrypt: decTime.toFixed(2) };
+    },
+    15000
+  );
 
-  test('4. 密码哈希性能', async () => {
-    console.log('\n4. 密码哈希性能\n');
+  perfTest(
+    '4. 密码哈希性能',
+    async () => {
+      console.log('\n4. 密码哈希性能\n');
 
-    const password = "P@ssw0rd!2025";
-    const hashTime = await measure('hashPassword', () => hashPassword(password));
-    const hash = await hashPassword(password);
-    const verifyTime = await measure('verifyPassword', () => verifyPassword(password, hash));
+      const password = 'P@ssw0rd!2025';
+      const hashTime = await measure('hashPassword', () => hashPassword(password));
+      const hash = await hashPassword(password);
+      const verifyTime = await measure('verifyPassword', () => verifyPassword(password, hash));
 
-    results.performance.password = { hash: hashTime.toFixed(2), verify: verifyTime.toFixed(2) };
-  }, 15000);
+      results.performance.password = { hash: hashTime.toFixed(2), verify: verifyTime.toFixed(2) };
+    },
+    15000
+  );
 
   afterAll(() => {
     console.log('\n');

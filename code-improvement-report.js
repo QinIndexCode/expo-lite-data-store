@@ -14,7 +14,7 @@ const issues = {
   duplication: [],
   performance: [],
   maintainability: [],
-  security: []
+  security: [],
 };
 
 function addIssue(category, severity, title, description, impact, recommendation, effort = 'medium') {
@@ -24,98 +24,154 @@ function addIssue(category, severity, title, description, impact, recommendation
     description,
     impact,
     recommendation,
-    effort
+    effort,
   });
 }
 
 // 1. 复杂度问题
-addIssue('complexity', 'high', 'ApiWrapper类过于庞大',
+addIssue(
+  'complexity',
+  'high',
+  'ApiWrapper类过于庞大',
   'ApiWrapper.ts文件有34KB，包含47个方法，承担了太多职责',
   '违反单一职责原则，难以维护和测试',
   '拆分为多个专门的类：RateLimitWrapper、ValidationWrapper、ApiRouter等',
-  'high');
+  'high'
+);
 
-addIssue('complexity', 'high', 'CacheManager类功能过度复杂',
+addIssue(
+  'complexity',
+  'high',
+  'CacheManager类功能过度复杂',
   'CacheManager.ts有25KB，包含102个方法，实现LRU、LFU等多种缓存策略',
   '类承担过多职责，方法过多导致维护困难',
   '拆分为：BaseCache、LRUCache、LFUCache、CacheMonitor等独立类',
-  'high');
+  'high'
+);
 
-addIssue('complexity', 'medium', '单个文件过长',
+addIssue(
+  'complexity',
+  'medium',
+  '单个文件过长',
   '多个文件超过1000行：CacheManager.ts(927行)、ApiWrapper.ts(905行)',
   '降低可读性和可维护性',
   '按照功能拆分文件，每个文件控制在500行以内',
-  'medium');
+  'medium'
+);
 
 // 2. 代码重复问题
-addIssue('duplication', 'medium', '限流检查代码重复',
+addIssue(
+  'duplication',
+  'medium',
+  '限流检查代码重复',
   'ApiWrapper中11处相同的rateLimitStatus.allowed检查',
   '代码重复，增加维护成本',
   '提取统一的限流检查方法或装饰器',
-  'low');
+  'low'
+);
 
-addIssue('duplication', 'medium', '错误处理模式重复',
+addIssue(
+  'duplication',
+  'medium',
+  '错误处理模式重复',
   '多个文件中有相似的try-catch错误处理逻辑',
   '不一致的错误处理，代码重复',
   '创建统一的错误处理中间件或工具函数',
-  'medium');
+  'medium'
+);
 
-addIssue('duplication', 'low', '验证逻辑重复',
+addIssue(
+  'duplication',
+  'low',
+  '验证逻辑重复',
   'DataWriter和ApiWrapper都有validateWriteData方法',
   '功能重复，增加维护负担',
   '提取统一的ValidationUtils类',
-  'low');
+  'low'
+);
 
 // 3. 性能问题
-addIssue('performance', 'medium', '魔法数字硬编码',
+addIssue(
+  'performance',
+  'medium',
+  '魔法数字硬编码',
   '多处使用硬编码数值，如1000、10000、3600000等',
   '降低可维护性和可配置性',
   '提取为命名常量或配置项',
-  'low');
+  'low'
+);
 
-addIssue('performance', 'low', '不必要的对象创建',
+addIssue(
+  'performance',
+  'low',
+  '不必要的对象创建',
   '某些循环中频繁创建对象或数组',
   '增加GC压力，影响性能',
   '重用对象或使用对象池模式',
-  'medium');
+  'medium'
+);
 
-addIssue('performance', 'low', '同步操作阻塞',
+addIssue(
+  'performance',
+  'low',
+  '同步操作阻塞',
   '某些I/O操作可能阻塞主线程',
   '影响响应性能',
   '评估是否需要移至Worker线程或优化同步操作',
-  'high');
+  'high'
+);
 
 // 4. 可维护性问题
-addIssue('maintainability', 'medium', '接口定义不完整',
+addIssue(
+  'maintainability',
+  'medium',
+  '接口定义不完整',
   '某些类缺少完整的接口定义，依赖具体实现',
   '降低可扩展性和可测试性',
   '为所有主要类定义接口',
-  'medium');
+  'medium'
+);
 
-addIssue('maintainability', 'low', '注释不够详细',
+addIssue(
+  'maintainability',
+  'low',
+  '注释不够详细',
   '某些复杂方法缺少详细的JSDoc注释',
   '降低代码可读性',
   '为所有公共方法添加完整的JSDoc注释',
-  'low');
+  'low'
+);
 
-addIssue('maintainability', 'medium', '配置管理分散',
+addIssue(
+  'maintainability',
+  'medium',
+  '配置管理分散',
   '配置项分散在多个文件中',
   '难以管理和维护配置',
   '创建统一的配置管理系统',
-  'medium');
+  'medium'
+);
 
 // 5. 安全问题
-addIssue('security', 'low', '输入验证不够严格',
+addIssue(
+  'security',
+  'low',
+  '输入验证不够严格',
   '某些输入验证逻辑可以被绕过',
   '潜在的安全风险',
   '加强输入验证，添加白名单机制',
-  'low');
+  'low'
+);
 
-addIssue('security', 'low', '错误信息泄露',
+addIssue(
+  'security',
+  'low',
+  '错误信息泄露',
   '某些错误信息可能暴露内部实现细节',
   '信息泄露风险',
   '规范化错误信息，避免暴露敏感信息',
-  'low');
+  'low'
+);
 
 console.log('📊 发现的问题统计:\n');
 
@@ -123,10 +179,12 @@ const totalIssues = Object.values(issues).flat().length;
 const severityCount = { high: 0, medium: 0, low: 0 };
 const effortCount = { high: 0, medium: 0, low: 0 };
 
-Object.values(issues).flat().forEach(issue => {
-  severityCount[issue.severity]++;
-  effortCount[issue.effort]++;
-});
+Object.values(issues)
+  .flat()
+  .forEach(issue => {
+    severityCount[issue.severity]++;
+    effortCount[issue.effort]++;
+  });
 
 console.log(`总问题数: ${totalIssues}`);
 console.log(`严重程度: 高危(${severityCount.high}) 中危(${severityCount.medium}) 低危(${severityCount.low})`);
@@ -153,7 +211,7 @@ console.log('🎯 优先改进计划:\n');
 const priorityOrder = [
   { phase: 'Phase 1 (高优先级)', issues: getIssuesByPriority('high') },
   { phase: 'Phase 2 (中优先级)', issues: getIssuesByPriority('medium') },
-  { phase: 'Phase 3 (低优先级)', issues: getIssuesByPriority('low') }
+  { phase: 'Phase 3 (低优先级)', issues: getIssuesByPriority('low') },
 ];
 
 priorityOrder.forEach(phase => {
@@ -212,7 +270,7 @@ function getCategoryIcon(category) {
     duplication: '📋',
     performance: '⚡',
     maintainability: '🛠️',
-    security: '🔒'
+    security: '🔒',
   };
   return icons[category] || '❓';
 }
@@ -223,7 +281,7 @@ function getCategoryName(category) {
     duplication: '重复代码',
     performance: '性能问题',
     maintainability: '可维护性',
-    security: '安全问题'
+    security: '安全问题',
   };
   return names[category] || category;
 }
@@ -232,11 +290,13 @@ function getEffortText(effort) {
   const texts = {
     high: '高难度',
     medium: '中难度',
-    low: '低难度'
+    low: '低难度',
   };
   return texts[effort] || effort;
 }
 
 function getIssuesByPriority(severity) {
-  return Object.values(issues).flat().filter(issue => issue.severity === severity);
+  return Object.values(issues)
+    .flat()
+    .filter(issue => issue.severity === severity);
 }

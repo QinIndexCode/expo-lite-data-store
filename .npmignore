@@ -12,12 +12,20 @@ eslint.config.js
 expo-env.d.ts
 .npmignore
 
+# Expo相关文件
+.expo/
+app.json
+
 # 工具和文档
 *.tsbuildinfo
 *.md
 !README.md
+!README_EN.md
+code-improvement-report.js
 
 # 其他
 .gitignore
 test*.*
 *.log
+.vscode/
+.trae

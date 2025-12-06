@@ -87,7 +87,7 @@ const readme = fs.readFileSync('README.md', 'utf8');
 test('README包含双版本说明', readme.includes('双版本'));
 test('README包含排序功能说明', readme.includes('sortBy'));
 test('README包含算法选择说明', readme.includes('sortAlgorithm'));
-test('README包含TypeScript使用示例', readme.includes("import {") && readme.includes("from 'expo-lite-db-store'"));
+test('README包含TypeScript使用示例', readme.includes('import {') && readme.includes("from 'expo-lite-db-store'"));
 test('README包含JavaScript使用示例', readme.includes("require('expo-lite-db-store')"));
 
 console.log('\n6. 验证.npmignore配置...\n');

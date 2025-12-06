@@ -8,15 +8,15 @@ expo-liteDBStore 是一个超轻量、零配置、纯 TypeScript 编写的 Expo 
 
 ### 1.2 核心优势
 
-| 特性                  | 说明                                      |
-|-----------------------|-------------------------------------------|
-| 零依赖、零配置        | 仅依赖 React Native FS，不需要 Metro 配置 |
-| 支持加密              | 可选 AES-GCM 加密，密钥由你完全掌控       |
-| 分块存储              | 单文件最大 5MB 自动分块，完美规避 RN FS 限制 |
-| 批量操作 & 事务支持   | 完整的事务支持，保证数据一致性            |
-| TypeScript 完美支持   | 完整类型定义，开箱即用                    |
-| 支持复杂查询          | 支持 where、skip、limit 等查询条件        |
-| 完全离线可用          | 无需网络，数据 100% 存储在设备本地        |
+| 特性                | 说明                                         |
+| ------------------- | -------------------------------------------- |
+| 零依赖、零配置      | 仅依赖 React Native FS，不需要 Metro 配置    |
+| 支持加密            | 可选 AES-GCM 加密，密钥由你完全掌控          |
+| 分块存储            | 单文件最大 5MB 自动分块，完美规避 RN FS 限制 |
+| 批量操作 & 事务支持 | 完整的事务支持，保证数据一致性               |
+| TypeScript 完美支持 | 完整类型定义，开箱即用                       |
+| 支持复杂查询        | 支持 where、skip、limit 等查询条件           |
+| 完全离线可用        | 无需网络，数据 100% 存储在设备本地           |
 
 ### 1.3 适用场景
 
@@ -40,14 +40,7 @@ pnpm add expo-lite-db-store
 ### 2.2 基本使用
 
 ```ts
-import { 
-  createTable, 
-  insert, 
-  findOne, 
-  update, 
-  remove, 
-  findMany 
-} from 'expo-lite-db-store';
+import { createTable, insert, findOne, update, remove, findMany } from 'expo-lite-db-store';
 
 // 创建表
 await createTable('users');
@@ -56,7 +49,7 @@ await createTable('users');
 await insert('users', [
   { id: 1, name: '张三', age: 25, active: true },
   { id: 2, name: '李四', age: 30, active: false },
-  { id: 3, name: '王五', age: 35, active: true }
+  { id: 3, name: '王五', age: 35, active: true },
 ]);
 
 // 查询单条数据
@@ -90,7 +83,7 @@ await createTable('users');
 await createTable('users', {
   columns: { id: 'string', name: 'string', age: 'number' },
   intermediates: true, // 自动创建中间目录
-  chunkSize: 1024 * 1024 // 1MB 分片大小
+  chunkSize: 1024 * 1024, // 1MB 分片大小
 });
 ```
 
@@ -125,13 +118,13 @@ await insert('users', { id: 1, name: '张三', age: 25 });
 // 插入多条数据
 await insert('users', [
   { id: 2, name: '李四', age: 30 },
-  { id: 3, name: '王五', age: 35 }
+  { id: 3, name: '王五', age: 35 },
 ]);
 
 // 带写入选项插入
 await insert('users', [{ id: 4, name: '赵六', age: 40 }], {
   mode: 'append', // 追加模式
-  forceChunked: true // 强制分片写入
+  forceChunked: true, // 强制分片写入
 });
 ```
 
@@ -147,10 +140,7 @@ const user = await findOne('users', { id: 1 });
 const activeUsers = await findMany('users', { active: true });
 
 // 复杂查询
-const filteredUsers = await findMany('users', 
-  { age: { $gt: 30 }, active: true },
-  { skip: 1, limit: 10 }
-);
+const filteredUsers = await findMany('users', { age: { $gt: 30 }, active: true }, { skip: 1, limit: 10 });
 
 // 读取所有数据
 const allUsers = await read('users');
@@ -159,7 +149,7 @@ const allUsers = await read('users');
 const paginatedUsers = await read('users', {
   skip: 0,
   limit: 20,
-  filter: { active: true }
+  filter: { active: true },
 });
 ```
 
@@ -169,7 +159,8 @@ const paginatedUsers = await read('users', {
 import { update } from 'expo-lite-db-store';
 
 // 更新匹配条件的数据
-const updatedCount = await update('users', 
+const updatedCount = await update(
+  'users',
   { age: 26, active: true }, // 更新内容
   { id: 1 } // 匹配条件
 );
@@ -195,11 +186,11 @@ import { beginTransaction, commit, rollback, insert, update } from 'expo-lite-db
 try {
   // 开始事务
   await beginTransaction();
-  
+
   // 执行多个操作
   await insert('orders', { id: 1, amount: 100 });
   await update('users', { balance: 900 }, { id: 1 });
-  
+
   // 提交事务
   await commit();
 } catch (error) {
@@ -219,7 +210,7 @@ const result = await bulkWrite('users', [
   { type: 'insert', data: { id: 1, name: '张三' } },
   { type: 'insert', data: { id: 2, name: '李四' } },
   { type: 'update', data: { age: 26 }, where: { id: 1 } },
-  { type: 'delete', where: { id: 3 } }
+  { type: 'delete', where: { id: 3 } },
 ]);
 ```
 
@@ -230,7 +221,7 @@ import { createTable, migrateToChunked } from 'expo-lite-db-store';
 
 // 创建表时指定分块大小
 await createTable('largeData', {
-  chunkSize: 5 * 1024 * 1024 // 5MB 分片大小
+  chunkSize: 5 * 1024 * 1024, // 5MB 分片大小
 });
 
 // 将现有表迁移到分块模式
@@ -246,6 +237,7 @@ await migrateToChunked('existingTable');
 创建一个新表。
 
 **参数：**
+
 - `tableName`: 表名
 - `options`: 可选配置
   - `columns`: 列定义
@@ -253,6 +245,7 @@ await migrateToChunked('existingTable');
   - `chunkSize`: 分片大小（字节）
 
 **返回值：**
+
 - `Promise<void>`
 
 #### `hasTable(tableName: string): Promise<boolean>`
@@ -260,9 +253,11 @@ await migrateToChunked('existingTable');
 检查指定表是否存在。
 
 **参数：**
+
 - `tableName`: 表名
 
 **返回值：**
+
 - `Promise<boolean>`: 表是否存在
 
 #### `listTables(): Promise<string[]>`
@@ -270,6 +265,7 @@ await migrateToChunked('existingTable');
 列出所有表名。
 
 **返回值：**
+
 - `Promise<string[]>`: 表名数组
 
 #### `deleteTable(tableName: string): Promise<void>`
@@ -277,9 +273,11 @@ await migrateToChunked('existingTable');
 删除指定表。
 
 **参数：**
+
 - `tableName`: 表名
 
 **返回值：**
+
 - `Promise<void>`
 
 #### `clearTable(tableName: string): Promise<void>`
@@ -287,9 +285,11 @@ await migrateToChunked('existingTable');
 清空指定表的数据。
 
 **参数：**
+
 - `tableName`: 表名
 
 **返回值：**
+
 - `Promise<void>`
 
 ### 4.2 数据操作 API
@@ -299,6 +299,7 @@ await migrateToChunked('existingTable');
 插入数据到指定表。
 
 **参数：**
+
 - `tableName`: 表名
 - `data`: 要插入的数据（单条或数组）
 - `options`: 可选配置
@@ -306,6 +307,7 @@ await migrateToChunked('existingTable');
   - `forceChunked`: 是否强制分片写入
 
 **返回值：**
+
 - `Promise<WriteResult>`: 写入结果
 
 #### `read(tableName: string, options?: ReadOptions): Promise<any[]>`
@@ -313,6 +315,7 @@ await migrateToChunked('existingTable');
 读取指定表的数据。
 
 **参数：**
+
 - `tableName`: 表名
 - `options`: 可选配置
   - `skip`: 跳过的记录数
@@ -320,6 +323,7 @@ await migrateToChunked('existingTable');
   - `filter`: 过滤条件
 
 **返回值：**
+
 - `Promise<any[]>`: 读取的数据数组
 
 #### `findOne(tableName: string, filter: FilterCondition): Promise<any | null>`
@@ -327,10 +331,12 @@ await migrateToChunked('existingTable');
 查询单条匹配数据。
 
 **参数：**
+
 - `tableName`: 表名
 - `filter`: 过滤条件
 
 **返回值：**
+
 - `Promise<any | null>`: 匹配的数据或 null
 
 #### `findMany(tableName: string, filter: FilterCondition, options?: { skip?: number; limit?: number }): Promise<any[]>`
@@ -338,6 +344,7 @@ await migrateToChunked('existingTable');
 查询多条匹配数据。
 
 **参数：**
+
 - `tableName`: 表名
 - `filter`: 过滤条件
 - `options`: 可选配置
@@ -345,6 +352,7 @@ await migrateToChunked('existingTable');
   - `limit`: 读取的记录数
 
 **返回值：**
+
 - `Promise<any[]>`: 匹配的数据数组
 
 #### `update(tableName: string, data: any, where: FilterCondition): Promise<number>`
@@ -352,11 +360,13 @@ await migrateToChunked('existingTable');
 更新匹配条件的数据。
 
 **参数：**
+
 - `tableName`: 表名
 - `data`: 要更新的数据
 - `where`: 匹配条件
 
 **返回值：**
+
 - `Promise<number>`: 更新的记录数
 
 #### `remove(tableName: string, where: FilterCondition): Promise<number>`
@@ -364,10 +374,12 @@ await migrateToChunked('existingTable');
 删除匹配条件的数据。
 
 **参数：**
+
 - `tableName`: 表名
 - `where`: 匹配条件
 
 **返回值：**
+
 - `Promise<number>`: 删除的记录数
 
 #### `bulkWrite(tableName: string, operations: BulkWriteOperation[]): Promise<WriteResult>`
@@ -375,6 +387,7 @@ await migrateToChunked('existingTable');
 执行批量写操作。
 
 **参数：**
+
 - `tableName`: 表名
 - `operations`: 批量操作数组
   - `type`: 操作类型（`insert`、`update` 或 `delete`）
@@ -382,6 +395,7 @@ await migrateToChunked('existingTable');
   - `where`: 匹配条件（`update` 和 `delete` 操作需要）
 
 **返回值：**
+
 - `Promise<WriteResult>`: 写入结果
 
 ### 4.3 事务 API
@@ -391,6 +405,7 @@ await migrateToChunked('existingTable');
 开始一个事务。
 
 **返回值：**
+
 - `Promise<void>`
 
 #### `commit(): Promise<void>`
@@ -398,6 +413,7 @@ await migrateToChunked('existingTable');
 提交当前事务。
 
 **返回值：**
+
 - `Promise<void>`
 
 #### `rollback(): Promise<void>`
@@ -405,6 +421,7 @@ await migrateToChunked('existingTable');
 回滚当前事务。
 
 **返回值：**
+
 - `Promise<void>`
 
 ### 4.4 工具 API
@@ -414,9 +431,11 @@ await migrateToChunked('existingTable');
 将指定表迁移到分块存储模式。
 
 **参数：**
+
 - `tableName`: 表名
 
 **返回值：**
+
 - `Promise<void>`
 
 ## 5. 高级用法
@@ -427,24 +446,18 @@ await migrateToChunked('existingTable');
 import { findMany } from 'expo-lite-db-store';
 
 // 使用函数作为过滤条件
-const users = await findMany('users', (user) => {
+const users = await findMany('users', user => {
   return user.age > 30 && user.active;
 });
 
 // 使用 $or 操作符
 const users = await findMany('users', {
-  $or: [
-    { age: { $gt: 30 } },
-    { active: true }
-  ]
+  $or: [{ age: { $gt: 30 } }, { active: true }],
 });
 
 // 使用 $and 操作符
 const users = await findMany('users', {
-  $and: [
-    { age: { $gt: 30 } },
-    { active: true }
-  ]
+  $and: [{ age: { $gt: 30 } }, { active: true }],
 });
 ```
 
@@ -455,11 +468,11 @@ import { beginTransaction, commit, rollback, insert, update } from 'expo-lite-db
 
 try {
   await beginTransaction();
-  
+
   // 执行多个操作
   await insert('orders', { id: 1, userId: 1, amount: 100 });
   await update('users', { balance: 900 }, { id: 1 });
-  
+
   // 提交事务
   await commit();
   console.log('Transaction committed successfully');
@@ -493,7 +506,7 @@ module.exports = {
   defaultChunkSize: 5 * 1024 * 1024, // 5MB
   encryptionKey: 'your-default-key',
   cacheSize: 100,
-  timeout: 30000 // 30秒超时
+  timeout: 30000, // 30秒超时
 };
 ```
 
@@ -505,7 +518,7 @@ import { db } from 'expo-lite-db-store';
 // 配置数据库实例
 db.configure({
   chunkSize: 2 * 1024 * 1024, // 2MB
-  encryptionKey: 'runtime-key'
+  encryptionKey: 'runtime-key',
 });
 ```
 
@@ -514,6 +527,7 @@ db.configure({
 ### 7.1 如何处理大数据量？
 
 对于大数据量，建议：
+
 1. 使用分块存储模式（设置合理的 chunkSize）
 2. 使用分页查询（skip + limit）
 3. 避免一次性读取所有数据
@@ -536,6 +550,7 @@ db.configure({
 ### 7.4 支持哪些数据类型？
 
 支持所有 JSON 数据类型：
+
 - 字符串
 - 数字
 - 布尔值
@@ -578,12 +593,12 @@ db.configure({
 
 ### 9.1 常见错误
 
-| 错误类型 | 可能原因 | 解决方案 |
-|----------|----------|----------|
-| 文件不存在 | 表未创建或已删除 | 检查表名是否正确，确保表已创建 |
-| 权限错误 | 应用没有文件系统权限 | 检查应用权限设置 |
-| 数据损坏 | 文件被意外修改 | 恢复备份或重新创建表 |
-| 超时错误 | 操作耗时过长 | 优化查询或增加超时时间 |
+| 错误类型   | 可能原因             | 解决方案                       |
+| ---------- | -------------------- | ------------------------------ |
+| 文件不存在 | 表未创建或已删除     | 检查表名是否正确，确保表已创建 |
+| 权限错误   | 应用没有文件系统权限 | 检查应用权限设置               |
+| 数据损坏   | 文件被意外修改       | 恢复备份或重新创建表           |
+| 超时错误   | 操作耗时过长         | 优化查询或增加超时时间         |
 
 ### 9.2 调试技巧
 

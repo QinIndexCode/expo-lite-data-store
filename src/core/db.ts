@@ -1,5 +1,5 @@
-import storage from "./adapter/FileSystemStorageAdapter";
-import { EncryptedStorageAdapter } from "./EncryptedStorageAdapter";
+import storage from './adapter/FileSystemStorageAdapter';
+import { EncryptedStorageAdapter } from './EncryptedStorageAdapter';
 
 /**
  * 是否启用加密存储
@@ -11,9 +11,7 @@ const USE_ENCRYPTION = false; // 上线改 true，调试改 false
  * 默认数据库实例
  * 根据 USE_ENCRYPTION 配置决定使用加密存储还是普通存储
  */
-export const db = USE_ENCRYPTION
-  ? new EncryptedStorageAdapter()
-  : storage;
+export const db = USE_ENCRYPTION ? new EncryptedStorageAdapter() : storage;
 
 /**
  * 明文存储实例（用于调试）

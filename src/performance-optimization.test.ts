@@ -46,7 +46,7 @@ describe('Performance Optimization Tests', () => {
       name: `user${i}`,
       email: `user${i}@example.com`,
       type: i % 2 === 0 ? 'admin' : 'user',
-      status: 'active'
+      status: 'active',
     }));
 
     await adapter.write(tableName, testData);
@@ -73,13 +73,11 @@ describe('Performance Optimization Tests', () => {
     const batchData = Array.from({ length: 50 }, (_, i) => ({
       id: 200 + i,
       name: `batch_user${i}`,
-      type: 'batch_test'
+      type: 'batch_test',
     }));
 
     const startBatch = Date.now();
-    const result = await adapter.bulkWrite(tableName, [
-      { type: 'insert', data: batchData }
-    ]);
+    const result = await adapter.bulkWrite(tableName, [{ type: 'insert', data: batchData }]);
     const batchTime = Date.now() - startBatch;
 
     expect(result.written).toBe(50);
@@ -123,7 +121,7 @@ describe('Performance Optimization Tests', () => {
     console.log('配置验证通过:', {
       queryOptimization: config.performance.enableQueryOptimization,
       cacheTimeout: config.encryption.cacheTimeout,
-      maxCacheSize: config.encryption.maxCacheSize
+      maxCacheSize: config.encryption.maxCacheSize,
     });
   });
 });

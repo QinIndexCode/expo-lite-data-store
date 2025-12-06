@@ -4,24 +4,37 @@
     "strict": true,
     "declaration": true,
     "declarationDir": "dist/types",
+    "outDir": "dist",
+    "rootDir": "./src",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "jsx": "react-native",
+    "baseUrl": "./src",
     "paths": {
-      "@/*": [
-        "./*"
-      ]
-    }
+      "@/*": ["./*"]
+    },
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": true,
+    "noImplicitThis": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": false,
+    "noPropertyAccessFromIndexSignature": false,
+    "allowSyntheticDefaultImports": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "incremental": true,
+    "tsBuildInfoFile": ".tsbuildinfo"
   },
-  "include": [
-    "**/*.ts",
-    "**/*.tsx",
-    ".expo/types/**/*.ts",
-    "expo-env.d.ts"
-  ],
-  "exclude": [
-    "**/__tests__/**",
-    "**/*.test.ts",
-    "**/*.test.tsx",
-    "dist/**",
-    "coverage/**",
-    "__mocks__/**"
-  ]
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],
+  "exclude": ["**/__tests__/**", "**/*.test.ts", "**/*.test.tsx", "dist/**", "coverage/**", "__mocks__/**"]
 }

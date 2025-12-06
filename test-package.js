@@ -33,11 +33,7 @@ checkDir('dist/js/utils');
 
 // 检查主要文件
 console.log('\n📄 检查主要文件...');
-const mainFiles = [
-  'dist/js/index.js',
-  'src/index.ts',
-  'package.json'
-];
+const mainFiles = ['dist/js/index.js', 'src/index.ts', 'package.json'];
 
 mainFiles.forEach(file => {
   if (fs.existsSync(file)) {
@@ -53,7 +49,7 @@ const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 
 const basicChecks = [
   { key: 'main', expected: 'dist/js/index.js' },
-  { key: 'types', expected: 'src/index.ts' }
+  { key: 'types', expected: 'src/index.ts' },
 ];
 
 basicChecks.forEach(check => {

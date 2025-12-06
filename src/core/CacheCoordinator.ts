@@ -9,7 +9,7 @@ export class CacheCoordinator {
    * 缓存管理器实例
    */
   private cacheManager: CacheManager;
-  
+
   /**
    * 构造函数
    * @param cacheManager 缓存管理器实例
@@ -17,7 +17,7 @@ export class CacheCoordinator {
   constructor(cacheManager: CacheManager) {
     this.cacheManager = cacheManager;
   }
-  
+
   /**
    * 生成缓存键
    * @param tableName 表名
@@ -27,7 +27,7 @@ export class CacheCoordinator {
   generateCacheKey(tableName: string, options?: any): string {
     return `${tableName}_${JSON.stringify(options)}`;
   }
-  
+
   /**
    * 从缓存中获取数据
    * @param key 缓存键
@@ -36,7 +36,7 @@ export class CacheCoordinator {
   getFromCache(key: string): any {
     return this.cacheManager.get(key);
   }
-  
+
   /**
    * 将数据存入缓存
    * @param key 缓存键
@@ -45,7 +45,7 @@ export class CacheCoordinator {
   setToCache(key: string, data: any): void {
     this.cacheManager.set(key, data);
   }
-  
+
   /**
    * 清除与特定表相关的所有缓存条目
    * @param tableName 表名
@@ -55,17 +55,17 @@ export class CacheCoordinator {
     // 我们需要使用一种策略来清除相关缓存
     // 这里我们使用一个特殊的缓存键来记录所有与该表相关的缓存键
     const tableCacheKeysKey = `${tableName}_cache_keys`;
-    const tableCacheKeys = this.cacheManager.get(tableCacheKeysKey) as string[] || [];
-    
+    const tableCacheKeys = (this.cacheManager.get(tableCacheKeysKey) as string[]) || [];
+
     // 删除所有相关缓存条目
     for (const key of tableCacheKeys) {
       this.cacheManager.delete(key);
     }
-    
+
     // 清除缓存键列表
     this.cacheManager.delete(tableCacheKeysKey);
   }
-  
+
   /**
    * 记录表的缓存键
    * @param tableName 表名
@@ -73,13 +73,13 @@ export class CacheCoordinator {
    */
   recordTableCacheKey(tableName: string, cacheKey: string): void {
     const tableCacheKeysKey = `${tableName}_cache_keys`;
-    const tableCacheKeys = this.cacheManager.get(tableCacheKeysKey) as string[] || [];
+    const tableCacheKeys = (this.cacheManager.get(tableCacheKeysKey) as string[]) || [];
     if (!tableCacheKeys.includes(cacheKey)) {
       tableCacheKeys.push(cacheKey);
       this.cacheManager.set(tableCacheKeysKey, tableCacheKeys);
     }
   }
-  
+
   /**
    * 获取缓存管理器实例
    * @returns 缓存管理器实例

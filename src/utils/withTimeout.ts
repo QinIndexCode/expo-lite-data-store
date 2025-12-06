@@ -2,8 +2,8 @@
  * 超时处理工具
  * 为Promise添加超时机制，防止操作无限期等待
  */
-import { StorageError } from "../types/storageErrorInfc";
-import config from "../liteStore.config";
+import { StorageError } from '../types/storageErrorInfc';
+import config from '../liteStore.config';
 
 /**
  * 为Promise添加超时机制
@@ -22,34 +22,32 @@ import config from "../liteStore.config";
  * );
  */
 export default function withTimeout<T>(
-    promise: Promise<T>,
-    ms = config.timeout,
-    operation = "chunked file operation"
+  promise: Promise<T>,
+  ms = config.timeout,
+  operation = 'chunked file operation'
 ): Promise<T> {
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    return Promise.race([
-        promise,
-        new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(
-                () =>
-                    reject(new StorageError(`${operation} timeout`, "TIMEOUT")),
-                ms
-            );
-        }),
-    ]).then(result => {
-        // 清理定时器
-        if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
-        }
-        return result;
-    }).catch(error => {
-        // 清理定时器
-        if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
-        }
-        throw error;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new StorageError(`${operation} timeout`, 'TIMEOUT')), ms);
+    }),
+  ])
+    .then(result => {
+      // 清理定时器
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      return result;
+    })
+    .catch(error => {
+      // 清理定时器
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      throw error;
     });
 }
