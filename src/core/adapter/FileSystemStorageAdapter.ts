@@ -332,7 +332,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
       // 优化：使用Map提高查找性能，减少O(n)查找操作
       const dataMap = new Map<string | number, Record<string, any>>();
-      
+
       // 保存没有id的数据（包括原有数据和新插入的数据）
       let itemsWithoutId = finalData.filter((item: Record<string, any>) => item['id'] === undefined);
 

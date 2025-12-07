@@ -4,17 +4,17 @@
 
 ### Query Operators
 
-| Operator | Description    | Example                                |
-| -------- | -------------- | -------------------------------------- |
-| `$eq`    | Equal to       | `{ age: { $eq: 25 } }`                 |
-| `$ne`    | Not equal to   | `{ status: { $ne: 'inactive' } }`      |
-| `$gt`    | Greater than   | `{ age: { $gt: 18 } }`                 |
-| `$gte`   | Greater or equal| `{ score: { $gte: 60 } }`              |
-| `$lt`    | Less than      | `{ price: { $lt: 100 } }`              |
-| `$lte`   | Less or equal  | `{ quantity: { $lte: 10 } }`           |
-| `$in`    | In array       | `{ category: { $in: ['A', 'B'] } }`    |
-| `$nin`   | Not in array   | `{ status: { $nin: ['deleted'] } }`    |
-| `$like`  | Fuzzy match    | `{ name: { $like: 'Zhang%' } }`        |
+| Operator | Description      | Example                             |
+| -------- | ---------------- | ----------------------------------- |
+| `$eq`    | Equal to         | `{ age: { $eq: 25 } }`              |
+| `$ne`    | Not equal to     | `{ status: { $ne: 'inactive' } }`   |
+| `$gt`    | Greater than     | `{ age: { $gt: 18 } }`              |
+| `$gte`   | Greater or equal | `{ score: { $gte: 60 } }`           |
+| `$lt`    | Less than        | `{ price: { $lt: 100 } }`           |
+| `$lte`   | Less or equal    | `{ quantity: { $lte: 10 } }`        |
+| `$in`    | In array         | `{ category: { $in: ['A', 'B'] } }` |
+| `$nin`   | Not in array     | `{ status: { $nin: ['deleted'] } }` |
+| `$like`  | Fuzzy match      | `{ name: { $like: 'Zhang%' } }`     |
 
 ### Complex Queries
 
@@ -73,13 +73,13 @@ const usersSorted = await findMany(
 
 The system provides 5 professional sorting algorithms, automatically selecting the optimal one:
 
-| Algorithm  | Use Case                 | Performance Characteristics |
-| ---------- | ------------------------ | --------------------------- |
-| `default`  | Small datasets (< 100 items) | Balanced performance and features |
-| `fast`     | Large datasets, simple comparison | Fastest, but simplified functionality |
-| `merge`    | Large datasets, stable sorting | Stable, suitable for large data |
-| `counting` | Limited range values (e.g., status, level) | O(n+k), space for time |
-| `slow`     | Requires full localeCompare | Supports Chinese, special characters |
+| Algorithm  | Use Case                                   | Performance Characteristics           |
+| ---------- | ------------------------------------------ | ------------------------------------- |
+| `default`  | Small datasets (< 100 items)               | Balanced performance and features     |
+| `fast`     | Large datasets, simple comparison          | Fastest, but simplified functionality |
+| `merge`    | Large datasets, stable sorting             | Stable, suitable for large data       |
+| `counting` | Limited range values (e.g., status, level) | O(n+k), space for time                |
+| `slow`     | Requires full localeCompare                | Supports Chinese, special characters  |
 
 ```typescript
 // Auto-select algorithm (recommended)
@@ -204,21 +204,21 @@ setAutoSyncConfig({
 
 ### Sync Configuration Parameters
 
-| Parameter   | Type    | Default | Description               |
-| ----------- | ------- | ------- | ------------------------- |
-| `enabled`   | boolean | `true`  | Whether to enable auto-sync |
-| `interval`  | number  | `5000`  | Sync interval (milliseconds) |
+| Parameter   | Type    | Default | Description                     |
+| ----------- | ------- | ------- | ------------------------------- |
+| `enabled`   | boolean | `true`  | Whether to enable auto-sync     |
+| `interval`  | number  | `5000`  | Sync interval (milliseconds)    |
 | `minItems`  | number  | `1`     | Minimum number of items to sync |
-| `batchSize` | number  | `100`   | Batch size limit          |
+| `batchSize` | number  | `100`   | Batch size limit                |
 
 ### Sync Statistics
 
-| Field Name          | Type   | Description                 |
-| ------------------- | ------ | --------------------------- |
-| `syncCount`         | number | Total sync count            |
-| `totalItemsSynced`  | number | Total items synced          |
-| `lastSyncTime`      | number | Last sync time              |
-| `avgSyncTime`       | number | Average sync time (milliseconds) |
+| Field Name         | Type   | Description                      |
+| ------------------ | ------ | -------------------------------- |
+| `syncCount`        | number | Total sync count                 |
+| `totalItemsSynced` | number | Total items synced               |
+| `lastSyncTime`     | number | Last sync time                   |
+| `avgSyncTime`      | number | Average sync time (milliseconds) |
 
 ## 🎯 Performance Optimization
 
@@ -283,7 +283,7 @@ while (true) {
 module.exports = {
   encryption: {
     cacheTimeout: 30000, // Cache timeout (milliseconds)
-    maxCacheSize: 100,    // Maximum number of cached tables
+    maxCacheSize: 100, // Maximum number of cached tables
   },
 };
 
@@ -324,24 +324,31 @@ module.exports = {
 ### Common Issues
 
 #### Q: Incorrect sorting order?
+
 A: Check if the sorting field has null/undefined values, which are sorted at the end.
 
 #### Q: Slow query performance?
+
 A: Try using a more suitable sorting algorithm for your data volume, or enable pagination.
 
 #### Q: High memory usage?
+
 A: For super large datasets, consider using pagination or `fast` sorting algorithm.
 
 #### Q: Incorrect Chinese sorting?
+
 A: Use `sortAlgorithm: 'slow'` for complete Chinese support.
 
 #### Q: How to use in pure JavaScript projects?
+
 A: JavaScript version is automatically used when importing, no special configuration needed.
 
 #### Q: What's the difference between TypeScript and JavaScript versions?
+
 A: TypeScript version provides complete type checking and IDE support; JavaScript version is lightweight but has no type checking.
 
 #### Q: How to build your own version?
+
 A: Run `npm run build:all` to build complete TypeScript and JavaScript versions.
 
 ### Debugging Tips
@@ -401,13 +408,13 @@ interface WriteResult {
 
 ### Sorting Algorithm Performance Comparison
 
-| Algorithm  | Small Dataset (<100) | Medium Dataset (100-10K) | Large Dataset (>10K) | Memory Usage | Stability |
-| ---------- | -------------------- | ------------------------- | -------------------- | ------------ | --------- |
-| default    | ⭐⭐⭐⭐⭐           | ⭐⭐⭐                      | ⭐⭐                   | Low          | High      |
-| fast       | ⭐⭐⭐⭐⭐           | ⭐⭐⭐⭐⭐                  | ⭐⭐⭐                 | Low          | Medium    |
-| merge      | ⭐⭐⭐⭐                | ⭐⭐⭐⭐⭐                  | ⭐⭐⭐⭐⭐             | Medium       | High      |
-| counting   | ⭐⭐⭐                 | ⭐⭐⭐⭐⭐                  | ⭐⭐⭐⭐⭐             | High\*       | High      |
-| slow       | ⭐⭐                   | ⭐⭐                        | ⭐⭐                   | Low          | High      |
+| Algorithm | Small Dataset (<100) | Medium Dataset (100-10K) | Large Dataset (>10K) | Memory Usage | Stability |
+| --------- | -------------------- | ------------------------ | -------------------- | ------------ | --------- |
+| default   | ⭐⭐⭐⭐⭐           | ⭐⭐⭐                   | ⭐⭐                 | Low          | High      |
+| fast      | ⭐⭐⭐⭐⭐           | ⭐⭐⭐⭐⭐               | ⭐⭐⭐               | Low          | Medium    |
+| merge     | ⭐⭐⭐⭐             | ⭐⭐⭐⭐⭐               | ⭐⭐⭐⭐⭐           | Medium       | High      |
+| counting  | ⭐⭐⭐               | ⭐⭐⭐⭐⭐               | ⭐⭐⭐⭐⭐           | High\*       | High      |
+| slow      | ⭐⭐                 | ⭐⭐                     | ⭐⭐                 | Low          | High      |
 
 \* Counting sort is memory efficient when range is limited
 
@@ -421,11 +428,11 @@ interface WriteResult {
 
 ## 🎯 Version Selection
 
-| Import Path                | Type Support      | Use Case          | Source Files                                 |
-| ---------------------------| ---------------- | ----------------- | -------------------------------------------- |
-| `'expo-lite-data-store'`    | ✅ Auto-select   | Recommended (default) | `dist/js/index.js` + `dist/types/index.d.ts` |
-| `'expo-lite-data-store/js'` | ✅ TypeScript    | JavaScript environment | `dist/js/index.js` + `dist/types/index.d.ts` |
-| `'expo-lite-data-store/ts'` | ✅ TypeScript    | TypeScript environment | `dist/js/index.js` + `dist/types/index.d.ts` |
+| Import Path                 | Type Support   | Use Case               | Source Files                                 |
+| --------------------------- | -------------- | ---------------------- | -------------------------------------------- |
+| `'expo-lite-data-store'`    | ✅ Auto-select | Recommended (default)  | `dist/js/index.js` + `dist/types/index.d.ts` |
+| `'expo-lite-data-store/js'` | ✅ TypeScript  | JavaScript environment | `dist/js/index.js` + `dist/types/index.d.ts` |
+| `'expo-lite-data-store/ts'` | ✅ TypeScript  | TypeScript environment | `dist/js/index.js` + `dist/types/index.d.ts` |
 
 ## 🎯 Build Tool Integration
 

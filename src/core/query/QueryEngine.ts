@@ -16,12 +16,12 @@ export class QueryEngine {
    */
   static filter<T extends Record<string, any>>(data: T[], condition?: FilterCondition): T[] {
     if (!condition) return data;
-    
+
     // 函数条件
     if (typeof condition === 'function') {
       return data.filter(condition as (value: T, index: number, array: T[]) => unknown);
     }
-    
+
     // 复合 AND 条件
     if ('$and' in condition) {
       let result = [...data];
@@ -30,7 +30,7 @@ export class QueryEngine {
       }
       return result;
     }
-    
+
     // 复合 OR 条件
     if ('$or' in condition) {
       const results = new Set<T>();
@@ -40,14 +40,14 @@ export class QueryEngine {
       }
       return Array.from(results);
     }
-    
+
     // 简单条件
     return data.filter(item => {
       let matches = true;
-      
+
       for (const [key, value] of Object.entries(condition)) {
         const itemValue = item[key];
-        
+
         // 操作符条件
         if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
           for (const [op, opValue] of Object.entries(value)) {
@@ -146,10 +146,10 @@ export class QueryEngine {
               default:
                 matches = false;
             }
-            
+
             if (!matches) break;
           }
-        } 
+        }
         // 简单值比较
         else {
           // 处理null和undefined的特殊情况
@@ -161,10 +161,10 @@ export class QueryEngine {
             matches = false;
           }
         }
-        
+
         if (!matches) break;
       }
-      
+
       return matches;
     });
   }

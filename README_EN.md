@@ -84,10 +84,14 @@ await insert('users', [
   { id: 2, name: 'Bob', age: 30 },
 ]);
 
-const users = await findMany('users', {}, {
-  sortBy: 'age',
-  order: 'desc',
-});
+const users = await findMany(
+  'users',
+  {},
+  {
+    sortBy: 'age',
+    order: 'desc',
+  }
+);
 
 console.log(users);
 ```
@@ -108,10 +112,10 @@ console.log(users);
 ### 💾 Data Operations
 
 | Method      | Signature                                          | Description                                         |
-| ----------- | -------------------------------------------------- | --------------------------------------------------- |
+| ----------- | -------------------------------------------------- | --------------------------------------------------- | ------------------- |
 | `insert`    | `(tableName, data) => Promise<WriteResult>`        | Insert single or multiple records                   |
 | `read`      | `(tableName, options?) => Promise<any[]>`          | Read data (supports filtering, pagination, sorting) |
-| `findOne`   | `(tableName, filter) => Promise<any|null>` | Query single record |
+| `findOne`   | `(tableName, filter) => Promise<any                | null>`                                              | Query single record |
 | `findMany`  | `(tableName, filter?, options?) => Promise<any[]>` | Query multiple records (supports advanced options)  |
 | `update`    | `(tableName, data, where) => Promise<number>`      | Update matching records                             |
 | `remove`    | `(tableName, where) => Promise<number>`            | Delete matching records                             |
@@ -145,13 +149,13 @@ module.exports = {
   // Encryption configuration
   encryption: {
     cacheTimeout: 30000, // Cache timeout (milliseconds)
-    maxCacheSize: 100,    // Maximum number of cached tables
+    maxCacheSize: 100, // Maximum number of cached tables
     // Other encryption configurations...
   },
   // Performance configuration
   performance: {
     enableQueryOptimization: true, // Enable query optimization
-    enableBatchOptimization: true,  // Enable batch operation optimization
+    enableBatchOptimization: true, // Enable batch operation optimization
     // Other performance configurations...
   },
   // Other configurations...
@@ -161,22 +165,32 @@ module.exports = {
 ## 🐛 Common Issues
 
 ### Q: How to switch between different versions?
+
 A: All versions are sourced from the dist directory, ensuring stability in production environments:
+
 - `import { ... } from 'expo-lite-data-store'` - Recommended use (auto-select)
 - `import { ... } from 'expo-lite-data-store/js'` - JavaScript environment
 - `import { ... } from 'expo-lite-data-store/ts'` - TypeScript environment
 
 ### Q: How to handle Chinese sorting?
+
 A: Use `sortAlgorithm: 'slow'` for complete Chinese support:
+
 ```typescript
-const users = await findMany('users', {}, {
-  sortBy: 'name',
-  sortAlgorithm: 'slow',
-});
+const users = await findMany(
+  'users',
+  {},
+  {
+    sortBy: 'name',
+    sortAlgorithm: 'slow',
+  }
+);
 ```
 
 ### Q: How to improve query performance?
+
 A: For large datasets, it is recommended to use:
+
 - Pagination querying
 - Appropriate sorting algorithm
 - Batch operations

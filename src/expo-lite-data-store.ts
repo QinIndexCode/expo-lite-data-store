@@ -58,13 +58,13 @@ export async function update(
 ): Promise<number> {
   // 读取所有数据
   const allData = await db.read(tableName);
-  
+
   let updatedCount = 0;
   const finalData = allData.map((item: Record<string, any>) => {
     // 检查是否匹配where条件
     // 直接实现匹配逻辑，处理基本的相等匹配
     let matches = true;
-    
+
     // 简单处理，只支持基本的相等匹配
     for (const [key, value] of Object.entries(where)) {
       // 对于复杂的where条件，我们应该使用db.findMany来判断
@@ -76,18 +76,18 @@ export async function update(
         break;
       }
     }
-    
+
     if (matches) {
       updatedCount++;
       return { ...item, ...data };
     }
     return item;
   });
-  
+
   if (updatedCount > 0) {
     await db.write(tableName, finalData, { mode: 'overwrite' });
   }
-  
+
   return updatedCount;
 }
 

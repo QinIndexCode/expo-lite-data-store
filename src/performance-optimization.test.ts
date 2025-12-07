@@ -24,7 +24,7 @@ describe('Performance Optimization Tests', () => {
   test('缓存机制应该正常工作', async () => {
     const tableName = 'test_cache';
     await adapter.createTable(tableName);
-    
+
     // 写入测试数据
     const testData = { id: 1, name: 'test', value: 'cached' };
     await adapter.write(tableName, testData);
@@ -49,7 +49,7 @@ describe('Performance Optimization Tests', () => {
   test('索引优化应该提升查询性能', async () => {
     const tableName = 'test_index';
     await adapter.createTable(tableName);
-    
+
     // 准备大量测试数据
     const testData = Array.from({ length: 100 }, (_, i) => ({
       id: i + 1,
@@ -82,7 +82,7 @@ describe('Performance Optimization Tests', () => {
   test('批量操作性能应该得到优化', async () => {
     const tableName = 'test_batch';
     await adapter.createTable(tableName);
-    
+
     const batchData = Array.from({ length: 50 }, (_, i) => ({
       id: 200 + i,
       name: `batch_user${i}`,

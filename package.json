@@ -3,6 +3,14 @@
   "version": "1.0.1",
   "main": "dist/js/index.js",
   "types": "dist/types/index.d.ts",
+  "author": "QinIndexCode",
+  "license": "MIT",
+  "description": "A lite data store for Expo",
+  "keywords": [
+    "expo",
+    "data store",
+    "lite"
+  ],
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",

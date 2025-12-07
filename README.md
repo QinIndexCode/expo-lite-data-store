@@ -84,10 +84,14 @@ await insert('users', [
   { id: 2, name: 'Bob', age: 30 },
 ]);
 
-const users = await findMany('users', {}, {
-  sortBy: 'age',
-  order: 'desc',
-});
+const users = await findMany(
+  'users',
+  {},
+  {
+    sortBy: 'age',
+    order: 'desc',
+  }
+);
 
 console.log(users);
 ```
@@ -145,13 +149,13 @@ module.exports = {
   // 加密配置
   encryption: {
     cacheTimeout: 30000, // 缓存超时时间（毫秒）
-    maxCacheSize: 100,    // 最大缓存表数量
+    maxCacheSize: 100, // 最大缓存表数量
     // 其他加密配置...
   },
   // 性能配置
   performance: {
     enableQueryOptimization: true, // 启用查询优化
-    enableBatchOptimization: true,  // 启用批量操作优化
+    enableBatchOptimization: true, // 启用批量操作优化
     // 其他性能配置...
   },
   // 其他配置...
@@ -161,22 +165,32 @@ module.exports = {
 ## 🐛 常见问题
 
 ### Q: 如何切换不同版本？
+
 A: 所有版本都从dist目录获取，确保生产环境的稳定性：
+
 - `import { ... } from 'expo-lite-data-store'` - 推荐使用（自动选择）
 - `import { ... } from 'expo-lite-data-store/js'` - JavaScript环境
 - `import { ... } from 'expo-lite-data-store/ts'` - TypeScript环境
 
 ### Q: 如何处理中文排序？
+
 A: 使用 `sortAlgorithm: 'slow'` 以获得完整的中文支持：
+
 ```typescript
-const users = await findMany('users', {}, {
-  sortBy: 'name',
-  sortAlgorithm: 'slow',
-});
+const users = await findMany(
+  'users',
+  {},
+  {
+    sortBy: 'name',
+    sortAlgorithm: 'slow',
+  }
+);
 ```
 
 ### Q: 如何提高查询性能？
+
 A: 对于大数据集，建议使用：
+
 - 分页查询
 - 合适的排序算法
 - 批量操作

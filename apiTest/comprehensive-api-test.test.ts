@@ -21,7 +21,7 @@ import {
   countTable,
   getSyncStats,
   syncNow,
-  setAutoSyncConfig
+  setAutoSyncConfig,
 } from '../src/expo-lite-data-store';
 
 const TEST_TABLE = 'test_main_table';
@@ -44,7 +44,7 @@ const seedBasicUsers = async () => {
   await insert(TEST_TABLE, [
     { id: 1, name: 'User A', age: 25, active: true },
     { id: 2, name: 'User B', age: 30, active: false },
-    { id: 3, name: 'User C', age: 35, active: true }
+    { id: 3, name: 'User C', age: 35, active: true },
   ]);
 };
 
@@ -74,7 +74,7 @@ describe('expo-lite-data-store – Optimized API Tests', () => {
 
     it('creates table with initial data', async () => {
       await createTable(TEST_TABLE, {
-        initialData: [{ id: 1, name: 'Init', age: 20 }]
+        initialData: [{ id: 1, name: 'Init', age: 20 }],
       });
 
       expect(await countTable(TEST_TABLE)).toBe(1);
@@ -94,7 +94,7 @@ describe('expo-lite-data-store – Optimized API Tests', () => {
       await insert(TEST_TABLE, { id: 1, name: 'Single' });
       await insert(TEST_TABLE, [
         { id: 2, name: 'Multi-1' },
-        { id: 3, name: 'Multi-2' }
+        { id: 3, name: 'Multi-2' },
       ]);
 
       const data = await read(TEST_TABLE);
@@ -123,7 +123,7 @@ describe('expo-lite-data-store – Optimized API Tests', () => {
 
     it('supports logical operators ($and / $or)', async () => {
       const result = await findMany(TEST_TABLE, {
-        $and: [{ active: true }, { age: { $gt: 30 } }]
+        $and: [{ active: true }, { age: { $gt: 30 } }],
       });
       expect(result[0].id).toBe(3);
     });
@@ -135,12 +135,16 @@ describe('expo-lite-data-store – Optimized API Tests', () => {
     });
 
     it('supports sorting and pagination', async () => {
-      const data = await findMany(TEST_TABLE, {}, {
-        sortBy: 'age',
-        order: 'desc',
-        skip: 1,
-        limit: 1
-      });
+      const data = await findMany(
+        TEST_TABLE,
+        {},
+        {
+          sortBy: 'age',
+          order: 'desc',
+          skip: 1,
+          limit: 1,
+        }
+      );
 
       expect(data.length).toBe(1);
       expect(data[0].id).toBe(2);
@@ -178,7 +182,7 @@ describe('expo-lite-data-store – Optimized API Tests', () => {
       await insert(TEST_TABLE, [
         { id: 1, name: 'User A' },
         { id: 2, name: 'User B' },
-        { id: 3, name: 'User C' }
+        { id: 3, name: 'User C' },
       ]);
     });
 
@@ -222,7 +226,6 @@ describe('expo-lite-data-store – Optimized API Tests', () => {
     });
   });
 
-
   /* ------------------------------------------------------------------------ */
   /*                            bulkWrite API                                  */
   /* ------------------------------------------------------------------------ */
@@ -237,7 +240,7 @@ describe('expo-lite-data-store – Optimized API Tests', () => {
         { type: 'insert', data: { id: 1, age: 20 } },
         { type: 'insert', data: { id: 2, age: 30 } },
         { type: 'update', data: { id: 1, age: 25 } },
-        { type: 'delete', data: { id: 2 } }
+        { type: 'delete', data: { id: 2 } },
       ]);
 
       const data = await read(TEST_TABLE);
@@ -287,8 +290,8 @@ describe('expo-lite-data-store – Optimized API Tests', () => {
       await createTable(TEST_TABLE_CHUNKED, {
         initialData: Array.from({ length: 5 }, (_, i) => ({
           id: i + 1,
-          value: i
-        }))
+          value: i,
+        })),
       });
 
       await migrateToChunked(TEST_TABLE_CHUNKED);
@@ -307,7 +310,10 @@ describe('expo-lite-data-store – Optimized API Tests', () => {
       await createTable(TEST_TABLE);
 
       // 使用批量插入代替并行插入，避免竞态条件
-      await insert(TEST_TABLE, Array.from({ length: 5 }, (_, i) => ({ id: i + 1, value: i })));
+      await insert(
+        TEST_TABLE,
+        Array.from({ length: 5 }, (_, i) => ({ id: i + 1, value: i }))
+      );
 
       expect(await countTable(TEST_TABLE)).toBe(5);
     });

@@ -283,7 +283,7 @@ while (true) {
 module.exports = {
   encryption: {
     cacheTimeout: 30000, // 缓存超时时间（毫秒）
-    maxCacheSize: 100,    // 最大缓存表数量
+    maxCacheSize: 100, // 最大缓存表数量
   },
 };
 
@@ -324,24 +324,31 @@ module.exports = {
 ### 常见问题
 
 #### Q: 排序后数据顺序不正确？
+
 A: 检查排序字段是否存在 null/undefined 值，这些值会被排到末尾。
 
 #### Q: 查询性能慢？
+
 A: 尝试使用更适合的数据量的排序算法，或启用分页查询。
 
 #### Q: 内存使用过高？
+
 A: 对于超大数据集，考虑使用分页查询或 `fast` 排序算法。
 
 #### Q: 中文排序不正确？
+
 A: 使用 `sortAlgorithm: 'slow'` 以获得完整的中文支持。
 
 #### Q: 如何在纯JavaScript项目中使用？
+
 A: 导入时会自动使用JavaScript版本，无需特殊配置。
 
 #### Q: TypeScript版本和JavaScript版本有什么区别？
+
 A: TypeScript版本提供完整的类型检查和IDE支持；JavaScript版本轻量化但无类型检查。
 
 #### Q: 如何构建自己的版本？
+
 A: 运行 `npm run build:all` 来构建完整的TypeScript和JavaScript版本。
 
 ### 调试技巧

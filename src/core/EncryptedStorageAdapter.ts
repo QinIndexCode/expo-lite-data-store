@@ -2,13 +2,7 @@
 // 加密存储适配装饰器
 import type { IStorageAdapter } from '../types/storageAdapterInfc';
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from '../types/storageTypes';
-import {
-  decrypt,
-  getMasterKey,
-  decryptFields,
-  decryptBulk,
-  decryptFieldsBulk,
-} from '../utils/crypto';
+import { decrypt, getMasterKey, decryptFields, decryptBulk, decryptFieldsBulk } from '../utils/crypto';
 import config from '../liteStore.config';
 import storage from './adapter/FileSystemStorageAdapter';
 import { ErrorHandler } from '../utils/errorHandler';
@@ -48,7 +42,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     }
 
     // 验证缓存超时时间
-  
+
     if (config.encryption.cacheTimeout < 0 || config.encryption.cacheTimeout > 3600000) {
       throw new Error(
         `Invalid cache timeout: ${config.encryption.cacheTimeout}. Must be between 0 and 3600000 (1 hour).`
@@ -139,8 +133,6 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     this.queryIndexes.get(tableName)!.set(field, index);
   }
 
-
-
   async createTable(
     tableName: string,
     options?: CreateTableOptions & {
@@ -195,13 +187,13 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       async () => {
         // 检查缓存是否有效
         const shouldBypassCache = options?.bypassCache || false; // Default to false to use cache for better performance
-        
+
         // 如果缓存超时时间为0，清除所有缓存并禁用缓存
         if (this.cacheTimeout === 0) {
           this.cachedData.clear();
           this.queryIndexes.clear();
         }
-        
+
         const cached = this.cachedData.get(tableName);
         if (!shouldBypassCache && cached && Date.now() - cached.timestamp < this.cacheTimeout) {
           return cached.data;
