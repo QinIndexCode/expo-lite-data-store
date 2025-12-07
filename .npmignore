@@ -1,31 +1,65 @@
-# 源码和测试
+# ── 源码和测试相关（绝对不能发） ─────────────────────
 src/
+__tests__/
 __mocks__/
-**/__tests__/
-**/*.test.*
 coverage/
 apiTest/
-# 开发配置
+*.test.ts
+*.test.js
+
+# ── 构建配置文件（绝对不能发） ───────────────────────
 jest*.js
+jest*.config.js
 tsconfig*.json
 eslint.config.js
+eslint*.js
+prettier*.js
+.prettierrc*
 expo-env.d.ts
-.npmignore
-
-# Expo相关文件
-.expo/
-app.json
-
-# 工具和文档
 *.tsbuildinfo
+
+# ── Expo / RN 开发时产生的垃圾文件 ───────────────────
+.expo/
+.expo-shared/
+app.json
+metro.config.js
+babel.config.js
+
+# ── 工具/文档/临时文件（除了必要的） ─────────────────
 *.md
 !README.md
 !README_EN.md
+!CHANGELOG.md
 code-improvement-report.js
-
-# 其他
-.gitignore
-test*.*
-*.log
 .vscode/
-.trae
+.trae/
+*.log
+.gitignore
+.npmignore
+test*.*
+*.tgz
+
+# ── node_modules 永远别发（保险） ─────────────────────
+node_modules/
+
+# ── 下面这几行是最重要的白名单保险（任选其一加在最下面） ──
+
+# 写法A（推荐）：明确只允许 dist 和几个关键文件通过
+# * 
+# !/dist/**
+# !/js/**
+# !/ts/**
+# !/README.md
+# !/README_EN.md
+# !/CHANGELOG.md
+# !/LICENSE
+
+# 写法B（更狠更干净）：什么都不允许，只强行放行必须的
+*
+!/dist
+!/js
+!/types
+!/README.md
+!/README_EN.md
+!/CHANGELOG.md
+!/LICENSE

@@ -5,11 +5,14 @@
   "types": "dist/types/index.d.ts",
   "author": "QinIndexCode",
   "license": "MIT",
-  "description": "A lite data store for Expo",
+  "description": "A lite data store for Expo; \n Detail in https://github.com/QinIndexCode/expo-lite-data-store",
   "keywords": [
     "expo",
     "data store",
-    "lite"
+    "lite",
+    "data",
+    "storage",
+    "react-native"
   ],
   "exports": {
     ".": {
