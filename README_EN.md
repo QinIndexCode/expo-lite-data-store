@@ -27,7 +27,7 @@ Designed specifically for React Native + Expo projects, with no native dependenc
 
 ```bash
 npm install expo-lite-data-store
-# or use yarn / pnpm
+# or use yarn / pnpm (At present, only npm has been uploaded, and yarn and pnpm will be followed in the future.)
 yarn add expo-lite-data-store
 pnpm add expo-lite-data-store
 ```
