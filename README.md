@@ -1,13 +1,14 @@
-# expo-lite-data-store
+# expo-lite-store
 
 中文版: [中文文档](README.md)
 English: [English Document](README_EN.md)
-____________________________
+
+---
+
 [![npm version](https://img.shields.io/npm/v/expo-lite-data-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-data-store)
 [![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-lite-data-store)](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)
 [![React Native](https://img.shields.io/badge/React%20Native-0.81+-blue.svg)](https://reactnative.dev/)
-
 
 **超轻量、零配置、纯 TypeScript 编写的 Expo 本地数据库**
 

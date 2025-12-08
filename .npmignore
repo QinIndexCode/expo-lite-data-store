@@ -1,4 +1,3 @@
-# ── 源码和测试相关（绝对不能发） ─────────────────────
 src/
 __tests__/
 __mocks__/
@@ -6,7 +5,7 @@ coverage/
 apiTest/
 *.test.ts
 *.test.js
-
+node_modules
 # ── 构建配置文件（绝对不能发） ───────────────────────
 jest*.js
 jest*.config.js
@@ -39,22 +38,10 @@ code-improvement-report.js
 test*.*
 *.tgz
 
-# ── node_modules 永远别发（保险） ─────────────────────
+# ── node_modules ─────────────────────
 node_modules/
 
-# ── 下面这几行是最重要的白名单保险（任选其一加在最下面） ──
-
-# 写法A（推荐）：明确只允许 dist 和几个关键文件通过
-# * 
-# !/dist/**
-# !/js/**
-# !/ts/**
-# !/README.md
-# !/README_EN.md
-# !/CHANGELOG.md
-# !/LICENSE
-
-# 写法B（更狠更干净）：什么都不允许，只强行放行必须的
+# 允许文件
 *
 !/dist
 !/js

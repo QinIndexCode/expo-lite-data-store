@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "expo-liteDBStore",
-    "slug": "expo-liteDBStore",
+    "name": "expo-lite-data-store",
+    "slug": "expo-lite-data-store",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
