@@ -37,16 +37,13 @@ code-improvement-report.js
 .npmignore
 test*.*
 *.tgz
+debug-*.*
 
 # ── node_modules ─────────────────────
 node_modules/
 
-# 允许文件
-*
-!/dist
-!/js
-!/types
-!/README.md
-!/README_EN.md
-!/CHANGELOG.md
-!/LICENSE
+# 确保必要的文件被包含
+!/dist/
+!README.md
+!README_EN.md
+!LICENSE.txt

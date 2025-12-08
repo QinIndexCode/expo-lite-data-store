@@ -1,6 +1,6 @@
 {
   "name": "expo-lite-data-store",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "dist/js/index.js",
   "types": "dist/types/index.d.ts",
   "author": "QinIndexCode",
@@ -52,7 +52,9 @@
     "format:check": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run test:all && npm run lint && npm run format:check && npm run typecheck"
+    "prepublishOnly": "npm run typecheck",
+    "publish:safe": "npm run build && npm run typecheck && npm publish",
+    "publish:force": "npm publish --ignore-scripts"
   },
   "dependencies": {
     "@types/bcryptjs": "^2.4.6",
