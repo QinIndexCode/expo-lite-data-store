@@ -1,0 +1,93 @@
+{
+  "name": "expo-lite-data-store",
+  "version": "1.0.1",
+  "main": "dist/js/index.js",
+  "types": "dist/types/index.d.ts",
+  "author": "QinIndexCode",
+  "license": "MIT",
+  "description": "A lite data store for Expo; \n Detail in https://github.com/QinIndexCode/expo-lite-data-store please don't use 1.0.0 version because it's not stable. In this version , fix crypto compatibility issue. ",
+  "versionDescription": "fix crypto compatibility issue and add config generation tool",
+  "keywords": [
+    "expo",
+    "data store",
+    "lite",
+    "data",
+    "storage",
+    "react-native"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/js/index.js",
+      "require": "./dist/js/index.js"
+    },
+    "./js": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/js/index.js",
+      "require": "./dist/js/index.js"
+    },
+    "./ts": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/js/index.js",
+      "require": "./dist/js/index.js"
+    }
+  },
+  "scripts": {
+    "build": "npm run build:all",
+    "build:js": "tsc",
+    "build:all": "npm run build:js && npm run lint && npm run format:check",
+    "test": "jest --config jest.simple.config.js --testPathIgnorePatterns=crypto-security-assessment --testPathIgnorePatterns=performance-optimization",
+    "test:core": "jest --config jest.simple.config.js --testPathIgnorePatterns=crypto-security-assessment --testPathIgnorePatterns=performance-optimization --testMatch=**/src/core/**/__tests__/**/*.test.ts",
+    "test:api": "jest --config jest.simple.config.js --testPathPatterns=apiTest --testPathPatterns=src/api.test.ts",
+    "test:utils": "jest --config jest.simple.config.js --testMatch=**/src/utils/**/__tests__/**/*.test.ts",
+    "test:config": "jest --config jest.simple.config.js --testMatch=**/src/config.test.ts",
+    "test:simple": "jest --config jest.simple.config.js --testMatch=**/src/simple.test.ts",
+    "test:crypto": "jest --config jest.crypto.config.js",
+    "test:performance": "jest --config jest.performance.config.js",
+    "test:all": "npm run test:core && npm run test:api && npm run test:utils && npm run test:config && npm run test:simple && npm run test:crypto && npm run test:performance",
+    "test:watch": "jest --config jest.simple.config.js --watch --testPathIgnorePatterns=crypto-security-assessment --testPathIgnorePatterns=performance-optimization",
+    "test:coverage": "jest --config jest.simple.config.js --coverage --testPathIgnorePatterns=crypto-security-assessment --testPathIgnorePatterns=performance-optimization",
+    "lint": "eslint . --ext .ts,.tsx",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --write .",
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run typecheck",
+    "publish:safe": "npm run build && npm run typecheck && npm publish",
+    "publish:force": "npm publish --ignore-scripts"
+  },
+  "dependencies": {
+    "crypto-es": "^3.1.2",
+    "bcryptjs": "^3.0.3",
+    "expo-crypto": "~15.0.7",
+    "expo-file-system": "~18.0.7",
+    "expo-secure-store": "~15.0.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.48.1",
+    "@typescript-eslint/parser": "^8.48.1",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^16.5.0",
+    "jest": "^30.2.0",
+    "jiti": "^2.6.1",
+    "prettier": "^3.3.3",
+    "ts-jest": "^29.4.5",
+    "typescript": "~5.9.2",
+    "typescript-eslint": "^8.48.1",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/crypto-js": "^4.2.2",
+    "expo": "~54.0.23",
+    "react": "19.1.0",
+    "react-native": "0.81.5"
+  },
+  "private": false
+}
