@@ -1,5 +1,11 @@
 # expo-lite-data-store
 
+---
+
+**notice** :current project test coverage is limited, and may contain undiscovered issues. Before using in production environment, please conduct thorough testing.
+
+---
+
 [![npm version](https://img.shields.io/npm/v/expo-lite-data-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-data-store)
 [![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-lite-data-store)](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)
@@ -32,7 +38,6 @@ yarn add expo-lite-data-store
 pnpm add expo-lite-data-store
 ```
 
-**Note**: The package name is `expo-lite-data-store` (note: `data-store` not `db-store`)
 
 ## 🚀 Quick Start
 
@@ -131,7 +136,7 @@ console.log(users);
 
 ## 📖 Detailed Documentation
 
-For complete detailed documentation, please check the [WIKI page](https://github.com/QinIndexCode/expo-lite-data-store/wiki), including:
+For complete detailed documentation, please check the local [WIKI_EN.md](WIKI_EN.md) file, including:
 
 - 🎯 **Advanced Queries**: Complex conditional queries, operators, compound queries
 - 🎯 **Smart Sorting**: Multi-field sorting, algorithm selection, performance optimization

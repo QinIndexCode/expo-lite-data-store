@@ -1,6 +1,6 @@
 {
   "name": "expo-lite-data-store",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "main": "dist/js/index.js",
   "types": "dist/types/index.d.ts",
   "author": "QinIndexCode",
@@ -34,7 +34,7 @@
   },
   "scripts": {
     "build": "npm run build:all",
-    "build:js": "tsc",
+    "build:js": "npx tsc -p tsconfig.js.json",
     "build:all": "npm run build:js && npm run lint && npm run format:check",
     "test": "jest --config jest.simple.config.js --testPathIgnorePatterns=crypto-security-assessment --testPathIgnorePatterns=performance-optimization",
     "test:core": "jest --config jest.simple.config.js --testPathIgnorePatterns=crypto-security-assessment --testPathIgnorePatterns=performance-optimization --testMatch=**/src/core/**/__tests__/**/*.test.ts",

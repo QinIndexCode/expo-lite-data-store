@@ -6,7 +6,7 @@ apiTest/
 *.test.ts
 *.test.js
 node_modules
-# ── 构建配置文件（绝对不能发） ───────────────────────
+# ── 构建配置文件 ───────────────────────
 jest*.js
 jest*.config.js
 tsconfig*.json
@@ -16,6 +16,8 @@ prettier*.js
 .prettierrc*
 expo-env.d.ts
 *.tsbuildinfo
+package-dev.json
+package-env.json
 
 # ── Expo / RN 开发时产生的垃圾文件 ───────────────────
 .expo/
@@ -28,7 +30,8 @@ babel.config.js
 *.md
 !README.md
 !README_EN.md
-!CHANGELOG.md
+!updatelog.md
+
 code-improvement-report.js
 .vscode/
 .trae/

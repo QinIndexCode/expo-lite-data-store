@@ -1,15 +1,15 @@
 /**
  * LiteStore 配置文件
  * 用于自定义 LiteStore 的行为
- * 
+ *
  * 如何使用：
  * 1. 在应用入口文件中导入此配置
  * 2. 使用 setConfig 方法将配置应用到 LiteStore
- * 
+ *
  * 示例：
  * import { setConfig } from 'expo-lite-data-store';
  * import liteStoreConfig from './liteStore.config';
- * 
+ *
  * // 在应用启动时设置配置
  * setConfig(liteStoreConfig);
  */

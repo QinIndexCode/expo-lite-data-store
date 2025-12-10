@@ -1,10 +1,13 @@
 # expo-lite-store
 
-中文版: [中文文档](README.md)
-English: [English Document](README_EN.md)
+中文版: [中文文档](./README.md)
+English: [English Document](./README_EN.md)
 
 ---
 
+**注意** 当前项目测试覆盖范围有限，可能存在未发现的问题。在生产环境中使用前，请务必进行充分测试。
+
+---
 [![npm version](https://img.shields.io/npm/v/expo-lite-data-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-data-store)
 [![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-lite-data-store)](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)
@@ -37,7 +40,6 @@ yarn add expo-lite-data-store
 pnpm add expo-lite-data-store
 ```
 
-**注意**：包名是 `expo-lite-data-store`（注意是 `data-store` 而不是 `db-store`）
 
 ## 🚀 快速开始
 
@@ -136,7 +138,7 @@ console.log(users);
 
 ## 📖 详细文档
 
-完整的详细文档请查看 [WIKI 页面](https://github.com/QinIndexCode/expo-lite-data-store/wiki)，包含：
+完整的详细文档请查看本地 [WIKI.md](./WIKI.md) 文件，包含：
 
 - 🎯 **高级查询**：复杂条件查询、操作符、复合查询
 - 🎯 **智能排序**：多字段排序、算法选择、性能优化

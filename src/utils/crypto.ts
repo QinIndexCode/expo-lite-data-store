@@ -206,9 +206,16 @@ const initializeKeyCacheCleanup = (): void => {
     keyCache.cleanup();
   }, KEY_CACHE_CLEANUP_INTERVAL);
 
-  // 页面卸载时清理缓存
+  // 页面卸载时清理缓存 //确保
+  // 显式检查window.addEventListener是否存在，防止React Native环境报错
+  // 使用更复杂的检查模式确保编译器不会优化掉
   if (typeof window !== 'undefined') {
-    window.addEventListener('beforeunload', clearKeyCache);
+    // 在React Native中，window存在但addEventListener不存在
+    // 使用typeof检查确保方法存在
+    const addEventListener = window['addEventListener'];
+    if (typeof addEventListener === 'function') {
+      addEventListener.call(window, 'beforeunload', clearKeyCache);
+    }
   }
 };
 
@@ -223,8 +230,10 @@ export const stopKeyCacheCleanup = (): void => {
   }
 
   // 清除页面卸载事件监听器
-  if (typeof window !== 'undefined') {
-    window.removeEventListener('beforeunload', clearKeyCache);
+  // 显式检查window.removeEventListener是否存在，防止React Native环境报错
+  // 使用括号语法确保编译器不会优化掉检查
+  if (typeof window !== 'undefined' && typeof window['removeEventListener'] === 'function') {
+    window['removeEventListener']('beforeunload', clearKeyCache);
   }
 };
 
