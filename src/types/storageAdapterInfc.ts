@@ -100,6 +100,23 @@ export interface IStorageAdapter {
   ): Promise<WriteResult>;
 
   /**
+   * zh-CN:
+   * 插入数据（总是使用追加模式，与write方法的append模式功能相同）
+   * en:
+   * insert data (always uses append mode, same as write method with append mode)
+   * ————————
+   * @param tableName table name / 表名
+   * @param data data to insert / 要插入的数据
+   * @param options insert options / 插入选项（mode将被强制设为append）
+   * @returns Promise<WriteResult>
+   */
+  insert(
+    tableName: string,
+    data: Record<string, any> | Record<string, any>[],
+    options?: WriteOptions
+  ): Promise<WriteResult>;
+
+  /**
      * zh-CN:
      * 读取数据
      * 表名：tableName
@@ -115,7 +132,7 @@ export interface IStorageAdapter {
      *              filter : client-side filter function / 客户端过滤函数
      * ————————
      * @param tableName table name / 表名
- 
+
      * @returns Promise<Record<string, any>[]>
      */
   read(tableName: string, options?: ReadOptions): Promise<Record<string, any>[]>;

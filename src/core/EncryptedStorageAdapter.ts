@@ -458,4 +458,16 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     // 直接调用底层存储适配器的clearTable方法
     await storage.clearTable(tableName);
   }
+
+  async insert(
+    tableName: string,
+    data: Record<string, any> | Record<string, any>[],
+    options?: WriteOptions
+  ): Promise<WriteResult> {
+    // 清除该表的缓存
+    this.clearTableCache(tableName);
+
+    // 插入操作总是使用append模式，忽略传入的mode选项
+    return storage.insert(tableName, data, { ...options, mode: 'append' });
+  }
 }

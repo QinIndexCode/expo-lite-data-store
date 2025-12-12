@@ -443,6 +443,23 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   }
 
   /**
+   * 插入数据（总是追加模式，与write方法的append模式功能相同）
+   * @param tableName 表名
+   * @param data 要插入的数据
+   * @param options 插入选项（mode将被强制设为append）
+   * @throws {Error} 当表名或数据无效时抛出
+   * @returns Promise<WriteResult> 插入结果
+   */
+  async insert(
+    tableName: string,
+    data: Record<string, any> | Record<string, any>[],
+    options?: WriteOptions
+  ): Promise<WriteResult> {
+    // 插入操作总是使用append模式，忽略传入的mode选项
+    return this.write(tableName, data, { ...options, mode: 'append' });
+  }
+
+  /**
    * 更新匹配的数据
    * @param tableName 表名
    * @param data 要更新的数据
