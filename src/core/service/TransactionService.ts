@@ -67,12 +67,14 @@ export class TransactionService {
    * @param writeFn 写入处理函数
    * @param deleteFn 删除处理函数
    * @param bulkWriteFn 批量写入处理函数
+   * @param updateFn 更新处理函数
    * @throws {Error} 当事务不存在时抛出
    */
   async commit(
     writeFn: (tableName: string, data: any, options?: any) => Promise<any>,
     deleteFn: (tableName: string, where: any) => Promise<any>,
-    bulkWriteFn: (tableName: string, operations: any[]) => Promise<any>
+    bulkWriteFn: (tableName: string, operations: any[]) => Promise<any>,
+    updateFn: (tableName: string, data: any, where: any) => Promise<any>
   ): Promise<void> {
     if (!this.isInTransaction()) {
       throw new Error('No transaction in progress');
@@ -85,7 +87,14 @@ export class TransactionService {
       for (const operation of operationsCopy) {
         switch (operation.type) {
           case 'write':
-            await writeFn(operation.tableName, operation.data, operation.options);
+            // 检查是否是update操作伪装的write操作（带有where和updates属性）
+            if (operation.data && typeof operation.data === 'object' && 'where' in operation.data && 'updates' in operation.data) {
+              // 这是一个update操作，调用updateFn而不是writeFn
+              await updateFn(operation.tableName, operation.data.updates, operation.data.where);
+            } else {
+              // 普通write操作
+              await writeFn(operation.tableName, operation.data, operation.options);
+            }
             break;
           case 'delete':
             await deleteFn(operation.tableName, operation.data);

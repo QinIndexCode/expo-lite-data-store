@@ -255,7 +255,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
         const dataSize = Array.isArray(data) ? data.length : 1;
 
         // 事务处理逻辑
-        if (this.transactionService.isInTransaction()) {
+        if (this.transactionService.isInTransaction() && !options?.directWrite) {
           // 保存数据快照（只在第一次操作该表时保存），用于事务回滚
           const currentData = await this.read(tableName);
           this.transactionService.saveSnapshot(tableName, currentData);
@@ -277,7 +277,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
           };
         }
 
-        // 不在事务中，根据directWrite选项决定是同步还是异步写入
+        // 不在事务中，或者directWrite为true，根据directWrite选项决定是同步还是异步写入
 
         // 1. 先执行磁盘写入操作
         const result = await this.dataWriter.write(tableName, data, options);
@@ -472,25 +472,6 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       throw new Error('Invalid table name: must be a non-empty string');
     }
 
-    // 事务处理逻辑
-    if (this.transactionService.isInTransaction()) {
-      // 保存数据快照（只在第一次操作该表时保存），用于事务回滚
-      const currentData = await this.read(tableName);
-      this.transactionService.saveSnapshot(tableName, currentData);
-
-      // 将操作添加到事务操作队列，使用'write'类型，因为update最终会调用write
-      this.transactionService.addOperation({
-        tableName,
-        type: 'write',
-        data: { where, updates: data },
-      });
-
-      // 事务中返回模拟结果，不实际修改数据
-      return 0;
-    }
-
-    // 不在事务中，直接执行更新操作
-
     // 1. 读取所有数据
     const allData = await this.read(tableName);
 
@@ -513,6 +494,24 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       return item;
     });
 
+    // 事务处理逻辑
+    if (this.transactionService.isInTransaction()) {
+      // 保存数据快照（只在第一次操作该表时保存），用于事务回滚
+      this.transactionService.saveSnapshot(tableName, allData);
+
+      // 将操作添加到事务操作队列，使用'write'类型，传入完整的更新后数据
+      this.transactionService.addOperation({
+        tableName,
+        type: 'write',
+        data: finalData,
+        options: { mode: 'overwrite' },
+      });
+
+      // 事务中返回匹配的记录数
+      return updatedCount;
+    }
+
+    // 不在事务中，直接执行更新操作
     if (updatedCount > 0) {
       // 3. 写入更新后的数据
       await this.write(tableName, finalData, { mode: 'overwrite' });
@@ -687,9 +686,10 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    */
   async commit(): Promise<void> {
     await this.transactionService.commit(
-      (tableName, data, options) => this.dataWriter.write(tableName, data, options),
-      (tableName, where) => this.dataWriter.delete(tableName, where),
-      (tableName, operations) => this.bulkWrite(tableName, operations)
+      (tableName, data, options) => this.write(tableName, data, { ...options, directWrite: true }),
+      (tableName, where) => this.delete(tableName, where),
+      (tableName, operations) => this.bulkWrite(tableName, operations),
+      (tableName, data, where) => this.update(tableName, data, where)
     );
   }
 
