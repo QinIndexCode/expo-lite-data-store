@@ -43,6 +43,7 @@
     "dist/**",
     "coverage/**",
     "__mocks__/**",
-    "test-install/**"
+    "test-install/**",
+    "node_modules/**"
   ]
 }

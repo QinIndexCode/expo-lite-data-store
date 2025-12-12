@@ -277,15 +277,20 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
           };
         }
 
-        // 不在事务中，直接执行写入操作
+        // 不在事务中，根据directWrite选项决定是同步还是异步写入
+
+        // 1. 先执行磁盘写入操作
         const result = await this.dataWriter.write(tableName, data, options);
 
-        // 测试环境中手动触发同步，确保数据写入能同步到磁盘
+        // 2. 测试环境中手动触发同步，确保数据写入能同步到磁盘
         if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
           await this.autoSyncService.sync();
         }
 
-        // 记录性能指标
+        // 3. 删除与该表相关的所有缓存，确保后续读取能获取到最新数据
+        this.cacheService.clearTableCache(tableName);
+
+        // 4. 记录性能指标
         performanceMonitor.record({
           operation: 'write',
           duration: Date.now() - startTime,
@@ -410,15 +415,108 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       return 0;
     }
 
-    // 不在事务中，直接执行删除操作
+    // 不在事务中，直接执行删除操作，然后清理缓存
+
+    // 1. 执行磁盘删除操作
     const result = await this.dataWriter.delete(tableName, where);
 
-    // 测试环境中手动触发同步，确保数据删除能写入磁盘
+    // 2. 测试环境中手动触发同步，确保数据删除能写入磁盘
     if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
       await this.autoSyncService.sync();
     }
 
+    // 3. 删除与该表相关的所有缓存，确保后续读取能获取到最新数据
+    this.cacheService.clearTableCache(tableName);
+
     return result;
+  }
+
+  /**
+   * 删除数据（与delete方法功能相同，为了API兼容性）
+   * @param tableName 表名
+   * @param where 删除条件
+   * @throws {Error} 当表名无效时抛出
+   * @returns Promise<number> 删除的记录数
+   */
+  async remove(tableName: string, where: Record<string, any>): Promise<number> {
+    return this.delete(tableName, where);
+  }
+
+  /**
+   * 更新匹配的数据
+   * @param tableName 表名
+   * @param data 要更新的数据
+   * @param where 更新条件，只支持基本的相等匹配
+   * @returns Promise<number> 更新的记录数
+   */
+  async update(tableName: string, data: Record<string, any>, where: Record<string, any>): Promise<number> {
+    // 输入验证：表名不能为空且必须是字符串
+    if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
+      throw new Error('Invalid table name: must be a non-empty string');
+    }
+
+    // 事务处理逻辑
+    if (this.transactionService.isInTransaction()) {
+      // 保存数据快照（只在第一次操作该表时保存），用于事务回滚
+      const currentData = await this.read(tableName);
+      this.transactionService.saveSnapshot(tableName, currentData);
+
+      // 将操作添加到事务操作队列，使用'write'类型，因为update最终会调用write
+      this.transactionService.addOperation({
+        tableName,
+        type: 'write',
+        data: { where, updates: data },
+      });
+
+      // 事务中返回模拟结果，不实际修改数据
+      return 0;
+    }
+
+    // 不在事务中，直接执行更新操作
+
+    // 1. 读取所有数据
+    const allData = await this.read(tableName);
+
+    // 2. 遍历数据，找到匹配where条件的记录并更新
+    let updatedCount = 0;
+    const finalData = allData.map((item: Record<string, any>) => {
+      // 检查是否匹配where条件
+      let matches = true;
+      for (const [key, value] of Object.entries(where)) {
+        if (item[key] !== value) {
+          matches = false;
+          break;
+        }
+      }
+
+      if (matches) {
+        updatedCount++;
+        return { ...item, ...data };
+      }
+      return item;
+    });
+
+    if (updatedCount > 0) {
+      // 3. 写入更新后的数据
+      await this.write(tableName, finalData, { mode: 'overwrite' });
+    }
+
+    return updatedCount;
+  }
+
+  /**
+   * 清空表数据
+   * @param tableName 表名
+   * @returns Promise<void>
+   */
+  async clearTable(tableName: string): Promise<void> {
+    // 输入验证：表名不能为空且必须是字符串
+    if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
+      throw new Error('Invalid table name: must be a non-empty string');
+    }
+
+    // 直接写入空数组来清空表，覆盖模式
+    await this.write(tableName, [], { mode: 'overwrite' });
   }
 
   // ==================== 批量操作 ====================

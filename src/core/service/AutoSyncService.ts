@@ -123,19 +123,18 @@ export class AutoSyncService {
         // 从缓存键中提取表名
         const tableName = cacheKey.split('_')[0];
 
-        console.log('[AutoSyncService] 同步表', tableName, '的1个项目');
+        console.log('[AutoSyncService] 同步表', tableName, '的所有数据');
 
-        // 写入磁盘（注意：这里需要根据实际情况调整写入模式）
-        // 由于我们不知道原始数据是单条还是多条，暂时使用append模式
-        // 更完善的实现应该在缓存时保存更多的元数据
-        await this.storageAdapter.write(tableName, data, { mode: 'append' });
+        // 写入磁盘，使用overwrite模式确保数据一致性
+        // 因为缓存中存储的是完整的表数据，所以需要使用overwrite模式
+        await this.storageAdapter.write(tableName, data, { mode: 'overwrite', directWrite: true });
 
         // 直接使用缓存键标记为干净数据
         this.cacheService.markAsClean(cacheKey);
 
         // 更新统计信息
-        this.stats.totalItemsSynced += 1;
-        console.log('[AutoSyncService] 完成同步表', tableName, '的1个项目');
+        this.stats.totalItemsSynced += Array.isArray(data) ? data.length : 1;
+        console.log('[AutoSyncService] 完成同步表', tableName, '的所有数据');
       }
 
       // 更新统计信息

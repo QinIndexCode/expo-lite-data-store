@@ -189,21 +189,17 @@ export async function update(
   data: Record<string, any>,
   where: Record<string, any>
 ): Promise<number> {
-  // 读取所有数据
+  // 1. 读取所有数据（会自动从缓存获取或从磁盘读取）
   const allData = await db.read(tableName);
 
+  // 2. 遍历数据，找到匹配where条件的记录并更新
   let updatedCount = 0;
   const finalData = allData.map((item: Record<string, any>) => {
     // 检查是否匹配where条件
-    // 直接实现匹配逻辑，处理基本的相等匹配
     let matches = true;
 
     // 简单处理，只支持基本的相等匹配
     for (const [key, value] of Object.entries(where)) {
-      // 对于复杂的where条件，我们应该使用db.findMany来判断
-      // 这里我们使用更简单的方法：读取所有匹配的数据，然后检查当前item是否在结果中
-      // 但这会导致异步操作，所以我们改为直接使用相等比较
-      // 这对于基本的测试用例已经足够
       if (item[key] !== value) {
         matches = false;
         break;
@@ -218,6 +214,7 @@ export async function update(
   });
 
   if (updatedCount > 0) {
+    // 3. 调用db.write方法，该方法已实现先执行磁盘操作后删除相关缓存的逻辑
     await db.write(tableName, finalData, { mode: 'overwrite' });
   }
 
