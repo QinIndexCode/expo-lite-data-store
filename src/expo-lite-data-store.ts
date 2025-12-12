@@ -168,58 +168,20 @@ export const rollback = db.rollback.bind(db);
 export const migrateToChunked = db.migrateToChunked.bind(db);
 
 /**
- * 清空表数据
- * @param tableName 表名
- * @returns Promise<void>
- */
-export async function clearTable(tableName: string): Promise<void> {
-  // 直接写入空数组来清空表，覆盖模式
-  await db.write(tableName, [], { mode: 'overwrite' });
-}
-
-/**
  * 更新匹配的数据
  * @param tableName 表名
  * @param data 要更新的数据
  * @param where 更新条件，只支持基本的相等匹配
  * @returns Promise<number> 更新的记录数
  */
-export async function update(
-  tableName: string,
-  data: Record<string, any>,
-  where: Record<string, any>
-): Promise<number> {
-  // 1. 读取所有数据（会自动从缓存获取或从磁盘读取）
-  const allData = await db.read(tableName);
+export const update = db.update.bind(db);
 
-  // 2. 遍历数据，找到匹配where条件的记录并更新
-  let updatedCount = 0;
-  const finalData = allData.map((item: Record<string, any>) => {
-    // 检查是否匹配where条件
-    let matches = true;
-
-    // 简单处理，只支持基本的相等匹配
-    for (const [key, value] of Object.entries(where)) {
-      if (item[key] !== value) {
-        matches = false;
-        break;
-      }
-    }
-
-    if (matches) {
-      updatedCount++;
-      return { ...item, ...data };
-    }
-    return item;
-  });
-
-  if (updatedCount > 0) {
-    // 3. 调用db.write方法，该方法已实现先执行磁盘操作后删除相关缓存的逻辑
-    await db.write(tableName, finalData, { mode: 'overwrite' });
-  }
-
-  return updatedCount;
-}
+/**
+ * 清空表数据
+ * @param tableName 表名
+ * @returns Promise<void>
+ */
+export const clearTable = db.clearTable.bind(db);
 
 // 自动同步相关类型定义
 

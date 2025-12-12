@@ -29,8 +29,10 @@
   },
   "scripts": {
     "build": "npm run build:all",
-    "build:js": "npx tsc -p tsconfig.js.json",
-    "build:all": "npm run build:js && npm run lint && npm run format:check",
+    "build:js": "tsc -p tsconfig.js.json",
+    "build:types": "tsc -p tsconfig.types.json",
+    "build:all": "rimraf dist && npm run build:js && npm run build:types && npm run lint",
+    "clean": "rimraf dist",
     "test": "jest --config jest.simple.config.js --testPathIgnorePatterns=crypto-security-assessment --testPathIgnorePatterns=performance-optimization",
     "test:core": "jest --config jest.simple.config.js --testPathIgnorePatterns=crypto-security-assessment --testPathIgnorePatterns=performance-optimization --testMatch=**/src/core/**/__tests__/**/*.test.ts",
     "test:api": "jest --config jest.simple.config.js --testPathPatterns=apiTest --testPathPatterns=src/api.test.ts",
@@ -49,20 +51,22 @@
     "format:check": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run typecheck",
+    "prepublishOnly": "npm run build:all && npm run typecheck",
     "publish:safe": "npm run build && npm run typecheck && npm publish",
     "publish:force": "npm publish --ignore-scripts",
     "postinstall": "node -e \"try { const { ConfigGenerator } = require('./dist/js/utils/configGenerator'); ConfigGenerator.generateConfig(process.cwd()); } catch(e) { console.log('配置文件生成失败:', e.message); }\""
   },
   "dependencies": {
-    "crypto-es": "^3.1.2",
     "bcryptjs": "^3.0.3",
+    "crypto-es": "^3.1.2",
     "expo-crypto": "~15.0.7",
     "expo-file-system": "~18.0.7",
     "expo-secure-store": "~15.0.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/crypto-js": "^4.2.2",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.10.1",
     "@types/react": "^19.0.0",
@@ -73,18 +77,17 @@
     "eslint-plugin-prettier": "^5.2.1",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
+    "expo": "~54.0.23",
     "globals": "^16.5.0",
     "jest": "^30.2.0",
     "jiti": "^2.6.1",
     "prettier": "^3.3.3",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "rimraf": "^6.1.2",
     "ts-jest": "^29.4.5",
     "typescript": "~5.9.2",
-    "typescript-eslint": "^8.48.1",
-    "@types/bcryptjs": "^2.4.6",
-    "@types/crypto-js": "^4.2.2",
-    "expo": "~54.0.23",
-    "react": "19.1.0",
-    "react-native": "0.81.5"
+    "typescript-eslint": "^8.48.1"
   },
   "private": false
 }

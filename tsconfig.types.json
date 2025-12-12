@@ -1,0 +1,13 @@
+// tsconfig.types.json
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist/types",
+    "declaration": true,
+    "emitDeclarationOnly": true,    // 关键！只生成 .d.ts 不生成 js
+    "declarationMap": true,
+    "sourceMap": false
+  },
+  "include": ["src/**/*"],
+  "exclude": ["src/__tests__/**", "src/**/*.test.ts", "dist/**"]
+}

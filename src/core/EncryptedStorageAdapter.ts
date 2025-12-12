@@ -430,4 +430,32 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   async rollback(): Promise<void> {
     return storage.rollback();
   }
+
+  async update(tableName: string, data: Record<string, any>, where: Record<string, any>): Promise<number> {
+    // 清除缓存
+    this.clearTableCache(tableName);
+    
+    // 直接调用底层存储适配器的update方法
+    const result = await storage.update(tableName, data, where);
+    
+    return result;
+  }
+
+  async remove(tableName: string, where: Record<string, any>): Promise<number> {
+    // 清除缓存
+    this.clearTableCache(tableName);
+    
+    // 直接调用底层存储适配器的remove方法
+    const result = await storage.remove(tableName, where);
+    
+    return result;
+  }
+
+  async clearTable(tableName: string): Promise<void> {
+    // 清除缓存
+    this.clearTableCache(tableName);
+    
+    // 直接调用底层存储适配器的clearTable方法
+    await storage.clearTable(tableName);
+  }
 }

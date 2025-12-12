@@ -209,6 +209,42 @@ export interface IStorageAdapter {
    * @returns Promise<void>
    */
   migrateToChunked(tableName: string): Promise<void>;
+
+  /**
+   * zh-CN:
+   * 更新匹配的数据
+   * en:
+   * update matched records
+   * ————————
+   * @param tableName table name / 表名
+   * @param data data to update / 要更新的数据
+   * @param where update condition / 更新条件
+   * @returns Promise<number> number of updated records / 更新的记录数
+   */
+  update(tableName: string, data: Record<string, any>, where: Record<string, any>): Promise<number>;
+
+  /**
+   * zh-CN:
+   * 删除数据（与delete方法功能相同，为了API兼容性）
+   * en:
+   * delete data (alias for delete method, for API compatibility)
+   * ————————
+   * @param tableName table name / 表名
+   * @param where delete condition / 删除条件
+   * @returns Promise<number> number of deleted records / 删除的记录数
+   */
+  remove(tableName: string, where: Record<string, any>): Promise<number>;
+
+  /**
+   * zh-CN:
+   * 清空表数据
+   * en:
+   * clear table data
+   * ————————
+   * @param tableName table name / 表名
+   * @returns Promise<void>
+   */
+  clearTable(tableName: string): Promise<void>;
 }
 
 // StorageError 存储层错误类

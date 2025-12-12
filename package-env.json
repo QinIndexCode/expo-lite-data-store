@@ -1,13 +1,20 @@
 {
   "name": "expo-lite-data-store",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "main": "dist/js/index.js",
   "types": "dist/types/index.d.ts",
   "author": "QinIndexCode",
   "license": "MIT",
-  "description": "A lite data store for Expo; \n Detail in https://github.com/QinIndexCode/expo-lite-data-store please don't use 1.0.0 version because it's not stable. In this version , fix crypto compatibility issue. ",
+  "description": "A lite data store for Expo; \n Detail in https://github.com/QinIndexCode/expo-lite-data-store fix update ,remove,delete issue",
   "versionDescription": "fix crypto compatibility issue and add config generation tool",
-  "keywords": ["expo", "data store", "lite", "data", "storage", "react-native"],
+  "keywords": [
+    "expo",
+    "data store",
+    "lite",
+    "data",
+    "storage",
+    "react-native"
+  ],
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
@@ -21,7 +28,10 @@
     }
   },
   "scripts": {
-    "build": "npx tsc -p tsconfig.js.json",
+    "build": "npm run build:all",
+    "build:js": "tsc -p tsconfig.js.json",
+    "build:types": "tsc -p tsconfig.types.json",
+    "build:all": "npm run build:js && npm run build:types",
     "prepare": "npm run build",
     "postinstall": "node -e \"try { const { ConfigGenerator } = require('./dist/js/utils/configGenerator'); ConfigGenerator.generateConfig(process.cwd()); } catch(e) { console.log('配置文件生成失败:', e.message); }\""
   },
