@@ -122,8 +122,80 @@ function deepMerge<T>(target: T, source: Partial<T>): T {
 // 配置存储，用于保存用户修改后的配置
 let userModifiedConfig: Partial<LiteStoreConfig> = {};
 
-// 合并配置
+// 自动加载用户根目录配置文件的函数
+async function loadUserConfig() {
+  // 仅在 Node.js 环境中执行，浏览器环境跳过
+  if (typeof process !== 'undefined' && process.versions && process.versions.node) {
+    try {
+      // 动态导入 Node.js 模块，避免在浏览器环境中加载失败
+      const fs = await import('fs');
+      const path = await import('path');
+      
+      // 构建用户根目录配置文件路径
+      const configPath = path.join(process.cwd(), 'liteStore.config.ts');
+      
+      // 检查配置文件是否存在
+      if (fs.existsSync(configPath)) {
+        // 动态加载用户配置文件
+        // 注意：在 ES 模块中，我们需要使用 dynamic import
+        // 但由于 TypeScript 编译后的代码可能是 CommonJS，我们需要兼容处理
+        let userConfig;
+        try {
+          // 首先尝试使用 CommonJS require（适用于编译后的代码）
+          if (typeof require !== 'undefined') {
+            userConfig = require(configPath);
+          } else {
+            // 否则尝试使用 ES 模块 dynamic import
+            const module = await import(configPath);
+            userConfig = module;
+          }
+          
+          // 提取默认导出
+          const userConfigData = userConfig.default || userConfig;
+          
+          if (userConfigData && typeof userConfigData === 'object') {
+            // 合并用户配置
+            userModifiedConfig = deepMerge(userModifiedConfig, userConfigData);
+            console.log('✅ 成功加载用户配置文件:', configPath);
+          }
+        } catch (e: any) {
+          console.warn('⚠️  动态加载配置文件失败，可能是因为配置文件使用了 TypeScript 语法', e.message || String(e));
+          // 尝试另一种方式：读取文件内容并解析（仅适用于简单配置）
+          try {
+            const fileContent = fs.readFileSync(configPath, 'utf8');
+            // 简单的配置文件解析，提取默认导出的对象
+            const configMatch = fileContent.match(/export\s+default\s+({[\s\S]*?});/);
+            if (configMatch && configMatch[1]) {
+              const userConfigData = eval(`(${configMatch[1]})`);
+              if (userConfigData && typeof userConfigData === 'object') {
+                userModifiedConfig = deepMerge(userModifiedConfig, userConfigData);
+                console.log('✅ 成功解析用户配置文件:', configPath);
+              }
+            }
+          } catch (parseError: any) {
+            console.warn('⚠️  解析配置文件内容失败:', parseError.message || String(parseError));
+          }
+        }
+      }
+    } catch (error: any) {
+      console.warn('⚠️  加载用户配置文件时发生错误:', error.message || String(error));
+      // 继续使用默认配置
+    }
+  }
+}
+
+// 初始化时自动加载用户配置
+loadUserConfig();
+
+// 注意：由于 loadUserConfig 是异步的，初始合并会使用默认配置
+// 配置会在 loadUserConfig 完成后通过 setConfig 方法更新
 const config: LiteStoreConfig = deepMerge(defaultConfig, userModifiedConfig);
+
+// 确保配置在异步加载完成后更新
+loadUserConfig().then(() => {
+  // 更新配置对象
+  Object.assign(config, deepMerge(defaultConfig, userModifiedConfig));
+});
 
 /**
  * 设置配置
