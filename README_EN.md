@@ -11,7 +11,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)
 [![React Native](https://img.shields.io/badge/React%20Native-0.81+-blue.svg)](https://reactnative.dev/)
 
-**Ultra-lightweight, zero-configuration, pure TypeScript Expo local database**
+**Lightweight, easy-configuration, pure TypeScript Expo local database**
 
 Designed specifically for React Native + Expo projects, with no native dependencies. Provides complete CRUD operations, transaction support, index optimization, and intelligent sorting features.
 
@@ -19,14 +19,14 @@ Designed specifically for React Native + Expo projects, with no native dependenc
 
 | Feature                          | Description                                                                     |
 | -------------------------------- | ------------------------------------------------------------------------------- |
-| 🚀 **Zero configuration**        | Only depends on React Native FS, no Metro configuration                         |
-| 🔒 **Optional encryption**       | AES-GCM encryption, keys fully under your control                               |
-| 📦 **Intelligent chunking**      | Automatically handles >5MB files, perfectly avoiding RN FS limits               |
-| 🔄 **Complete transactions**     | ACID transaction guarantees, data consistency ensured                           |
+| 🚀 **Easy configuration**        | Only depends on React Native FS, no Metro configuration                         |
+| 🔒 **Optional encryption**       | AES-CTR encryption, keys automatically generated and managed by the system      |
+| 📦 **Intelligent chunking**      | Automatically handles >5MB files, avoiding RN FS limits                         |
+| 🔄 **Transaction support**       | Transaction support, data consistency ensured                                   |
 | 📝 **TypeScript native support** | Complete type definitions, ready to use                                         |
-| 🔍 **Complex queries**           | Supports advanced queries like where, skip, limit, sort                         |
+| 🔍 **Advanced queries**          | Supports advanced queries like where, skip, limit, sort                         |
 | 📱 **Fully offline**             | No network required, 100% local data storage                                    |
-| 🎯 **Intelligent sorting**       | 5 sorting algorithms, automatically selects optimal performance                 |
+| 🎯 **Intelligent sorting**       | 5 sorting algorithms, automatically selects appropriate algorithm based on data size |
 | ⏰ **Auto-synchronization**      | Regularly synchronizes dirty data from cache to disk, ensuring data persistence |
 
 ## 📦 Installation
@@ -145,22 +145,65 @@ For complete detailed documentation, please check the local [WIKI_EN.md](WIKI_EN
 
 ## 🔧 Configuration
 
+### Configuration Modification Method
+
+To modify the configuration, please find the `node_modules/expo-lite-data-store/dist/js/liteStore.config.js` file and make changes to it.
+
+### Configuration Options
+
+The configuration file contains the following main options:
+
 ```typescript
 // liteStore.config.js
 module.exports = {
+  // Basic configuration
+  chunkSize: 5 * 1024 * 1024, // File chunk size (5MB)
+  storageFolder: 'expo-litedatastore', // Storage folder name
+  sortMethods: 'default', // Default sorting algorithm
+  timeout: 30000, // Operation timeout (30 seconds)
+  
   // Encryption configuration
   encryption: {
-    cacheTimeout: 30000, // Cache timeout (milliseconds)
-    maxCacheSize: 100, // Maximum number of cached tables
-    // Other encryption configurations...
+    algorithm: 'AES-CTR', // Encryption algorithm
+    keySize: 256, // Key size
+    hmacAlgorithm: 'SHA-256', // HMAC algorithm
+    keyIterations: 100000, // Key iteration count
+    enableFieldLevelEncryption: false, // Enable field-level encryption
+    encryptedFields: [], // Fields to encrypt
+    cacheTimeout: 300000, // Cache timeout (5 minutes)
+    maxCacheSize: 50, // Maximum number of cached tables
+    useBulkOperations: true, // Enable bulk operations
   },
+  
   // Performance configuration
   performance: {
     enableQueryOptimization: true, // Enable query optimization
+    maxConcurrentOperations: 5, // Maximum concurrent operations
     enableBatchOptimization: true, // Enable batch operation optimization
-    // Other performance configurations...
+    memoryWarningThreshold: 0.8, // Memory warning threshold (80%)
   },
-  // Other configurations...
+  
+  // Cache configuration
+  cache: {
+    maxSize: 1000, // Maximum cache size
+    defaultExpiry: 3600000, // Default expiry time (1 hour)
+    enableCompression: false, // Enable compression
+    cleanupInterval: 300000, // Cleanup interval (5 minutes)
+    memoryWarningThreshold: 0.8, // Memory warning threshold (80%)
+    autoSync: {
+      enabled: true, // Enable auto-sync
+      interval: 5000, // Sync interval (5 seconds)
+      minItems: 1, // Minimum items for sync
+      batchSize: 100, // Batch size limit
+    },
+  },
+  
+  // Monitoring configuration
+  monitoring: {
+    enablePerformanceTracking: true, // Enable performance tracking
+    enableHealthChecks: true, // Enable health checks
+    metricsRetention: 86400000, // Metrics retention (24 hours)
+  },
 };
 ```
 

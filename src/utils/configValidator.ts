@@ -49,8 +49,7 @@ export class ConfigValidator {
     // 验证缓存配置
     this.validateCacheConfig(result);
 
-    // 验证API配置
-    this.validateApiConfig(result);
+
 
     // 验证监控配置
     this.validateMonitoringConfig(result);
@@ -323,78 +322,7 @@ export class ConfigValidator {
     }
   }
 
-  /**
-   * 验证API配置
-   * @param result 验证结果对象
-   */
-  private static validateApiConfig(result: ConfigValidationResult): void {
-    const api = config.api;
-    if (api) {
-      // 验证rateLimit配置
-      if (api.rateLimit) {
-        // 验证enabled
-        if (api.rateLimit.enabled !== undefined) {
-          if (typeof api.rateLimit.enabled !== 'boolean') {
-            result.errors.push('api.rateLimit.enabled must be a boolean');
-            result.isValid = false;
-          }
-        }
 
-        // 验证requestsPerSecond
-        if (api.rateLimit.requestsPerSecond !== undefined) {
-          if (typeof api.rateLimit.requestsPerSecond !== 'number') {
-            result.errors.push('api.rateLimit.requestsPerSecond must be a number');
-            result.isValid = false;
-          } else if (api.rateLimit.requestsPerSecond < 1) {
-            result.errors.push('api.rateLimit.requestsPerSecond must be greater than 0');
-            result.isValid = false;
-          } else if (api.rateLimit.requestsPerSecond > 1000) {
-            result.warnings.push('api.rateLimit.requestsPerSecond should be less than or equal to 1000');
-          }
-        }
-
-        // 验证burstCapacity
-        if (api.rateLimit.burstCapacity !== undefined) {
-          if (typeof api.rateLimit.burstCapacity !== 'number') {
-            result.errors.push('api.rateLimit.burstCapacity must be a number');
-            result.isValid = false;
-          } else if (api.rateLimit.burstCapacity < 1) {
-            result.errors.push('api.rateLimit.burstCapacity must be greater than 0');
-            result.isValid = false;
-          }
-        }
-      }
-
-      // 验证retry配置
-      if (api.retry) {
-        // 验证maxAttempts
-        if (api.retry.maxAttempts !== undefined) {
-          if (typeof api.retry.maxAttempts !== 'number') {
-            result.errors.push('api.retry.maxAttempts must be a number');
-            result.isValid = false;
-          } else if (api.retry.maxAttempts < 1) {
-            result.errors.push('api.retry.maxAttempts must be greater than 0');
-            result.isValid = false;
-          } else if (api.retry.maxAttempts > 10) {
-            result.warnings.push('api.retry.maxAttempts should be less than or equal to 10');
-          }
-        }
-
-        // 验证backoffMultiplier
-        if (api.retry.backoffMultiplier !== undefined) {
-          if (typeof api.retry.backoffMultiplier !== 'number') {
-            result.errors.push('api.retry.backoffMultiplier must be a number');
-            result.isValid = false;
-          } else if (api.retry.backoffMultiplier < 1) {
-            result.errors.push('api.retry.backoffMultiplier must be greater than or equal to 1');
-            result.isValid = false;
-          } else if (api.retry.backoffMultiplier > 10) {
-            result.warnings.push('api.retry.backoffMultiplier should be less than or equal to 10');
-          }
-        }
-      }
-    }
-  }
 
   /**
    * 验证监控配置

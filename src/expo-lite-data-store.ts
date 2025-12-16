@@ -3,15 +3,9 @@
 // 提供数据库操作的所有公共接口，包括表管理、数据读写、查询、事务等
 // 创建于: 2025-11-19
 // 最后修改: 2025-12-12
+// 直接导入数据库实例
 import { db, plainStorage } from './core/db';
-import { setConfig, getConfig, resetConfig } from './liteStore.config';
-import { LiteStoreConfig } from './types/config';
 // AutoSyncService 类型用于类型检查
-
-/**
- * LiteStore 配置类型
- */
-export { LiteStoreConfig };
 
 /**
  * 数据库实例，支持加密存储
@@ -22,23 +16,6 @@ export { db };
  * 普通存储实例，不支持加密
  */
 export { plainStorage };
-
-/**
- * 设置配置
- * @param config 配置对象
- */
-export { setConfig };
-
-/**
- * 获取当前配置
- * @returns 当前配置对象
- */
-export { getConfig };
-
-/**
- * 重置配置为默认值
- */
-export { resetConfig };
 
 /**
  * 创建表
@@ -279,10 +256,6 @@ export default {
   migrateToChunked,
   clearTable,
   update,
-  // 配置相关方法
-  setConfig,
-  getConfig,
-  resetConfig,
   // 自动同步相关方法
   getSyncStats,
   syncNow,

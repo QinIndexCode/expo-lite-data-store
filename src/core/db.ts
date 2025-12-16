@@ -15,29 +15,6 @@ import { EncryptedStorageAdapter } from './EncryptedStorageAdapter';
 const USE_ENCRYPTION = !(typeof process !== 'undefined' && process.env.NODE_ENV === 'test') && true;
 
 /**
- * 初始化配置文件
- * 仅在 Node.js 环境中运行，在浏览器环境中跳过
- */
-async function initializeConfig() {
-  // 检查是否在 Node.js 环境中
-  if (typeof process !== 'undefined' && process.versions && process.versions.node) {
-    try {
-      // 动态导入配置生成器，避免在浏览器环境中加载 fs 模块
-      const { ConfigGenerator } = await import('../utils/configGenerator');
-
-      // 生成配置文件（如果不存在）
-      await ConfigGenerator.generateConfig();
-    } catch (error) {
-      console.debug('初始化配置文件失败:', error);
-      // 配置文件生成失败不影响数据库初始化，使用默认配置
-    }
-  }
-}
-
-// 初始化配置文件
-initializeConfig();
-
-/**
  * 默认数据库实例
  * 根据 USE_ENCRYPTION 配置决定使用加密存储还是普通存储
  */

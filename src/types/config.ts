@@ -1,4 +1,11 @@
 /**
+ * 深度Partial类型，使所有嵌套属性都变为可选
+ */
+export type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
+};
+
+/**
  * LiteStore配置类型定义
  */
 export interface LiteStoreConfig {
@@ -49,18 +56,7 @@ export interface LiteStoreConfig {
     };
   };
 
-  /** API配置 */
-  api: {
-    rateLimit: {
-      enabled: boolean;
-      requestsPerSecond: number;
-      burstCapacity: number;
-    };
-    retry: {
-      maxAttempts: number;
-      backoffMultiplier: number;
-    };
-  };
+
 
   /** 监控配置 */
   monitoring: {

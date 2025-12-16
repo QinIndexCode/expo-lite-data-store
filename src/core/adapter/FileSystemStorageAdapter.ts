@@ -74,13 +74,13 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     // 初始化服务，支持自定义缓存配置
     const defaultCacheConfig: CacheConfig = {
       strategy: CacheStrategy.LRU,
-      maxSize: CACHE.DEFAULT_MAX_SIZE,
-      defaultExpiry: CACHE.DEFAULT_EXPIRY, // 1小时
+      maxSize: config.cache.maxSize || CACHE.DEFAULT_MAX_SIZE,
+      defaultExpiry: config.cache.defaultExpiry || CACHE.DEFAULT_EXPIRY, // 1小时
       enablePenetrationProtection: true,
       enableBreakdownProtection: true,
       enableAvalancheProtection: true,
       maxMemoryUsage: 50 * 1024 * 1024, // 默认50MB内存限制
-      memoryThreshold: CACHE.MEMORY_THRESHOLD, // 80%阈值触发清理
+      memoryThreshold: config.cache.memoryWarningThreshold || CACHE.MEMORY_THRESHOLD, // 80%阈值触发清理
       avalancheRandomExpiry: CACHE.AVALANCHE_PROTECTION_RANGE, // 0-5分钟随机过期
     };
 
@@ -88,6 +88,8 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       ...defaultCacheConfig,
       ...options?.cacheConfig,
     });
+    
+
 
     this.cacheService = new CacheService(this.cacheManager);
     this.transactionService = new TransactionService();

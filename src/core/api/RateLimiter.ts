@@ -4,7 +4,7 @@
 // 最后修改: 2025-12-11
 
 import { RATE_LIMIT } from '../constants';
-import config from '../../liteStore.config';
+
 
 /**
  * 限流配置接口
@@ -267,7 +267,7 @@ export class RateLimiter {
    * @returns 默认限流速率（每秒令牌数）
    */
   static getDefaultRate(): number {
-    return config.api?.rateLimit?.requestsPerSecond || RATE_LIMIT.DEFAULT_RATE;
+    return RATE_LIMIT.DEFAULT_RATE;
   }
 
   /**
@@ -275,7 +275,7 @@ export class RateLimiter {
    * @returns 默认令牌桶容量
    */
   static getDefaultCapacity(): number {
-    return config.api?.rateLimit?.burstCapacity || RATE_LIMIT.DEFAULT_CAPACITY;
+    return RATE_LIMIT.DEFAULT_CAPACITY;
   }
 
   /**
@@ -283,7 +283,7 @@ export class RateLimiter {
    * @returns 默认是否启用限流
    */
   static isEnabledByDefault(): boolean {
-    return config.api?.rateLimit?.enabled !== false;
+    return true;
   }
 
   /**
@@ -291,7 +291,7 @@ export class RateLimiter {
    * @returns 默认重试次数
    */
   static getDefaultMaxAttempts(): number {
-    return config.api?.retry?.maxAttempts || 3;
+    return 3;
   }
 
   /**
@@ -299,7 +299,7 @@ export class RateLimiter {
    * @returns 默认重试退避乘数
    */
   static getDefaultBackoffMultiplier(): number {
-    return config.api?.retry?.backoffMultiplier || 2;
+    return 2;
   }
 }
 

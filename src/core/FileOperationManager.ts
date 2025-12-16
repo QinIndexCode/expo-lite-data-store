@@ -44,6 +44,17 @@ export class FileOperationManager {
     this.permissionChecker = new PermissionChecker();
     this.fileHandlerFactory = new FileHandlerFactory(chunkSize, metadataManager);
   }
+  
+  /**
+   * 更新分片大小
+   * @param chunkSize 新的分片大小
+   */
+  updateChunkSize(chunkSize: number): void {
+    if (this.fileHandlerFactory && typeof (this.fileHandlerFactory as any).updateChunkSize === 'function') {
+      (this.fileHandlerFactory as any).updateChunkSize(chunkSize);
+      console.log('[FileOperationManager] Chunk size updated to:', chunkSize);
+    }
+  }
 
   /**
    * 获取文件信息，优先从缓存中获取

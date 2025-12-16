@@ -1,7 +1,7 @@
 // src/taskQueue/taskQueue.ts
 // 任务队列管理系统
 //
-import config from '../liteStore.config';
+
 //
 /**
 //  * 任务优先级枚举
@@ -177,7 +177,7 @@ export class TaskQueue {
     this.config = {
       maxConcurrentTasks: queueConfig.maxConcurrentTasks || 5,
       defaultTimeout: queueConfig.defaultTimeout || 30000,
-      defaultMaxRetries: queueConfig.defaultMaxRetries || config.api.retry.maxAttempts,
+      defaultMaxRetries: queueConfig.defaultMaxRetries || 3,
     };
   }
 
@@ -395,7 +395,7 @@ export class TaskQueue {
           task.error = error;
 
           // Calculate exponential backoff based on retry count and config
-          const backoffTime = Math.pow(config.api.retry.backoffMultiplier, task.retryCount - 1) * 1000;
+          const backoffTime = Math.pow(2, task.retryCount - 1) * 1000;
 
           // Add jitter to prevent thundering herd
           const jitter = Math.random() * 500;

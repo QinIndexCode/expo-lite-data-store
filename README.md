@@ -15,7 +15,7 @@ English: [English Document](./README_EN.md)
 [![React Native](https://img.shields.io/badge/React%20Native-0.81+-blue.svg)](https://reactnative.dev/)
 [![Expo](https://img.shields.io/badge/Expo-51.0+-blue.svg)](https://expo.dev/)
 
-**超轻量、零配置、纯 TypeScript 编写的 Expo 本地数据库**
+**轻量、易配置、纯 TypeScript 编写的 Expo 本地数据库**
 
 专为 React Native + Expo 项目设计，无需任何 native 依赖。提供完整的 CRUD 操作、事务支持、索引优化和智能排序功能。
 
@@ -23,14 +23,14 @@ English: [English Document](./README_EN.md)
 
 | 特性                       | 描述                                           |
 | -------------------------- | ---------------------------------------------- |
-| 🚀 **零配置使用**          | 仅依赖 React Native FS，无需 Metro 配置        |
-| 🔒 **可选加密**            | AES-GCM 加密，密钥完全由您掌控                 |
-| 📦 **智能分块**            | 自动处理 >5MB 文件，完美规避 RN FS 限制        |
-| 🔄 **完整事务**            | ACID 事务保证，数据一致性有保障                |
+| 🚀 **易配置使用**          | 仅依赖 React Native FS，无需 Metro 配置        |
+| 🔒 **可选加密**            | AES-CTR 加密，密钥由系统自动生成和管理         |
+| 📦 **智能分块**            | 自动处理 >5MB 文件，规避 RN FS 限制            |
+| 🔄 **事务支持**            | 事务保证，数据一致性有保障                    |
 | 📝 **TypeScript 原生支持** | 完整的类型定义，开箱即用                       |
-| 🔍 **复杂查询**            | 支持 where、skip、limit、sort 等高级查询       |
+| 🔍 **高级查询**            | 支持 where、skip、limit、sort 等查询选项       |
 | 📱 **完全离线**            | 无需网络，数据 100% 存储在设备本地             |
-| 🎯 **智能排序**            | 5种排序算法，自动选择最优性能                  |
+| 🎯 **智能排序**            | 5种排序算法，根据数据量自动选择合适算法        |
 | ⏰ **自动同步**            | 定期将缓存中的脏数据同步到磁盘，确保数据持久化 |
 
 ## 📦 安装
@@ -149,23 +149,70 @@ console.log(users);
 
 ## 🔧 配置
 
+### 如何修改配置
+
+配置直接从打包文件加载。要修改配置，您需要编辑以下文件：
+
+```
+node_modules/expo-lite-data-store/dist/js/liteStore.config.js
+```
+
+### 配置选项
+
+配置文件包含以下主要选项：
+
 ```typescript
 // liteStore.config.js
 module.exports = {
+  // 基础配置
+  chunkSize: 5 * 1024 * 1024, // 文件分块大小（5MB）
+  storageFolder: 'expo-litedatastore', // 存储文件夹名称
+  sortMethods: 'default', // 默认排序算法
+  timeout: 10000, // 操作超时时间（10秒）
+  
   // 加密配置
   encryption: {
-    cacheTimeout: 30000, // 缓存超时时间（毫秒）
-    maxCacheSize: 100, // 最大缓存表数量
-    // 其他加密配置...
+    algorithm: 'AES-CTR', // 加密算法
+    keySize: 256, // 密钥长度
+    hmacAlgorithm: 'SHA-512', // HMAC算法
+    keyIterations: 120000, // 密钥迭代次数
+    enableFieldLevelEncryption: false, // 是否启用字段级加密
+    encryptedFields: ['password', 'email', 'phone'], // 需要加密的字段
+    cacheTimeout: 30000, // 密钥缓存超时时间（30秒）
+    maxCacheSize: 50, // 最大缓存密钥数量
+    useBulkOperations: true, // 是否启用批量操作
   },
+  
   // 性能配置
   performance: {
-    enableQueryOptimization: true, // 启用查询优化
-    enableBatchOptimization: true, // 启用批量操作优化
-    // 其他性能配置...
+    enableQueryOptimization: true, // 是否启用查询优化
+    maxConcurrentOperations: 5, // 最大并发操作数
+    enableBatchOptimization: true, // 是否启用批量操作优化
+    memoryWarningThreshold: 0.8, // 内存警告阈值（80%）
   },
-  // 其他配置...
-};
+  
+  // 缓存配置
+  cache: {
+    maxSize: 1000, // 最大缓存大小
+    defaultExpiry: 3600000, // 默认过期时间（1小时）
+    enableCompression: false, // 是否启用压缩
+    cleanupInterval: 300000, // 清理间隔（5分钟）
+    memoryWarningThreshold: 0.8, // 内存警告阈值（80%）
+    autoSync: {
+      enabled: true, // 是否启用自动同步
+      interval: 5000, // 同步间隔（5秒）
+      minItems: 1, // 触发同步的最小项目数
+      batchSize: 100, // 每次同步的最大项目数
+    },
+  },
+  
+  // 监控配置
+  monitoring: {
+    enablePerformanceTracking: true, // 是否启用性能跟踪
+    enableHealthChecks: true, // 是否启用健康检查
+    metricsRetention: 86400000, // 指标保留时间（24小时）
+  },
+}
 ```
 
 ## 🐛 常见问题

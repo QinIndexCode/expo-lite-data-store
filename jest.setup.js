@@ -4,7 +4,7 @@
 // 设置测试环境变量
 process.env.NODE_ENV = 'test';
 
-console.log('[jest.setup] 测试环境初始化，NODE_ENV =', process.env.NODE_ENV);
+console.log('[jest.setup] Test environment initialized, NODE_ENV =', process.env.NODE_ENV);
 
 // 测试监控和超时检测
 global.testMonitor = {
@@ -17,7 +17,7 @@ global.testMonitor = {
     this.currentTest = { name: testName, path: testPath };
     this.testStartTime = Date.now();
 
-    console.log(`[TestMonitor] 开始测试: ${testName} (${testPath})`);
+    console.log(`[TestMonitor] Starting test: ${testName} (${testPath})`);
 
     // 清理之前的超时
     if (this.timeoutId) {
@@ -27,21 +27,21 @@ global.testMonitor = {
 
     // 设置60秒超时 - 使用真实定时器确保在fake timers环境中也能工作
     this.timeoutId = setTimeout(() => {
-      console.error(`[TestMonitor] ❌ 测试超时！测试已运行超过60秒`);
-      console.error(`[TestMonitor] 当前测试: ${this.currentTest ? this.currentTest.name : '未知'}`);
-      console.error(`[TestMonitor] 测试文件: ${this.currentTest ? this.currentTest.path : '未知'}`);
-      console.error(`[TestMonitor] 开始时间: ${new Date(this.testStartTime).toISOString()}`);
-      console.error(`[TestMonitor] 运行时长: ${(Date.now() - this.testStartTime) / 1000}秒`);
+      console.error(`[TestMonitor] ❌ Test timeout! Test has been running for more than 60 seconds`);
+      console.error(`[TestMonitor] Current test: ${this.currentTest ? this.currentTest.name : 'unknown'}`);
+      console.error(`[TestMonitor] Test file: ${this.currentTest ? this.currentTest.path : 'unknown'}`);
+      console.error(`[TestMonitor] Start time: ${new Date(this.testStartTime).toISOString()}`);
+      console.error(`[TestMonitor] Duration: ${(Date.now() - this.testStartTime) / 1000} seconds`);
 
       // 报告可能的阻塞点
       this.reportPotentialBlockage();
 
       // 强制退出进程
-      console.error(`[TestMonitor] 强制退出测试进程...`);
+      console.error(`[TestMonitor] Forcing test process exit...`);
       process.exit(1);
     }, this.timeoutDuration);
 
-    console.log(`[TestMonitor] 已设置${this.timeoutDuration / 1000}秒超时监控`);
+    console.log(`[TestMonitor] Set ${this.timeoutDuration / 1000} seconds timeout monitoring`);
   },
 
   endTest(testName) {
@@ -52,7 +52,7 @@ global.testMonitor = {
 
     if (this.currentTest && this.testStartTime) {
       const duration = Date.now() - this.testStartTime;
-      console.log(`[TestMonitor] ✅ 测试完成: ${testName} (${duration}ms)`);
+      console.log(`[TestMonitor] ✅ Test completed: ${testName} (${duration}ms)`);
     }
 
     this.currentTest = null;
@@ -60,27 +60,27 @@ global.testMonitor = {
   },
 
   reportPotentialBlockage() {
-    console.error(`[TestMonitor] 🔍 分析可能的阻塞原因:`);
+    console.error(`[TestMonitor] 🔍 Analyzing potential blockage causes:`);
 
     // 检查是否有未完成的异步操作
     if (typeof jest !== 'undefined') {
-      console.error(`[TestMonitor] - Jest 定时器状态: ${jest.useFakeTimers ? '使用假定时器' : '使用真实定时器'}`);
+      console.error(`[TestMonitor] - Jest timer status: ${jest.useFakeTimers ? 'using fake timers' : 'using real timers'}`);
     }
 
     // 检查进程状态
-    console.error(`[TestMonitor] - 进程内存使用: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
+    console.error(`[TestMonitor] - Process memory usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
 
     // 检查是否有未解决的Promise
-    console.error(`[TestMonitor] - Node.js版本: ${process.version}`);
-    console.error(`[TestMonitor] - 平台: ${process.platform}`);
+    console.error(`[TestMonitor] - Node.js version: ${process.version}`);
+    console.error(`[TestMonitor] - Platform: ${process.platform}`);
 
     // 建议解决方案
-    console.error(`[TestMonitor] 💡 可能的解决方案:`);
-    console.error(`[TestMonitor] 1. 检查是否有未清理的 setTimeout/setInterval`);
-    console.error(`[TestMonitor] 2. 检查是否有未完成的 Promise`);
-    console.error(`[TestMonitor] 3. 检查是否有循环引用或内存泄漏`);
-    console.error(`[TestMonitor] 4. 检查是否有死锁的异步操作`);
-    console.error(`[TestMonitor] 5. 运行: npm test -- --detectOpenHandles`);
+    console.error(`[TestMonitor] 💡 Potential solutions:`);
+    console.error(`[TestMonitor] 1. Check for uncleaned setTimeout/setInterval`);
+    console.error(`[TestMonitor] 2. Check for unresolved Promises`);
+    console.error(`[TestMonitor] 3. Check for circular references or memory leaks`);
+    console.error(`[TestMonitor] 4. Check for deadlocked async operations`);
+    console.error(`[TestMonitor] 5. Run: npm test -- --detectOpenHandles`);
   },
 };
 
@@ -107,11 +107,11 @@ if (typeof afterEach !== 'undefined') {
 // 全局清理：清理所有可能的异步操作和定时器
 if (typeof afterAll !== 'undefined') {
   afterAll(async () => {
-    console.log('[jest.setup] afterAll: 开始全局清理');
+    console.log('[jest.setup] afterAll: Starting global cleanup');
 
     // 清理测试监控器
     if (global.testMonitor && global.testMonitor.timeoutId) {
-      console.log('[jest.setup] afterAll: 清理测试监控器超时定时器');
+      console.log('[jest.setup] afterAll: Cleaning up test monitor timeout timer');
       clearTimeout(global.testMonitor.timeoutId);
       global.testMonitor.timeoutId = null;
     }
@@ -119,7 +119,7 @@ if (typeof afterAll !== 'undefined') {
     try {
       // 停止密钥缓存清理定时器
       const { stopKeyCacheCleanup } = require('./src/utils/crypto');
-      console.log('[jest.setup] afterAll: 清理密钥缓存清理定时器');
+      console.log('[jest.setup] afterAll: Cleaning up key cache cleanup timer');
       stopKeyCacheCleanup();
     } catch (e) {
       console.warn('[jest.setup] afterAll: 清理密钥缓存清理定时器失败', e);
@@ -129,7 +129,7 @@ if (typeof afterAll !== 'undefined') {
       // 清理全局任务队列
       const { taskQueue } = require('./src/taskQueue/taskQueue');
       if (taskQueue && typeof taskQueue.cleanup === 'function') {
-        console.log('[jest.setup] afterAll: 清理全局 taskQueue');
+        console.log('[jest.setup] afterAll: Cleaning up global taskQueue');
         taskQueue.cleanup();
       }
     } catch (e) {
@@ -140,11 +140,11 @@ if (typeof afterAll !== 'undefined') {
       // 清理全局数据库实例
       const { db, plainStorage } = require('./src/core/db');
       if (db && typeof db.cleanup === 'function') {
-        console.log('[jest.setup] afterAll: 清理全局 db 实例');
+        console.log('[jest.setup] afterAll: Cleaning up global db instance');
         db.cleanup();
       }
       if (plainStorage && typeof plainStorage.cleanup === 'function' && plainStorage !== db) {
-        console.log('[jest.setup] afterAll: 清理全局 plainStorage 实例');
+        console.log('[jest.setup] afterAll: Cleaning up global plainStorage instance');
         plainStorage.cleanup();
       }
     } catch (e) {
@@ -165,7 +165,7 @@ if (typeof afterAll !== 'undefined') {
 
     // 等待所有异步操作完成
     await new Promise(resolve => setTimeout(resolve, 100));
-    console.log('[jest.setup] afterAll: 全局清理完成');
+    console.log('[jest.setup] afterAll: Global cleanup completed');
   });
 }
 

@@ -77,7 +77,7 @@ async function taskQueueExample() {
         timeout: 60000,
         callback: task => {
           if (task.status === 'completed') {
-            console.log('模式迁移完成');
+            console.log('Mode migration completed');
             resolve(null);
           } else {
             reject(task.error);

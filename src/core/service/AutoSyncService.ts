@@ -27,7 +27,7 @@ export class AutoSyncService {
   /** 存储适配器实例 */
   private storageAdapter: FileSystemStorageAdapter;
   /** 同步配置 */
-  private config: AutoSyncConfig;
+  private config!: AutoSyncConfig;
   /** 同步定时器ID */
   private syncTimer: ReturnType<typeof setInterval> | null = null;
   /** 是否正在同步中 */
@@ -54,6 +54,15 @@ export class AutoSyncService {
     this.storageAdapter = storageAdapter;
 
     // 初始化配置
+    this._updateConfigFromGlobalConfig();
+
+
+  }
+
+  /**
+   * 从全局配置更新本地配置
+   */
+  private _updateConfigFromGlobalConfig(): void {
     this.config = {
       enabled: config.cache.autoSync?.enabled ?? true,
       interval: config.cache.autoSync?.interval ?? 5000,
@@ -70,7 +79,7 @@ export class AutoSyncService {
       return;
     }
 
-    console.log('[AutoSyncService] 启动自动同步服务', this.config);
+    console.log('[AutoSyncService] Starting auto-sync service', this.config);
 
     // 立即执行一次同步
     this.sync();
@@ -88,7 +97,7 @@ export class AutoSyncService {
     if (this.syncTimer) {
       clearInterval(this.syncTimer);
       this.syncTimer = null;
-      console.log('[AutoSyncService] 停止自动同步服务');
+      console.log('[AutoSyncService] Stopping auto-sync service');
     }
   }
 
@@ -97,7 +106,7 @@ export class AutoSyncService {
    */
   async sync(): Promise<void> {
     if (this.isSyncing) {
-      console.log('[AutoSyncService] 跳过同步，已有同步正在进行');
+      console.log('[AutoSyncService] Skipping sync, already in progress');
       return;
     }
 
@@ -109,11 +118,11 @@ export class AutoSyncService {
       const dirtyData = this.cacheService.getDirtyData();
       const dirtyCount = dirtyData.size;
 
-      console.log('[AutoSyncService] 检测到', dirtyCount, '个脏数据项');
+      console.log('[AutoSyncService] Detected', dirtyCount, 'dirty items');
 
       // 检查是否达到同步阈值
       if (dirtyCount < this.config.minItems) {
-        console.log('[AutoSyncService] 脏数据数量未达到阈值，跳过同步');
+        console.log('[AutoSyncService] Dirty item count below threshold, skipping sync');
         return;
       }
 
@@ -123,7 +132,7 @@ export class AutoSyncService {
         // 从缓存键中提取表名
         const tableName = cacheKey.split('_')[0];
 
-        console.log('[AutoSyncService] 同步表', tableName, '的所有数据');
+        console.log('[AutoSyncService] Syncing all data for table', tableName);
 
         // 写入磁盘，使用overwrite模式确保数据一致性
         // 因为缓存中存储的是完整的表数据，所以需要使用overwrite模式
@@ -134,7 +143,7 @@ export class AutoSyncService {
 
         // 更新统计信息
         this.stats.totalItemsSynced += Array.isArray(data) ? data.length : 1;
-        console.log('[AutoSyncService] 完成同步表', tableName, '的所有数据');
+        console.log('[AutoSyncService] Completed sync for table', tableName);
       }
 
       // 更新统计信息
@@ -145,9 +154,9 @@ export class AutoSyncService {
       // 平滑更新平均同步耗时
       this.stats.avgSyncTime = (this.stats.avgSyncTime * (this.stats.syncCount - 1) + syncTime) / this.stats.syncCount;
 
-      console.log('[AutoSyncService] 同步完成，耗时', syncTime, 'ms');
+      console.log('[AutoSyncService] Completed sync in', syncTime, 'ms');
     } catch (error) {
-      console.error('[AutoSyncService] 同步失败:', error);
+      console.error('[AutoSyncService] Sync failed:', error);
     } finally {
       this.isSyncing = false;
     }
@@ -179,7 +188,7 @@ export class AutoSyncService {
       ...newConfig,
     };
 
-    console.log('[AutoSyncService] 更新同步配置', this.config);
+    console.log('[AutoSyncService] Updated sync configuration', this.config);
 
     // 如果配置改变，重启定时器
     if (newConfig.interval !== undefined && this.syncTimer) {

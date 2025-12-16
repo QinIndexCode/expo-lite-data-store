@@ -9,7 +9,7 @@ import { ErrorHandler } from '../utils/errorHandler';
 import { QueryEngine } from './query/QueryEngine';
 
 export class EncryptedStorageAdapter implements IStorageAdapter {
-  private keyPromise: Promise<string>;
+  private keyPromise: Promise<string> | null = null;
   private cachedData: Map<string, { data: Record<string, any>[]; timestamp: number }> = new Map();
   private cacheTimeout = config.encryption.cacheTimeout; // 从配置读取缓存超时时间
   private maxCacheSize = config.encryption.maxCacheSize; // 从配置读取最大缓存大小
@@ -18,11 +18,19 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   private queryIndexes: Map<string, Map<string, Map<string | number, Record<string, any>[]>>> = new Map();
 
   constructor() {
-    // 在构造函数中初始化 keyPromise，确保每个实例都使用相同的密钥
-    this.keyPromise = getMasterKey();
-
     // 配置验证
     this.validateConfig();
+  }
+
+  /**
+   * 获取或初始化密钥
+   * 延迟初始化，只有在实际需要使用密钥时才调用getMasterKey()，避免不必要的生物识别/密码识别
+   */
+  private async getOrInitKey(): Promise<string> {
+    if (!this.keyPromise) {
+      this.keyPromise = getMasterKey();
+    }
+    return this.keyPromise;
   }
 
   /**
@@ -72,7 +80,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   private async key() {
-    return await this.keyPromise;
+    return await this.getOrInitKey();
   }
 
   /**

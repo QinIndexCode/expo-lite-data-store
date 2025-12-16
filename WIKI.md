@@ -2,31 +2,17 @@
 
 ## 🎯 完整配置说明
 
-### 配置概述
+### 配置概览
 
-LiteStore 提供了丰富的配置选项，允许您根据项目需求调整性能、安全性和行为。配置可以通过 `setConfig()` 函数在运行时动态修改，也可以通过配置文件进行设置。
+LiteStore 提供丰富的配置选项，允许您根据项目需求调整性能、安全性和行为。
 
-### 配置管理 API
+**重要说明**：配置直接从打包文件加载。要修改配置，您需要编辑以下文件：
 
-```typescript
-import { setConfig, getConfig, resetConfig } from 'expo-lite-data-store';
-
-// 设置配置
-setConfig({
-  chunkSize: 10 * 1024 * 1024, // 10MB
-  encryption: {
-    enabled: true,
-    keySize: 256,
-  },
-});
-
-// 获取当前配置
-const currentConfig = getConfig();
-console.log(currentConfig);
-
-// 重置配置为默认值
-resetConfig();
 ```
+node_modules/expo-lite-data-store/dist/js/liteStore.config.js
+```
+
+**无运行时配置 API**：该库不提供运行时配置 API。所有配置更改必须通过直接编辑打包的配置文件来完成。这种方法确保了在不同环境中一致的配置加载，并防止了异步加载的问题。
 
 ### 基础配置
 
@@ -74,15 +60,7 @@ resetConfig();
 | `autoSync.minItems`      | `number`  | `1`               | 触发同步的最小脏项数量     |
 | `autoSync.batchSize`     | `number`  | `100`             | 每次同步的最大项目数       |
 
-### API配置
 
-| 配置项                        | 类型      | 默认值 | 说明                  |
-| ----------------------------- | --------- | ------ | --------------------- |
-| `rateLimit.enabled`           | `boolean` | `true` | 是否启用 API 速率限制 |
-| `rateLimit.requestsPerSecond` | `number`  | `20`   | 每秒最大请求数        |
-| `rateLimit.burstCapacity`     | `number`  | `40`   | 突发请求容量          |
-| `retry.maxAttempts`           | `number`  | `3`    | 最大重试次数          |
-| `retry.backoffMultiplier`     | `number`  | `2`    | 重试退避乘数          |
 
 ### 监控配置
 
@@ -424,61 +402,181 @@ module.exports = {
 
 ### 数据加密
 
-```typescript
-// 注意：加密功能需要在项目初始化时启用
-// 当前版本的加密功能正在开发中，敬请期待
+当前版本的加密功能正在开发中，敬请期待。
 
-// 未来版本的使用方式：
-// import { enableEncryption, setEncryptionKey } from 'expo-lite-data-store';
-//
-// // 启用加密
-// await enableEncryption();
-//
-// // 设置加密密钥（请妥善保管）
-// await setEncryptionKey('your-secure-key-here');
-//
-// // 加密后的数据将自动处理，无需额外代码
-```
+### 密钥配置说明
+
+1. **密钥生成方式**: 密钥由系统自动生成，不是完全自定义编写的。系统会根据设备信息和随机数生成安全的加密密钥。
+
+2. **密钥获取**: 您可以通过API获取当前使用的密钥，但不能直接设置自定义密钥。
+
+3. **密钥安全性**: 生成的密钥会被安全存储，并通过缓存机制优化性能。
 
 ### 安全最佳实践
 
-1. **密钥管理**: 加密密钥请妥善保管，避免硬编码
+1. **密钥管理**: 加密密钥由系统自动生成和管理，无需您手动处理
 2. **敏感数据**: 对包含敏感信息的数据启用加密
 3. **备份安全**: 加密数据的备份也需要保护
-4. **密钥轮换**: 定期更换加密密钥
+4. **密钥轮换**: 系统会定期自动轮换密钥
 5. **权限控制**: 限制数据库文件的访问权限
+
+### 生物识别与密码识别
+
+**当前行为**: 已优化！只有在实际需要使用加密密钥时才会触发生物识别或密码识别。
+
+**优化说明**: 我们已经修改了加密适配器的初始化逻辑，采用延迟初始化策略：
+1. 不再在系统初始化时触发生物识别或密码识别
+2. 只有在实际执行加密操作（如解密数据）时才会请求密钥
+3. 如果项目不使用加密数据，不会触发任何生物识别或密码识别
+4. 优化后的行为提供了更好的用户体验，避免了不必要的身份验证请求
 
 ## 🎯 故障排除
 
 ### 常见问题
 
-#### Q: 排序后数据顺序不正确？
+<details>
+<summary>Q: 排序后数据顺序不正确？</summary>
 
 A: 检查排序字段是否存在 null/undefined 值，这些值会被排到末尾。
+</details>
 
-#### Q: 查询性能慢？
+<details>
+<summary>Q: 查询性能慢？</summary>
 
 A: 尝试使用更适合的数据量的排序算法，或启用分页查询。
+</details>
 
-#### Q: 内存使用过高？
+<details>
+<summary>Q: 内存使用过高？</summary>
 
 A: 对于超大数据集，考虑使用分页查询或 `fast` 排序算法。
+</details>
 
-#### Q: 中文排序不正确？
+<details>
+<summary>Q: 中文排序不正确？</summary>
 
 A: 使用 `sortAlgorithm: 'slow'` 以获得完整的中文支持。
+</details>
 
-#### Q: 如何在纯JavaScript项目中使用？
+<details>
+<summary>Q: 如何在纯JavaScript项目中使用？</summary>
 
 A: 导入时会自动使用JavaScript版本，无需特殊配置。
+</details>
 
-#### Q: TypeScript版本和JavaScript版本有什么区别？
+<details>
+<summary>Q: TypeScript版本和JavaScript版本有什么区别？</summary>
 
 A: TypeScript版本提供完整的类型检查和IDE支持；JavaScript版本轻量化但无类型检查。
+</details>
 
-#### Q: 如何构建自己的版本？
+<details>
+<summary>Q: 如何构建自己的版本？</summary>
 
 A: 运行 `npm run build:all` 来构建完整的TypeScript和JavaScript版本。
+</details>
+
+<details>
+<summary>Q: 配置文件修改后不生效？</summary>
+
+A: 配置文件直接从打包文件加载，修改后需要重新启动应用才能生效。
+</details>
+
+<details>
+<summary>Q: 如何禁用自动同步？</summary>
+
+A: 在配置文件中设置 `cache.autoSync.enabled: false`，或使用 `setAutoSyncConfig({ enabled: false })` API。
+</details>
+
+<details>
+<summary>Q: 加密功能如何使用？</summary>
+
+A: 当前版本的加密功能正在开发中，敬请期待。
+</details>
+
+<details>
+<summary>Q: 如何处理数据迁移？</summary>
+
+A: 目前不支持自动数据迁移，建议手动导出旧数据并导入到新表中。
+</details>
+
+<details>
+<summary>Q: 支持哪些过滤操作符？</summary>
+
+A: 支持 `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$like`, `$and`, `$or` 等操作符。
+</details>
+
+### 错误代码说明
+
+#### 表相关错误代码
+
+| 错误代码 | 描述 | 解决方案 |
+|---------|------|----------|
+| `TABLE_NOT_FOUND` | 指定的表不存在 | 检查表名是否正确，或先创建表 |
+| `TABLE_CREATE_FAILED` | 表创建失败 | 检查是否有写权限，或表名是否已存在 |
+| `TABLE_DELETE_FAILED` | 表删除失败 | 检查是否有写权限，或表是否被锁定 |
+| `TABLE_UPDATE_FAILED` | 表更新失败 | 检查是否有写权限，或表是否被锁定 |
+| `TABLE_READ_FAILED` | 表读取失败 | 检查是否有读权限，或文件是否损坏 |
+| `TABLE_COUNT_FAILED` | 表计数失败 | 检查表是否存在，或是否有读权限 |
+| `TABLE_SIZE_FAILED` | 获取表大小失败 | 检查表是否存在，或是否有读权限 |
+| `TABLE_CHUNK_FAILED` | 表分片失败 | 检查文件系统权限，或存储空间是否充足 |
+| `TABLE_CHUNK_SIZE_FAILED` | 表分片大小配置失败 | 检查分片大小配置是否在有效范围内 |
+| `TABLE_CHUNK_SIZE_TOO_SMALL` | 表分片大小太小 | 增加分片大小配置 |
+| `TABLE_CHUNK_SIZE_TOO_LARGE` | 表分片大小太大 | 减小分片大小配置 |
+| `TABLE_ALREADY_EXISTS` | 表已存在 | 选择其他表名，或删除已存在的表 |
+| `TABLE_NAME_INVALID` | 表名无效 | 使用有效的表名，避免特殊字符 |
+| `TABLE_COLUMN_INVALID` | 表列无效 | 检查列定义是否正确 |
+| `TABLE_INDEX_INVALID` | 表索引无效 | 检查索引定义是否正确 |
+| `TABLE_INDEX_ALREADY_EXISTS` | 表索引已存在 | 选择其他索引名，或删除已存在的索引 |
+| `TABLE_INDEX_NOT_FOUND` | 表索引不存在 | 检查索引名是否正确，或先创建索引 |
+| `TABLE_INDEX_NAME_INVALID` | 表索引名无效 | 使用有效的索引名，避免特殊字符 |
+| `TABLE_INDEX_TYPE_INVALID` | 表索引类型无效 | 使用支持的索引类型 |
+| `TABLE_INDEX_UNIQUE_INVALID` | 表索引唯一性配置无效 | 检查唯一性配置是否正确 |
+| `TABLE_INDEX_NOT_UNIQUE` | 表索引不唯一 | 确保索引字段值唯一，或修改索引配置 |
+
+#### 文件相关错误代码
+
+| 错误代码 | 描述 | 解决方案 |
+|---------|------|----------|
+| `FILE_NOT_FOUND` | 文件不存在 | 检查文件路径是否正确 |
+| `FILE_ALREADY_EXISTS` | 文件已存在 | 选择其他文件名，或删除已存在的文件 |
+| `FILE_NAME_INVALID` | 文件名无效 | 使用有效的文件名，避免特殊字符 |
+| `FILE_CONTENT_INVALID` | 文件内容无效 | 检查文件内容格式是否正确 |
+| `FILE_CONTENT_TOO_LARGE` | 文件内容太大 | 减小文件大小，或调整配置允许更大的文件 |
+| `FILE_READ_FAILED` | 文件读取失败 | 检查是否有读权限，或文件是否损坏 |
+| `FILE_WRITE_FAILED` | 文件写入失败 | 检查是否有写权限，或存储空间是否充足 |
+| `FILE_DELETE_FAILED` | 文件删除失败 | 检查是否有写权限，或文件是否被锁定 |
+| `FILE_MOVE_FAILED` | 文件移动失败 | 检查是否有写权限，或目标路径是否存在 |
+| `FILE_COPY_FAILED` | 文件复制失败 | 检查是否有读/写权限，或存储空间是否充足 |
+| `FILE_RENAME_FAILED` | 文件重命名失败 | 检查是否有写权限，或目标文件名是否已存在 |
+| `FILE_TRUNCATE_FAILED` | 文件截断失败 | 检查是否有写权限，或文件是否被锁定 |
+
+#### 事务相关错误代码
+
+| 错误代码 | 描述 | 解决方案 |
+|---------|------|----------|
+| `TRANSACTION_IN_PROGRESS` | 事务已在进行中 | 等待当前事务完成，或提交/回滚当前事务 |
+| `NO_TRANSACTION_IN_PROGRESS` | 没有事务在进行中 | 先开始一个事务 |
+| `TRANSACTION_COMMIT_FAILED` | 事务提交失败 | 检查事务中的操作是否正确，或是否有并发冲突 |
+| `TRANSACTION_ROLLBACK_FAILED` | 事务回滚失败 | 检查是否有写权限，或系统是否支持回滚操作 |
+
+#### 其他错误代码
+
+| 错误代码 | 描述 | 解决方案 |
+|---------|------|----------|
+| `UNKNOWN` | 未知错误 | 查看详细错误信息，或检查系统日志 |
+| `TIMEOUT` | 操作超时 | 增加超时配置，或优化操作性能 |
+| `PERMISSION_DENIED` | 权限不足 | 检查是否有相应的文件系统权限 |
+| `DISK_FULL` | 磁盘空间不足 | 清理磁盘空间，或选择其他存储位置 |
+| `CORRUPTED_DATA` | 数据损坏 | 恢复备份数据，或重新创建表 |
+| `DATA_INCOMPLETE` | 数据不完整 | 检查数据来源，或重新获取数据 |
+| `CHUNK_INTEGRITY_FAILED` | 分片完整性检查失败 | 检查文件是否损坏，或重新创建分片 |
+| `META_FILE_READ_ERROR` | 元文件读取失败 | 检查元文件是否存在，或是否损坏 |
+| `META_FILE_WRITE_ERROR` | 元文件写入失败 | 检查是否有写权限，或存储空间是否充足 |
+| `QUERY_FAILED` | 查询执行失败 | 检查查询条件是否正确，或表结构是否匹配 |
+| `MIGRATION_FAILED` | 数据迁移失败 | 检查迁移脚本是否正确，或数据格式是否兼容 |
+| `WRITTEN_COUNT_MISMATCH` | 写入数量不匹配 | 检查写入操作是否正确，或数据是否完整 |
+| `BULK_OPERATION_FAILED` | 批量操作失败 | 检查批量操作中的每个操作是否正确，或拆分批量操作 |
 
 ### 调试技巧
 
@@ -490,7 +588,542 @@ A: 运行 `npm run build:all` 来构建完整的TypeScript和JavaScript版本。
 
 ## 🎯 API 参考
 
-### ReadOptions 接口
+### 核心 API 列表
+
+| 类别         | API 名称          | 描述                           |
+| ------------ | ----------------- | ------------------------------ |
+| **表管理**   | `createTable`     | 创建新表                       |
+|              | `deleteTable`     | 删除表                         |
+|              | `hasTable`        | 检查表是否存在                 |
+|              | `listTables`      | 获取所有表名                   |
+|              | `countTable`      | 获取表记录数                   |
+|              | `clearTable`      | 清空表数据                     |
+| **数据操作** | `insert`          | 插入单条或多条数据             |
+|              | `read`            | 读取数据（支持过滤、分页、排序） |
+|              | `findOne`         | 查询单条记录                   |
+|              | `findMany`        | 查询多条记录（支持高级选项）   |
+|              | `update`          | 更新匹配的记录                 |
+|              | `remove`          | 删除匹配的记录                 |
+|              | `bulkWrite`       | 批量操作                       |
+| **事务管理** | `beginTransaction`| 开始新事务                     |
+|              | `commit`          | 提交当前事务                   |
+|              | `rollback`        | 回滚当前事务                   |
+| **同步管理** | `getSyncStats`    | 获取同步统计信息               |
+|              | `syncNow`         | 立即触发同步                   |
+|              | `setAutoSyncConfig`| 自定义自动同步配置             |
+| **缓存管理** | `clearKeyCache`   | 清除密钥缓存                   |
+
+### 详细 API 说明
+
+#### 表管理 API
+
+##### createTable
+
+**功能**：创建一个新的数据表
+
+**签名**：
+```typescript
+createTable(tableName: string, options?: CreateTableOptions): Promise<void>
+```
+
+**参数**：
+- `tableName`: 表名，必须唯一
+- `options`: 可选配置项
+  - `columns`: 列定义（可选）
+  - `initialData`: 初始数据（可选）
+  - `mode`: 存储模式，`'single'` 或 `'chunked'`（可选）
+
+**示例**：
+```typescript
+// 创建基本表
+await createTable('users');
+
+// 创建带初始数据的表
+await createTable('users', {
+  initialData: [
+    { id: 1, name: '张三', age: 25 },
+    { id: 2, name: '李四', age: 30 }
+  ]
+});
+
+// 创建分块存储的表
+await createTable('large_data', {
+  mode: 'chunked'
+});
+```
+
+##### deleteTable
+
+**功能**：删除指定的数据表
+
+**签名**：
+```typescript
+deleteTable(tableName: string): Promise<void>
+```
+
+**参数**：
+- `tableName`: 要删除的表名
+
+**示例**：
+```typescript
+await deleteTable('users');
+```
+
+##### hasTable
+
+**功能**：检查指定的数据表是否存在
+
+**签名**：
+```typescript
+hasTable(tableName: string): Promise<boolean>
+```
+
+**参数**：
+- `tableName`: 要检查的表名
+
+**返回值**：
+- `boolean`: 表是否存在
+
+**示例**：
+```typescript
+const exists = await hasTable('users');
+console.log(`表 users 存在: ${exists}`);
+```
+
+##### listTables
+
+**功能**：获取所有数据表的名称
+
+**签名**：
+```typescript
+listTables(): Promise<string[]>
+```
+
+**返回值**：
+- `string[]`: 所有表名的数组
+
+**示例**：
+```typescript
+const tables = await listTables();
+console.log('所有表:', tables);
+```
+
+##### countTable
+
+**功能**：获取指定表的记录数
+
+**签名**：
+```typescript
+countTable(tableName: string): Promise<number>
+```
+
+**参数**：
+- `tableName`: 表名
+
+**返回值**：
+- `number`: 表中的记录数
+
+**示例**：
+```typescript
+const count = await countTable('users');
+console.log(`表 users 中有 ${count} 条记录`);
+```
+
+##### clearTable
+
+**功能**：清空指定表中的所有数据
+
+**签名**：
+```typescript
+clearTable(tableName: string): Promise<void>
+```
+
+**参数**：
+- `tableName`: 要清空的表名
+
+**示例**：
+```typescript
+await clearTable('users');
+```
+
+#### 数据操作 API
+
+##### insert
+
+**功能**：向指定表中插入单条或多条数据
+
+**签名**：
+```typescript
+insert(tableName: string, data: Record<string, any> | Record<string, any>[]): Promise<WriteResult>
+```
+
+**参数**：
+- `tableName`: 表名
+- `data`: 要插入的数据，可以是单条记录或记录数组
+
+**返回值**：
+- `WriteResult`: 写入结果，包含写入字节数、总字节数等信息
+
+**示例**：
+```typescript
+// 插入单条数据
+await insert('users', { id: 1, name: '张三', age: 25 });
+
+// 插入多条数据
+await insert('users', [
+  { id: 2, name: '李四', age: 30 },
+  { id: 3, name: '王五', age: 35 }
+]);
+```
+
+##### read
+
+**功能**：从指定表中读取数据，支持过滤、分页和排序
+
+**签名**：
+```typescript
+read(tableName: string, options?: ReadOptions): Promise<Record<string, any>[]>
+```
+
+**参数**：
+- `tableName`: 表名
+- `options`: 读取选项
+  - `filter`: 查询条件
+  - `skip`: 跳过的记录数
+  - `limit`: 返回的最大记录数
+  - `sortBy`: 排序字段
+  - `order`: 排序方向，`'asc'` 或 `'desc'`
+  - `sortAlgorithm`: 排序算法
+
+**返回值**：
+- `Record<string, any>[]`: 匹配的记录数组
+
+**示例**：
+```typescript
+// 读取所有数据
+const allUsers = await read('users');
+
+// 带过滤条件的读取
+const activeUsers = await read('users', {
+  filter: { status: 'active' }
+});
+
+// 带分页和排序的读取
+const paginatedUsers = await read('users', {
+  skip: 10,
+  limit: 20,
+  sortBy: 'age',
+  order: 'desc'
+});
+```
+
+##### findOne
+
+**功能**：查询指定表中的单条记录
+
+**签名**：
+```typescript
+findOne(tableName: string, filter: FilterCondition): Promise<Record<string, any> | null>
+```
+
+**参数**：
+- `tableName`: 表名
+- `filter`: 查询条件
+
+**返回值**：
+- `Record<string, any> | null`: 匹配的记录，如果没有匹配则返回 `null`
+
+**示例**：
+```typescript
+// 根据ID查询
+const user = await findOne('users', { id: 1 });
+
+// 根据条件查询
+const activeUser = await findOne('users', {
+  $and: [{ status: 'active' }, { age: { $gte: 18 } }]
+});
+```
+
+##### findMany
+
+**功能**：查询指定表中的多条记录，支持高级查询选项
+
+**签名**：
+```typescript
+findMany(tableName: string, filter?: FilterCondition, options?: {
+  skip?: number;
+  limit?: number;
+  sortBy?: string | string[];
+  order?: 'asc' | 'desc' | ('asc' | 'desc')[];
+  sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
+}): Promise<Record<string, any>[]>
+```
+
+**参数**：
+- `tableName`: 表名
+- `filter`: 查询条件
+- `options`: 查询选项
+  - `skip`: 跳过的记录数
+  - `limit`: 返回的最大记录数
+  - `sortBy`: 排序字段或字段数组
+  - `order`: 排序方向或方向数组
+  - `sortAlgorithm`: 排序算法
+
+**返回值**：
+- `Record<string, any>[]`: 匹配的记录数组
+
+**示例**：
+```typescript
+// 基本查询
+const users = await findMany('users', { age: { $gte: 18 } });
+
+// 多字段排序
+const sortedUsers = await findMany('users', {}, {
+  sortBy: ['department', 'name', 'age'],
+  order: ['asc', 'asc', 'desc']
+});
+
+// 使用特定排序算法
+const chineseSortedUsers = await findMany('users', {}, {
+  sortBy: 'name',
+  sortAlgorithm: 'slow' // 支持中文排序
+});
+```
+
+##### update
+
+**功能**：更新指定表中匹配条件的记录
+
+**签名**：
+```typescript
+update(tableName: string, data: Record<string, any>, where: FilterCondition): Promise<number>
+```
+
+**参数**：
+- `tableName`: 表名
+- `data`: 要更新的数据
+- `where`: 更新条件
+
+**返回值**：
+- `number`: 更新的记录数
+
+**示例**：
+```typescript
+// 更新单条记录
+const updatedCount = await update('users', { age: 26 }, { id: 1 });
+
+// 更新多条记录
+const updatedCount = await update('users', { status: 'inactive' }, {
+  lastLogin: { $lt: '2024-01-01' }
+});
+
+// 使用操作符更新
+const updatedCount = await update('users', { balance: { $inc: 100 } }, { id: 1 });
+```
+
+##### remove
+
+**功能**：删除指定表中匹配条件的记录
+
+**签名**：
+```typescript
+remove(tableName: string, where: FilterCondition): Promise<number>
+```
+
+**参数**：
+- `tableName`: 表名
+- `where`: 删除条件
+
+**返回值**：
+- `number`: 删除的记录数
+
+**示例**：
+```typescript
+// 删除单条记录
+const deletedCount = await remove('users', { id: 1 });
+
+// 删除多条记录
+const deletedCount = await remove('users', {
+  status: 'inactive'
+});
+```
+
+##### bulkWrite
+
+**功能**：执行批量操作，支持插入、更新和删除
+
+**签名**：
+```typescript
+bulkWrite(tableName: string, operations: Array<{
+  type: 'insert' | 'update' | 'delete';
+  data: Record<string, any> | Record<string, any>[];
+}>): Promise<WriteResult>
+```
+
+**参数**：
+- `tableName`: 表名
+- `operations`: 操作数组
+  - `type`: 操作类型，`'insert'`、`'update'` 或 `'delete'`
+  - `data`: 操作数据
+
+**返回值**：
+- `WriteResult`: 写入结果
+
+**示例**：
+```typescript
+await bulkWrite('users', [
+  { type: 'insert', data: { id: 4, name: '赵六', age: 28 } },
+  { type: 'update', data: { status: 'active' }, where: { id: 2 } },
+  { type: 'delete', data: { id: 3 } }
+]);
+```
+
+#### 事务管理 API
+
+##### beginTransaction
+
+**功能**：开始一个新事务
+
+**签名**：
+```typescript
+beginTransaction(): Promise<void>
+```
+
+**示例**：
+```typescript
+await beginTransaction();
+try {
+  // 执行一系列操作
+  await insert('users', { id: 5, name: '钱七' });
+  await update('users', { balance: { $inc: 100 } }, { id: 5 });
+  // 提交事务
+  await commit();
+} catch (error) {
+  // 回滚事务
+  await rollback();
+  throw error;
+}
+```
+
+##### commit
+
+**功能**：提交当前事务
+
+**签名**：
+```typescript
+commit(): Promise<void>
+```
+
+**示例**：
+```typescript
+await beginTransaction();
+try {
+  // 执行操作
+  await commit();
+} catch (error) {
+  await rollback();
+}
+```
+
+##### rollback
+
+**功能**：回滚当前事务
+
+**签名**：
+```typescript
+rollback(): Promise<void>
+```
+
+**示例**：
+```typescript
+await beginTransaction();
+try {
+  // 执行操作
+  await commit();
+} catch (error) {
+  await rollback();
+}
+```
+
+#### 自动同步 API
+
+##### getSyncStats
+
+**功能**：获取自动同步统计信息
+
+**签名**：
+```typescript
+getSyncStats(): Promise<{
+  syncCount: number;
+  totalItemsSynced: number;
+  lastSyncTime: number;
+  avgSyncTime: number;
+}>
+```
+
+**返回值**：
+- 同步统计信息对象
+  - `syncCount`: 总同步次数
+  - `totalItemsSynced`: 总同步项数
+  - `lastSyncTime`: 上次同步时间
+  - `avgSyncTime`: 平均同步耗时
+
+**示例**：
+```typescript
+const stats = await getSyncStats();
+console.log('同步统计:', stats);
+```
+
+##### syncNow
+
+**功能**：立即触发一次同步
+
+**签名**：
+```typescript
+syncNow(): Promise<void>
+```
+
+**示例**：
+```typescript
+// 手动触发同步
+await syncNow();
+```
+
+##### setAutoSyncConfig
+
+**功能**：设置自动同步配置
+
+**签名**：
+```typescript
+setAutoSyncConfig(config: Partial<{
+  enabled: boolean;
+  interval: number;
+  minItems: number;
+  batchSize: number;
+}>): Promise<void>
+```
+
+**参数**：
+- `config`: 同步配置
+  - `enabled`: 是否启用自动同步
+  - `interval`: 同步间隔（毫秒）
+  - `minItems`: 触发同步的最小脏项数量
+  - `batchSize`: 每次同步的最大项数
+
+**示例**：
+```typescript
+// 设置自动同步配置
+await setAutoSyncConfig({
+  enabled: true,
+  interval: 10000, // 10秒同步一次
+  minItems: 5, // 至少5个脏项才同步
+  batchSize: 200 // 每次最多同步200个项目
+});
+```
+
+### 接口定义
+
+#### ReadOptions 接口
 
 ```typescript
 interface ReadOptions {
@@ -508,7 +1141,7 @@ interface ReadOptions {
 }
 ```
 
-### FilterCondition 类型
+#### FilterCondition 类型
 
 ```typescript
 type FilterCondition =
@@ -522,7 +1155,7 @@ type FilterCondition =
     };
 ```
 
-### WriteResult 接口
+#### WriteResult 接口
 
 ```typescript
 interface WriteResult {

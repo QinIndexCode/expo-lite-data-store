@@ -61,4 +61,14 @@ export class FileHandlerFactory {
     const estimatedSize = data.reduce((acc, item) => acc + JSON.stringify(item).length, 0);
     return estimatedSize > (this.chunkSize || 1024 * 1024) / 2;
   }
+  
+  /**
+   * 更新分片大小
+   * @param chunkSize 新的分片大小
+   */
+  updateChunkSize(chunkSize: number): void {
+    if (typeof chunkSize === 'number' && chunkSize > 0) {
+      this.chunkSize = chunkSize;
+    }
+  }
 }

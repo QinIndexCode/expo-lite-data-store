@@ -1,12 +1,12 @@
 {
   "name": "expo-lite-data-store",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "main": "dist/js/index.js",
   "types": "dist/types/index.d.ts",
   "author": "QinIndexCode",
   "license": "MIT",
-  "description": "A lite data store for Expo; \n Detail in https://github.com/QinIndexCode/expo-lite-data-store please don't use 1.0.0 version because it's not stable. In this version , fix crypto compatibility issue. ",
-  "versionDescription": "fix crypto compatibility issue and add config generation tool",
+  "description": "A lite data store for Expo; \n Detail in https://github.com/QinIndexCode/expo-lite-data-store",
+  "versionDescription": "Optimize configuration system, fix config file usage in Expo project, remove config API, improve biometric authentication behavior, and enhance documentation.",
   "keywords": [
     "expo",
     "data store",
@@ -53,8 +53,7 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm run build:all && npm run typecheck",
     "publish:safe": "npm run build && npm run typecheck && npm publish",
-    "publish:force": "npm publish --ignore-scripts",
-    "postinstall": "node -e \"try { const { ConfigGenerator } = require('./dist/js/utils/configGenerator'); ConfigGenerator.generateConfig(process.cwd()); } catch(e) { console.log('配置文件生成失败:', e.message); }\""
+    "publish:force": "npm publish --ignore-scripts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

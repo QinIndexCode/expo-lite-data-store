@@ -24,7 +24,8 @@ prettier*.js
 
 # TypeScript配置文件
 tsconfig.json
-!tsconfig.js.json
+tsconfig.js.json 
+
 
 # 开发和环境配置文件
 package-dev.json
@@ -42,7 +43,6 @@ expo-env.d.ts
 *.md
 !README.md
 !README_EN.md
-!updatelog.md
 !LICENSE.txt
 
 # 工具和临时文件
@@ -70,3 +70,5 @@ test-*.*
 !README_EN.md
 !LICENSE.txt
 !package.json
+
+updatelog.md
