@@ -1,3 +1,4 @@
+暂时不要使用本项目，出现部分重大Bug
 # expo-lite-data-store
 
 中文版: [中文文档](./README.md) |
