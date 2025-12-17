@@ -26,11 +26,11 @@ jobs:
 
       - name: Copy and rename Chinese description
         run: |
-          cp WIKI.md wiki/Description(Zh).md
+          cp "WIKI.md" "wiki/Description(Zh).md"
 
       - name: Copy and rename English description
         run: |
-          cp WIKI_EN.md wiki/Description(En).md
+          cp "WIKI_EN.md" "wiki/Description(En).md"
 
       - name: Commit and push to wiki if changed
         run: |
@@ -38,6 +38,9 @@ jobs:
           git config user.name "GitHub Action"
           git config user.email "action@github.com"
           git add .
-          git diff --quiet && echo "No changes" && exit 0
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
           git commit -m "Update descriptions from repository"
-          git push origin main  # Wiki 默认分支通常是 main 或 master，根据实际情况调整
+          git push origin main  # 如果 wiki 分支是 master，请改为 master
