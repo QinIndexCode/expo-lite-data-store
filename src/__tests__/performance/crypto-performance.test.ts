@@ -334,14 +334,16 @@ describe('Crypto Performance Tests', () => {
     expect(config.encryption.keyIterations).toBeGreaterThanOrEqual(1);
 
     // 3. 字段级加密总开关
-    expect(typeof config.encryption.enableFieldLevelEncryption).toBe('boolean');
+    const enableFieldLevelEncryption = config.encryption.enableFieldLevelEncryption || false;
+    expect(typeof enableFieldLevelEncryption).toBe('boolean');
 
     // 4. 敏感字段白名单（仅在开启字段级加密时才强制非空）
-    expect(Array.isArray(config.encryption.encryptedFields)).toBe(true);
-    if (config.encryption.enableFieldLevelEncryption) {
-      expect(config.encryption.encryptedFields.length).toBeGreaterThan(0);
+    const encryptedFields = config.encryption.encryptedFields || [];
+    expect(Array.isArray(encryptedFields)).toBe(true);
+    if (enableFieldLevelEncryption) {
+      expect(encryptedFields.length).toBeGreaterThan(0);
       // 额外检查数组元素均为字符串，防止误写数字或布尔
-      config.encryption.encryptedFields.forEach((f: any) => {
+      encryptedFields.forEach((f: any) => {
         expect(typeof f).toBe('string');
       });
     }
@@ -356,7 +358,7 @@ describe('Crypto Performance Tests', () => {
     console.log('[Config-Sanity] 加密配置验证通过 | 快照:', {
       keyIterations: config.encryption.keyIterations,
       enableFieldLevelEncryption: config.encryption.enableFieldLevelEncryption,
-      encryptedFieldsCount: config.encryption.encryptedFields.length,
+      encryptedFieldsCount: encryptedFields.length,
       useBulkOperations: config.encryption.useBulkOperations,
       hmacAlgorithm: config.encryption.hmacAlgorithm,
     });

@@ -1,7 +1,16 @@
 // src/types/storageTypes.ts
 // 存储类型定义，包含过滤条件、读写选项和元数据结构
 // 创建于: 2025-11-19
-// 最后修改: 2025-12-11
+// 最后修改: 2025-12-17
+
+/**
+ * 通用选项类型
+ * 包含所有API共有的可选参数
+ */
+export type CommonOptions = {
+  encrypted?: boolean; // 是否启用加密存储，默认为 false
+  requireAuthOnAccess?: boolean; // 是否需要生物识别验证，默认为 false
+};
 
 /**
  * 过滤条件类型
@@ -27,7 +36,7 @@ export type WriteResult = {
  * 读取选项类型
  * 用于配置数据读取的各种参数
  */
-export type ReadOptions = {
+export type ReadOptions = CommonOptions & {
   skip?: number; // 跳过的记录数
   limit?: number; // 读取的记录数限制
   filter?: FilterCondition; // 过滤条件
@@ -41,23 +50,40 @@ export type ReadOptions = {
  * 创建表选项类型
  * 用于配置表的创建参数
  */
-export type CreateTableOptions = {
+export type CreateTableOptions = CommonOptions & {
   columns?: Record<string, string>; // 列定义，键为列名，值为数据类型
   intermediates?: boolean; // 是否自动创建中间目录
   chunkSize?: number; // 分片大小阈值，超过此值将使用分片写入
-  encrypted?: boolean; // 是否启用加密存储，默认为 false
-  requireAuthOnAccess?: boolean; // 是否需要生物识别验证，默认为 false
+  initialData?: Record<string, any>[]; // 初始数据
+  mode?: 'single' | 'chunked'; // 存储模式
 };
 
 /**
  * 写入选项类型
  * 用于配置数据写入的各种参数
  */
-export type WriteOptions = {
+export type WriteOptions = CommonOptions & {
   mode?: 'append' | 'overwrite'; // 写入模式：追加或覆盖
   forceChunked?: boolean; // 是否强制使用分片写入
-  encrypted?: boolean; // 是否启用加密存储，默认为 false
-  requireAuthOnAccess?: boolean; // 是否需要生物识别验证，默认为 false
+  encryptFullTable?: boolean; // 是否启用整表加密，与字段级加密互斥
+};
+
+/**
+ * 表管理选项类型
+ * 用于表管理操作的参数
+ */
+export type TableOptions = CommonOptions;
+
+/**
+ * 查找选项类型
+ * 用于findMany操作的参数
+ */
+export type FindOptions = CommonOptions & {
+  skip?: number; // 跳过的记录数
+  limit?: number; // 读取的记录数限制
+  sortBy?: string | string[]; // 排序字段，支持单字段或多字段
+  order?: 'asc' | 'desc' | ('asc' | 'desc')[]; // 排序方向，与sortBy对应
+  sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow'; // 排序算法
 };
 
 /**

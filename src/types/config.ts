@@ -21,12 +21,12 @@ export interface LiteStoreConfig {
     keySize: 256;
     hmacAlgorithm: 'SHA-256' | 'SHA-512';
     keyIterations: number;
-    enableFieldLevelEncryption: boolean;
-    encryptedFields: string[];
+    enableFieldLevelEncryption?: boolean;
+    encryptedFields?: string[];
     cacheTimeout: number;
     maxCacheSize: number;
     useBulkOperations: boolean;
-    requireAuthOnAccess: boolean;
+    requireAuthOnAccess?: boolean;
   };
 
   /** 性能配置 */

@@ -2,7 +2,7 @@
 // 加密存储适配装饰器
 import type { IStorageAdapter } from '../types/storageAdapterInfc';
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from '../types/storageTypes';
-import { decrypt, getMasterKey, decryptFields, decryptBulk, decryptFieldsBulk } from '../utils/crypto';
+import { decrypt, getMasterKey, decryptFields, decryptBulk, decryptFieldsBulk, encrypt, encryptFieldsBulk, encryptFields } from '../utils/crypto';
 import config from '../liteStore.config';
 import storage from './adapter/FileSystemStorageAdapter';
 import { ErrorHandler } from '../utils/errorHandler';
@@ -25,10 +25,10 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   constructor(options: { requireAuthOnAccess?: boolean } = {}) {
     // 配置验证
     this.validateConfig();
-    // 优先使用选项中的配置，否则使用全局配置中的默认值
+    // 优先使用选项中的配置，否则使用全局配置中的默认值，默认值为false
     this.requireAuthOnAccess = options.requireAuthOnAccess !== undefined 
       ? options.requireAuthOnAccess 
-      : config.encryption.requireAuthOnAccess;
+      : config.encryption.requireAuthOnAccess || false;
   }
 
   /**
@@ -77,13 +77,13 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     }
 
     // 验证字段级加密配置
-    if (typeof config.encryption.enableFieldLevelEncryption !== 'boolean') {
+    if (config.encryption.enableFieldLevelEncryption !== undefined && typeof config.encryption.enableFieldLevelEncryption !== 'boolean') {
       throw new Error(
         `Invalid enableFieldLevelEncryption value: ${config.encryption.enableFieldLevelEncryption}. Must be a boolean.`
       );
     }
 
-    if (!Array.isArray(config.encryption.encryptedFields)) {
+    if (config.encryption.encryptedFields !== undefined && !Array.isArray(config.encryption.encryptedFields)) {
       throw new Error(`Invalid encryptedFields value: ${config.encryption.encryptedFields}. Must be an array.`);
     }
   }
@@ -183,10 +183,48 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         // 清除该表的缓存
         this.clearTableCache(tableName);
 
-        // 暂时禁用加密，直接写入数据
         const finalData = Array.isArray(data) ? data : [data];
+        const key = await this.key();
+        
+        let encryptedData: Record<string, any>[] = [];
+        
+        // 明确检查：如果同时启用了字段级加密和整表加密，抛出错误
+        if (options?.encryptFullTable && config.encryption.enableFieldLevelEncryption && (config.encryption.encryptedFields?.length || 0) > 0) {
+          throw new Error('Cannot use both full table encryption and field-level encryption simultaneously. Please choose one encryption mode.');
+        }
+        
+        // 加密写入逻辑 - 整表加密和字段级加密互斥
+        if (options?.encryptFullTable) {
+          // 整表加密模式
+          const serializedData = JSON.stringify(finalData);
+          const encrypted = await encrypt(serializedData, key);
+          encryptedData = [{ __enc: encrypted }];
+        } else if (config.encryption.enableFieldLevelEncryption && (config.encryption.encryptedFields?.length || 0) > 0) {
+          // 字段级加密模式
+          const encryptedFields = config.encryption.encryptedFields || [];
+          
+          if (config.encryption.useBulkOperations && finalData.length > 1) {
+            // 批量字段级加密
+            encryptedData = await encryptFieldsBulk(finalData, {
+              fields: encryptedFields,
+              masterKey: key,
+            });
+          } else {
+            // 单次字段级加密
+            const encryptionPromises = finalData.map(item =>
+              encryptFields(item, {
+                fields: encryptedFields,
+                masterKey: key,
+              })
+            );
+            encryptedData = await Promise.all(encryptionPromises);
+          }
+        } else {
+          // 不加密，直接写入
+          encryptedData = finalData;
+        }
 
-        return storage.write(tableName, finalData, { mode: 'overwrite', ...options });
+        return storage.write(tableName, encryptedData, { mode: 'overwrite', ...options });
       },
       cause =>
         ErrorHandler.createGeneralError(
@@ -232,19 +270,20 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
           // 批量数据解密
           const decryptedStrings = await decryptBulk(first['__enc_bulk'], key);
           result = decryptedStrings.map(str => JSON.parse(str));
-        } else if (config.encryption.enableFieldLevelEncryption && config.encryption.encryptedFields.length > 0) {
+        } else if (config.encryption.enableFieldLevelEncryption && (config.encryption.encryptedFields?.length || 0) > 0) {
           // 字段级解密
+          const encryptedFields = config.encryption.encryptedFields || [];
           if (config.encryption.useBulkOperations && raw.length > 1) {
             // 批量字段级解密
             result = await decryptFieldsBulk(raw, {
-              fields: config.encryption.encryptedFields,
+              fields: encryptedFields,
               masterKey: key,
             });
           } else {
             // 单次字段级解密
             const decryptionPromises = raw.map(item =>
               decryptFields(item, {
-                fields: config.encryption.encryptedFields,
+                fields: encryptedFields,
                 masterKey: key,
               })
             );
@@ -409,10 +448,52 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     // 清除缓存
     this.clearTableCache(tableName);
 
-    // 直接调用底层存储适配器的bulkWrite方法
-    const result = await storage.bulkWrite(tableName, operations);
-
-    return result;
+    // 1. 读取所有数据
+    const allData = await this.read(tableName);
+    
+    let finalData = [...allData];
+    let writtenCount = 0;
+    
+    // 2. 执行所有操作
+    for (const operation of operations) {
+      if (operation.type === 'insert') {
+        // 插入操作
+        const insertData = Array.isArray(operation.data) ? operation.data : [operation.data];
+        finalData = [...finalData, ...insertData];
+        writtenCount += insertData.length;
+      } else if (operation.type === 'update') {
+        // 更新操作
+        const updateData = Array.isArray(operation.data) ? operation.data : [operation.data];
+        for (const updateItem of updateData) {
+          finalData = finalData.map(item => {
+            // 简单的匹配逻辑，假设updateItem包含id或完整的匹配条件
+            const idField = Object.keys(updateItem).find(key => key === 'id' || key === '_id');
+            if (idField && item[idField] === updateItem[idField]) {
+              writtenCount++;
+              return { ...item, ...updateItem };
+            }
+            return item;
+          });
+        }
+      } else if (operation.type === 'delete') {
+        // 删除操作
+        const deleteData = Array.isArray(operation.data) ? operation.data : [operation.data];
+        for (const deleteItem of deleteData) {
+          const originalLength = finalData.length;
+          finalData = finalData.filter(item => {
+            // 简单的匹配逻辑，假设deleteItem包含id或完整的匹配条件
+            const idField = Object.keys(deleteItem).find(key => key === 'id' || key === '_id');
+            return !(idField && item[idField] === deleteItem[idField]);
+          });
+          writtenCount += originalLength - finalData.length;
+        }
+      }
+    }
+    
+    // 3. 使用write方法重新写入数据，确保加密逻辑正确应用
+    const result = await this.write(tableName, finalData);
+    
+    return { ...result, written: writtenCount };
   }
 
   async migrateToChunked(tableName: string): Promise<void> {
@@ -452,20 +533,64 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     // 清除缓存
     this.clearTableCache(tableName);
     
-    // 直接调用底层存储适配器的update方法
-    const result = await storage.update(tableName, data, where);
+    // 1. 读取所有数据
+    const allData = await this.read(tableName);
     
-    return result;
+    // 2. 找到匹配where条件的记录
+    let updatedCount = 0;
+    const updatedData = allData.map((item: Record<string, any>) => {
+      // 检查是否匹配where条件
+      let matches = true;
+      for (const [key, value] of Object.entries(where)) {
+        if (item[key] !== value) {
+          matches = false;
+          break;
+        }
+      }
+      
+      if (matches) {
+        updatedCount++;
+        return { ...item, ...data };
+      }
+      return item;
+    });
+    
+    // 3. 使用write方法重新写入数据，确保加密逻辑正确应用
+    await this.write(tableName, updatedData);
+    
+    return updatedCount;
   }
 
   async remove(tableName: string, where: Record<string, any>): Promise<number> {
     // 清除缓存
     this.clearTableCache(tableName);
     
-    // 直接调用底层存储适配器的remove方法
-    const result = await storage.remove(tableName, where);
+    // 1. 读取所有数据
+    const allData = await this.read(tableName);
     
-    return result;
+    // 2. 过滤掉匹配where条件的记录
+    let removedCount = 0;
+    const remainingData = allData.filter((item: Record<string, any>) => {
+      // 检查是否匹配where条件
+      let matches = true;
+      for (const [key, value] of Object.entries(where)) {
+        if (item[key] !== value) {
+          matches = false;
+          break;
+        }
+      }
+      
+      if (matches) {
+        removedCount++;
+        return false; // 移除匹配的记录
+      }
+      return true; // 保留不匹配的记录
+    });
+    
+    // 3. 使用write方法重新写入数据，确保加密逻辑正确应用
+    await this.write(tableName, remainingData);
+    
+    return removedCount;
   }
 
   async clearTable(tableName: string): Promise<void> {
@@ -484,7 +609,41 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     // 清除该表的缓存
     this.clearTableCache(tableName);
 
+    const finalData = Array.isArray(data) ? data : [data];
+    const key = await this.key();
+    
+    let encryptedData: Record<string, any>[] = [];
+    
+    // 加密写入逻辑 - 整表加密和字段级加密互斥
+    if (options?.encryptFullTable) {
+      // 整表加密模式 - 插入操作不支持整表加密，直接返回错误
+      throw new Error('Full table encryption is not supported for insert operations. Use write method with overwrite mode instead.');
+    } else if (config.encryption.enableFieldLevelEncryption && (config.encryption.encryptedFields?.length || 0) > 0) {
+      // 字段级加密模式
+      const encryptedFields = config.encryption.encryptedFields || [];
+      
+      if (config.encryption.useBulkOperations && finalData.length > 1) {
+        // 批量字段级加密
+        encryptedData = await encryptFieldsBulk(finalData, {
+          fields: encryptedFields,
+          masterKey: key,
+        });
+      } else {
+        // 单次字段级加密
+        const encryptionPromises = finalData.map(item =>
+          encryptFields(item, {
+            fields: encryptedFields,
+            masterKey: key,
+          })
+        );
+        encryptedData = await Promise.all(encryptionPromises);
+      }
+    } else {
+      // 不加密，直接写入
+      encryptedData = finalData;
+    }
+
     // 插入操作总是使用append模式，忽略传入的mode选项
-    return storage.insert(tableName, data, { ...options, mode: 'append' });
+    return storage.insert(tableName, encryptedData, { ...options, mode: 'append' });
   }
 }

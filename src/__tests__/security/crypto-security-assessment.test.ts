@@ -13,8 +13,8 @@
  * 日期：2025-12-03
  */
 
-import { encrypt, decrypt, encryptBulk, decryptBulk, encryptFields, decryptFields, getMasterKey } from './utils/crypto';
-import config from './liteStore.config';
+import { encrypt, decrypt, encryptBulk, decryptBulk, encryptFields, decryptFields, getMasterKey } from '../../utils/crypto';
+import config from '../../liteStore.config';
 
 // ==================== 测试配置（平衡精度与执行时间）===================
 const TEST_CONFIG = {

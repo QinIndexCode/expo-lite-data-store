@@ -16,9 +16,8 @@
  * 日期：2025-12-03
  */
 
-import { encrypt, decrypt, encryptBulk, decryptBulk, encryptFields, decryptFields } from './utils/crypto';
-import { getMasterKey } from './utils/crypto';
-import config from './liteStore.config';
+import { encrypt, decrypt, encryptBulk, decryptBulk, encryptFields, decryptFields, getMasterKey } from '../../utils/crypto';
+import config from '../../liteStore.config';
 
 // ==================== 配置区 ====================
 

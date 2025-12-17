@@ -12,8 +12,8 @@ English: [English Document](./README_EN.md)
 [![npm version](https://img.shields.io/npm/v/expo-lite-data-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-data-store)
 [![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-lite-data-store)](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)
-[![React Native](https://img.shields.io/badge/React%20Native-0.81+-blue.svg)](https://reactnative.dev/)
-[![Expo](https://img.shields.io/badge/Expo-51.0+-blue.svg)](https://expo.dev/)
+[![React Native](https://img.shields.io/badge/React%20Native-0.72+-blue.svg)](https://reactnative.dev/)
+[![Expo](https://img.shields.io/badge/Expo-50.0+-blue.svg)](https://expo.dev/)
 
 **轻量、易配置、纯 TypeScript 编写的 Expo 本地数据库**
 
@@ -106,7 +106,7 @@ console.log(users);
 
 ### 非加密模式
 
-默认情况下，数据库使用非加密模式，不会触发任何生物识别认证：
+默认情况下，数据库使用非加密模式，**不会触发任何生物识别认证**：
 
 ```typescript
 // 非加密模式（默认）
@@ -115,15 +115,26 @@ await insert('users', { id: 1, name: '张三' });
 const user = await findOne('users', { id: 1 });
 ```
 
+**重要说明**：非加密模式下，数据以明文形式存储，不会使用任何加密算法，也不会触发生物识别或密码认证。
+
 ### 加密模式
 
 启用加密模式，但不要求每次访问都进行生物识别认证：
 
 ```typescript
 // 加密模式，无需生物识别
-await createTable('users', {}, true, false);
-await insert('users', { id: 1, name: '张三' }, true, false);
-const user = await findOne('users', { id: 1 }, true, false);
+await createTable('users', {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
+await insert('users', { id: 1, name: '张三' }, {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
+const user = await findOne('users', { id: 1 }, {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
 ```
 
 ### 加密模式 + 生物识别认证
@@ -132,9 +143,18 @@ const user = await findOne('users', { id: 1 }, true, false);
 
 ```typescript
 // 加密模式，需要生物识别认证
-await createTable('users', {}, true, true);
-await insert('users', { id: 1, name: '张三' }, true, true);
-const user = await findOne('users', { id: 1 }, true, true);
+await createTable('users', {
+  encrypted: true,
+  requireAuthOnAccess: true
+});
+await insert('users', { id: 1, name: '张三' }, {
+  encrypted: true,
+  requireAuthOnAccess: true
+});
+const user = await findOne('users', { id: 1 }, {
+  encrypted: true,
+  requireAuthOnAccess: true
+});
 ```
 
 ### 加密参数说明
@@ -143,6 +163,14 @@ const user = await findOne('users', { id: 1 }, true, true);
 | -------------------- | ------- | ------ | -------------------------------------------------------------------- |
 | `encrypted`          | boolean | false  | 是否启用数据加密                                                     |
 | `requireAuthOnAccess`| boolean | false  | 是否在每次访问数据时都要求生物识别认证（仅在 `encrypted` 为 true 时生效） |
+| `encryptFullTable`   | boolean | false  | 是否启用整表加密（仅在 `encrypted` 为 true 时生效，与字段级加密互斥） |
+| `enableFieldLevelEncryption` | boolean | false | 是否启用字段级加密（仅在 `encrypted` 为 true 时生效，与整表加密互斥） |
+| `encryptedFields` | string[] | [] | 需要加密的字段列表（仅在 `enableFieldLevelEncryption` 为 true 时生效） |
+
+**重要说明**：
+- 整表加密和字段级加密**不能同时使用**，系统会自动检测冲突并抛出明确的错误信息
+- 加密模式下，密钥由系统自动生成和管理，无需手动处理
+- 生物识别认证仅在 `requireAuthOnAccess` 为 true 时触发
 
 ## 📚 基础 API 参考
 
@@ -150,32 +178,53 @@ const user = await findOne('users', { id: 1 }, true, true);
 
 | 方法          | 签名                                                                             | 说明           |
 | ------------- | -------------------------------------------------------------------------------- | -------------- |
-| `createTable` | `(tableName, options?, encrypted = false, requireAuthOnAccess = false) => Promise<void>` | 创建新表       |
-| `deleteTable` | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<void>`           | 删除表         |
-| `hasTable`    | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<boolean>`        | 检查表是否存在 |
-| `listTables`  | `(encrypted = false, requireAuthOnAccess = false) => Promise<string[]>`                | 获取所有表名   |
-| `countTable`  | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<number>`         | 获取表记录数   |
-| `clearTable`  | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<void>`           | 清空表数据     |
+| `createTable` | `(tableName, options?) => Promise<void>` | 创建新表       |
+| `deleteTable` | `(tableName, options?) => Promise<void>` | 删除表         |
+| `hasTable`    | `(tableName, options?) => Promise<boolean>` | 检查表是否存在 |
+| `listTables`  | `(options?) => Promise<string[]>` | 获取所有表名   |
+| `countTable`  | `(tableName, options?) => Promise<number>` | 获取表记录数   |
+| `clearTable`  | `(tableName, options?) => Promise<void>` | 清空表数据     |
 
 ### 💾 数据操作
 
 | 方法        | 签名                                                                                       | 说明                             |
 | ----------- | ------------------------------------------------------------------------------------------ | -------------------------------- |
-| `insert`    | `(tableName, data, encrypted = false, requireAuthOnAccess = false) => Promise<WriteResult>`        | 插入单条或多条数据               |
-| `read`      | `(tableName, options?, encrypted = false, requireAuthOnAccess = false) => Promise<any[]>`          | 读取数据（支持过滤、分页、排序） |
-| `findOne`   | `(tableName, filter, encrypted = false, requireAuthOnAccess = false) => Promise<any\|null>`        | 查询单条记录                     |
-| `findMany`  | `(tableName, filter?, options?, encrypted = false, requireAuthOnAccess = false) => Promise<any[]>` | 查询多条记录（支持高级选项）     |
-| `update`    | `(tableName, data, where, encrypted = false, requireAuthOnAccess = false) => Promise<number>`      | 更新匹配的记录                   |
-| `remove`    | `(tableName, where, encrypted = false, requireAuthOnAccess = false) => Promise<number>`            | 删除匹配的记录                   |
-| `bulkWrite` | `(tableName, operations, encrypted = false, requireAuthOnAccess = false) => Promise<WriteResult>`  | 批量操作                         |
+| `insert`    | `(tableName, data, options?) => Promise<WriteResult>`        | 插入单条或多条数据             |
+| `read`      | `(tableName, options?) => Promise<any[]>`          | 读取数据（支持过滤、分页、排序） |
+| `findOne`   | `(tableName, filter, options?) => Promise<any\|null>`        | 查询单条记录                     |
+| `findMany`  | `(tableName, filter?, options?) => Promise<any[]>` | 查询多条记录（支持高级选项）     |
+| `update`    | `(tableName, data, where, options?) => Promise<number>`      | 更新匹配的记录                   |
+| `remove`    | `(tableName, where, options?) => Promise<number>`            | 删除匹配的记录                   |
+| `bulkWrite` | `(tableName, operations, options?) => Promise<WriteResult>`  | 批量操作                         |
 
 ### 🔄 事务管理
 
 | 方法               | 签名                                                                       | 说明         |
 | ------------------ | -------------------------------------------------------------------------- | ------------ |
-| `beginTransaction` | `(encrypted = false, requireAuthOnAccess = false) => Promise<void>` | 开始新事务   |
-| `commit`           | `(encrypted = false, requireAuthOnAccess = false) => Promise<void>` | 提交当前事务 |
-| `rollback`         | `(encrypted = false, requireAuthOnAccess = false) => Promise<void>` | 回滚当前事务 |
+| `beginTransaction` | `(options?) => Promise<void>` | 开始新事务   |
+| `commit`           | `(options?) => Promise<void>` | 提交当前事务 |
+| `rollback`         | `(options?) => Promise<void>` | 回滚当前事务 |
+
+### 🛠️ API 参数说明
+
+所有 API 支持键值对参数格式，参数顺序无关，支持的通用选项：
+
+| 参数名               | 类型    | 默认值 | 说明                                                                 |
+| -------------------- | ------- | ------ | -------------------------------------------------------------------- |
+| `encrypted`          | boolean | false  | 是否启用数据加密                                                     |
+| `requireAuthOnAccess`| boolean | false  | 是否在每次访问数据时都要求生物识别认证（仅在 `encrypted` 为 true 时生效） |
+
+### 📝 向后兼容性
+
+所有 API 保持向后兼容性，旧的 API 调用方式仍然有效：
+
+```typescript
+// 新格式（推荐，参数顺序无关）
+await createTable('users', {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
+```
 
 ## 📖 详细文档
 

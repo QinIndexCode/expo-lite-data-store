@@ -25,19 +25,10 @@ const defaultConfig: LiteStoreConfig = {
     // Key Derivation (anti-brute force)
     keyIterations: 120_000, // 2025 recommended: ≥120,000
 
-    // Field-Level Encryption
-    enableFieldLevelEncryption: false, // Disabled for now, using full data encryption
-    encryptedFields: [
-      // Explicitly list fields to encrypt
-      'password',
-      'email',
-      'phone',
-      'idCard',
-      'bankCard',
-      'realName',
-      'token',
-      'refreshToken',
-    ],
+    // Field Level Encryption
+    enableFieldLevelEncryption: true, // Enable field-level encryption
+    encryptedFields: ['password', 'email', 'phone'], // Fields to encrypt
+    requireAuthOnAccess: false, // Require authentication when accessing encrypted data
 
     // Key Cache Optimization
     cacheTimeout: 30_000, // Auto-clear masterKey from memory after 30 seconds
@@ -45,9 +36,6 @@ const defaultConfig: LiteStoreConfig = {
 
     // Bulk Operations
     useBulkOperations: true, // Keep enabled for 5~10x performance improvement
-
-    // Biometric Authentication
-    requireAuthOnAccess: false, // 是否每次访问都需要生物识别验证，默认为 false
   },
 
   // Performance Configuration

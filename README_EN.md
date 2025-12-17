@@ -9,7 +9,8 @@
 [![npm version](https://img.shields.io/npm/v/expo-lite-data-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-data-store)
 [![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-lite-data-store)](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)
-[![React Native](https://img.shields.io/badge/React%20Native-0.81+-blue.svg)](https://reactnative.dev/)
+[![React Native](https://img.shields.io/badge/React%20Native-0.72+-blue.svg)](https://reactnative.dev/)
+[![Expo](https://img.shields.io/badge/Expo-50.0+-blue.svg)](https://expo.dev/)
 
 **Lightweight, easy-configuration, pure TypeScript Expo local database**
 
@@ -102,7 +103,7 @@ console.log(users);
 
 ### Non-encrypted Mode
 
-By default, the database uses non-encrypted mode and will not trigger any biometric authentication:
+By default, the database uses non-encrypted mode and **will not trigger any biometric authentication**:
 
 ```typescript
 // Non-encrypted mode (default)
@@ -111,15 +112,26 @@ await insert('users', { id: 1, name: 'John Doe' });
 const user = await findOne('users', { id: 1 });
 ```
 
+**Important Note**: In non-encrypted mode, data is stored in plain text, no encryption algorithm is used, and no biometric or password authentication is triggered.
+
 ### Encrypted Mode
 
 Enable encrypted mode without requiring biometric authentication for each access:
 
 ```typescript
 // Encrypted mode without biometric authentication
-await createTable('users', {}, true, false);
-await insert('users', { id: 1, name: 'John Doe' }, true, false);
-const user = await findOne('users', { id: 1 }, true, false);
+await createTable('users', {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
+await insert('users', { id: 1, name: 'John Doe' }, {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
+const user = await findOne('users', { id: 1 }, {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
 ```
 
 ### Encrypted Mode + Biometric Authentication
@@ -128,9 +140,18 @@ Enable encrypted mode and require biometric authentication for each access:
 
 ```typescript
 // Encrypted mode with biometric authentication
-await createTable('users', {}, true, true);
-await insert('users', { id: 1, name: 'John Doe' }, true, true);
-const user = await findOne('users', { id: 1 }, true, true);
+await createTable('users', {
+  encrypted: true,
+  requireAuthOnAccess: true
+});
+await insert('users', { id: 1, name: 'John Doe' }, {
+  encrypted: true,
+  requireAuthOnAccess: true
+});
+const user = await findOne('users', { id: 1 }, {
+  encrypted: true,
+  requireAuthOnAccess: true
+});
 ```
 
 ### Encryption Parameters
@@ -139,6 +160,14 @@ const user = await findOne('users', { id: 1 }, true, true);
 | ------------------- | ------- | ------ | --------------------------------------------------------------------------- |
 | `encrypted`         | boolean | false  | Whether to enable data encryption                                           |
 | `requireAuthOnAccess` | boolean | false   | Whether to require biometric authentication for each access (only effective when `encrypted` is true) |
+| `encryptFullTable`   | boolean | false  | Whether to enable full table encryption (only effective when `encrypted` is true, mutually exclusive with field-level encryption) |
+| `enableFieldLevelEncryption` | boolean | false | Whether to enable field-level encryption (only effective when `encrypted` is true, mutually exclusive with full table encryption) |
+| `encryptedFields` | string[] | [] | List of fields to encrypt (only effective when `enableFieldLevelEncryption` is true) |
+
+**Important Notes**:
+- Full table encryption and field-level encryption **cannot be used simultaneously**. The system will automatically detect conflicts and throw a clear error message.
+- In encrypted mode, keys are automatically generated and managed by the system, no manual handling required.
+- Biometric authentication is only triggered when `requireAuthOnAccess` is true.
 
 ## 📚 Basic API Reference
 
@@ -146,32 +175,56 @@ const user = await findOne('users', { id: 1 }, true, true);
 
 | Method        | Signature                                                                                | Description            |
 | ------------- | ----------------------------------------------------------------------------------------- | ---------------------- |
-| `createTable` | `(tableName, options?, encrypted = false, requireAuthOnAccess = false) => Promise<void>` | Create new table       |
-| `deleteTable` | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<void>`           | Delete table           |
-| `hasTable`    | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<boolean>`        | Check if table exists  |
-| `listTables`  | `(encrypted = false, requireAuthOnAccess = false) => Promise<string[]>`                  | Get all table names    |
-| `countTable`  | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<number>`         | Get table record count |
-| `clearTable`  | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<void>`           | Clear table data       |
+| `createTable` | `(tableName, options?) => Promise<void>` | Create new table       |
+| `deleteTable` | `(tableName, options?) => Promise<void>` | Delete table           |
+| `hasTable`    | `(tableName, options?) => Promise<boolean>` | Check if table exists  |
+| `listTables`  | `(options?) => Promise<string[]>` | Get all table names    |
+| `countTable`  | `(tableName, options?) => Promise<number>` | Get table record count |
+| `clearTable`  | `(tableName, options?) => Promise<void>` | Clear table data       |
 
 ### 💾 Data Operations
 
 | Method      | Signature                                                                                           | Description                                         |
 | ----------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `insert`    | `(tableName, data, encrypted = false, requireAuthOnAccess = false) => Promise<WriteResult>`        | Insert single or multiple records                   |
-| `read`      | `(tableName, options?, encrypted = false, requireAuthOnAccess = false) => Promise<any[]>`          | Read data (supports filtering, pagination, sorting) |
-| `findOne`   | `(tableName, filter, encrypted = false, requireAuthOnAccess = false) => Promise<any \| null>`      | Query single record                                 |
-| `findMany`  | `(tableName, filter?, options?, encrypted = false, requireAuthOnAccess = false) => Promise<any[]>` | Query multiple records (supports advanced options)  |
-| `update`    | `(tableName, data, where, encrypted = false, requireAuthOnAccess = false) => Promise<number>`      | Update matching records                             |
-| `remove`    | `(tableName, where, encrypted = false, requireAuthOnAccess = false) => Promise<number>`            | Delete matching records                             |
-| `bulkWrite` | `(tableName, operations, encrypted = false, requireAuthOnAccess = false) => Promise<WriteResult>`  | Batch operations                                    |
+| `insert`    | `(tableName, data, options?) => Promise<WriteResult>`        | Insert single or multiple records                   |
+| `read`      | `(tableName, options?) => Promise<any[]>`          | Read data (supports filtering, pagination, sorting) |
+| `findOne`   | `(tableName, filter, options?) => Promise<any \| null>`      | Query single record                                 |
+| `findMany`  | `(tableName, filter?, options?) => Promise<any[]>` | Query multiple records (supports advanced options)  |
+| `update`    | `(tableName, data, where, options?) => Promise<number>`      | Update matching records                             |
+| `remove`    | `(tableName, where, options?) => Promise<number>`            | Delete matching records                             |
+| `bulkWrite` | `(tableName, operations, options?) => Promise<WriteResult>`  | Batch operations                                    |
 
 ### 🔄 Transaction Management
 
 | Method             | Signature                                                                       | Description                  |
 | ------------------ | --------------------------------------------------------------------------------| ---------------------------- |
-| `beginTransaction` | `(encrypted = false, requireAuthOnAccess = false) => Promise<void>` | Start new transaction        |
-| `commit`           | `(encrypted = false, requireAuthOnAccess = false) => Promise<void>` | Commit current transaction   |
-| `rollback`         | `(encrypted = false, requireAuthOnAccess = false) => Promise<void>` | Rollback current transaction |
+| `beginTransaction` | `(options?) => Promise<void>` | Start new transaction        |
+| `commit`           | `(options?) => Promise<void>` | Commit current transaction   |
+| `rollback`         | `(options?) => Promise<void>` | Rollback current transaction |
+
+### 🛠️ API Parameter Description
+
+All APIs support key-value parameter format, parameter order is irrelevant, supported common options:
+
+| Parameter name       | Type    | Default | Description                                                                 |
+| -------------------- | ------- | ------ | -------------------------------------------------------------------------- |
+| `encrypted`          | boolean | false  | Whether to enable data encryption                                          |
+| `requireAuthOnAccess`| boolean | false  | Whether to require biometric authentication for each access (only effective when `encrypted` is true) |
+
+### 📝 Backward Compatibility
+
+All APIs maintain backward compatibility, old API calling methods still work:
+
+```typescript
+// Old format (still works)
+await createTable('users', {}, true, false);
+
+// New format (recommended, parameter order is irrelevant)
+await createTable('users', {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
+```
 
 ## 📖 Detailed Documentation
 
@@ -208,12 +261,12 @@ module.exports = {
   encryption: {
     algorithm: 'AES-CTR', // Encryption algorithm
     keySize: 256, // Key size
-    hmacAlgorithm: 'SHA-256', // HMAC algorithm
-    keyIterations: 100000, // Key iteration count
-    enableFieldLevelEncryption: false, // Enable field-level encryption
-    encryptedFields: [], // Fields to encrypt
-    cacheTimeout: 300000, // Cache timeout (5 minutes)
-    maxCacheSize: 50, // Maximum number of cached tables
+    hmacAlgorithm: 'SHA-512', // HMAC algorithm
+    keyIterations: 120000, // Key iteration count
+    enableFieldLevelEncryption: true, // Enable field-level encryption
+    encryptedFields: ['password', 'email', 'phone'], // Fields to encrypt
+    cacheTimeout: 30000, // Cache timeout (30 seconds)
+    maxCacheSize: 50, // Maximum number of cached keys
     useBulkOperations: true, // Enable bulk operations
   },
   

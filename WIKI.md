@@ -37,6 +37,12 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 | `maxCacheSize`               | `number`   | `50`             | LRU 缓存最多保留的派生密钥数量               |
 | `useBulkOperations`          | `boolean`  | `true`           | 是否启用批量操作优化                         |
 
+**重要说明**：
+- 整表加密和字段级加密**不能同时使用**，系统会自动检测冲突并抛出明确的错误信息
+- 整表加密模式通过 API 调用时的 `encryptFullTable` 参数启用
+- 字段级加密通过配置文件中的 `enableFieldLevelEncryption` 和 `encryptedFields` 启用
+- 非加密模式下，数据以明文形式存储，不会使用任何加密算法，也不会触发生物识别或密码认证
+
 ### 性能配置
 
 | 配置项                    | 类型      | 默认值 | 说明                              |
@@ -72,39 +78,48 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 
 ### 配置最佳实践
 
+要修改配置，您需要直接编辑打包的配置文件：
+
+```
+node_modules/expo-lite-data-store/dist/js/liteStore.config.js
+```
+
 1. **性能优化**：
 
-   ```typescript
-   setConfig({
+   ```javascript
+   // liteStore.config.js
+   module.exports = {
      performance: {
        enableQueryOptimization: true,
        maxConcurrentOperations: 8, // 根据设备性能调整
        enableBatchOptimization: true,
      },
-   });
+   };
    ```
 
 2. **安全性增强**：
 
-   ```typescript
-   setConfig({
+   ```javascript
+   // liteStore.config.js
+   module.exports = {
      encryption: {
        keyIterations: 200000, // 增加密钥派生迭代次数
        cacheTimeout: 15000, // 减少密钥缓存时间
        enableFieldLevelEncryption: true,
      },
-   });
+   };
    ```
 
 3. **内存优化**：
-   ```typescript
-   setConfig({
+   ```javascript
+   // liteStore.config.js
+   module.exports = {
      cache: {
        maxSize: 500, // 减少缓存大小
        enableCompression: true, // 启用缓存压缩
        memoryWarningThreshold: 0.7, // 降低内存警告阈值
      },
-   });
+   };
    ```
 
 ## 🎯 API 参考
@@ -144,7 +159,7 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 
 **签名**：
 ```typescript
-createTable(tableName: string, options?: CreateTableOptions, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+createTable(tableName: string, options?: CreateTableOptions): Promise<void>
 ```
 
 **参数**：
@@ -153,6 +168,8 @@ createTable(tableName: string, options?: CreateTableOptions, encrypted: boolean 
   - `columns`: 列定义（可选）
   - `initialData`: 初始数据（可选）
   - `mode`: 存储模式，`'single'` 或 `'chunked'`（可选）
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **示例**：
 ```typescript
@@ -171,6 +188,12 @@ await createTable('users', {
 await createTable('large_data', {
   mode: 'chunked'
 });
+
+// 使用加密选项创建表
+await createTable('sensitive_data', {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
 ```
 
 ##### deleteTable
@@ -179,15 +202,24 @@ await createTable('large_data', {
 
 **签名**：
 ```typescript
-deleteTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+deleteTable(tableName: string, options?: TableOptions): Promise<void>
 ```
 
 **参数**：
 - `tableName`: 要删除的表名
+- `options`: 可选配置项
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **示例**：
 ```typescript
+// 删除普通表
 await deleteTable('users');
+
+// 删除加密表
+await deleteTable('sensitive_data', {
+  encrypted: true
+});
 ```
 
 ##### hasTable
@@ -196,19 +228,28 @@ await deleteTable('users');
 
 **签名**：
 ```typescript
-hasTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<boolean>
+hasTable(tableName: string, options?: TableOptions): Promise<boolean>
 ```
 
 **参数**：
 - `tableName`: 要检查的表名
+- `options`: 可选配置项
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `boolean`: 表是否存在
 
 **示例**：
 ```typescript
+// 检查普通表
 const exists = await hasTable('users');
 console.log(`表 users 存在: ${exists}`);
+
+// 检查加密表
+const encryptedExists = await hasTable('sensitive_data', {
+  encrypted: true
+});
 ```
 
 ##### listTables
@@ -217,16 +258,27 @@ console.log(`表 users 存在: ${exists}`);
 
 **签名**：
 ```typescript
-listTables(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<string[]>
+listTables(options?: TableOptions): Promise<string[]>
 ```
+
+**参数**：
+- `options`: 可选配置项
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `string[]`: 所有表名的数组
 
 **示例**：
 ```typescript
+// 获取所有普通表
 const tables = await listTables();
 console.log('所有表:', tables);
+
+// 获取所有加密表
+const encryptedTables = await listTables({
+  encrypted: true
+});
 ```
 
 ##### countTable
@@ -235,19 +287,28 @@ console.log('所有表:', tables);
 
 **签名**：
 ```typescript
-countTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<number>
+countTable(tableName: string, options?: TableOptions): Promise<number>
 ```
 
 **参数**：
 - `tableName`: 表名
+- `options`: 可选配置项
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `number`: 表中的记录数
 
 **示例**：
 ```typescript
+// 获取普通表记录数
 const count = await countTable('users');
 console.log(`表 users 中有 ${count} 条记录`);
+
+// 获取加密表记录数
+const encryptedCount = await countTable('sensitive_data', {
+  encrypted: true
+});
 ```
 
 ##### clearTable
@@ -256,15 +317,24 @@ console.log(`表 users 中有 ${count} 条记录`);
 
 **签名**：
 ```typescript
-clearTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+clearTable(tableName: string, options?: TableOptions): Promise<void>
 ```
 
 **参数**：
 - `tableName`: 要清空的表名
+- `options`: 可选配置项
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **示例**：
 ```typescript
+// 清空普通表
 await clearTable('users');
+
+// 清空加密表
+await clearTable('sensitive_data', {
+  encrypted: true
+});
 ```
 
 #### 数据操作 API
@@ -275,12 +345,18 @@ await clearTable('users');
 
 **签名**：
 ```typescript
-insert(tableName: string, data: Record<string, any> | Record<string, any>[], encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<WriteResult>
+insert(tableName: string, data: Record<string, any> | Record<string, any>[], options?: WriteOptions): Promise<WriteResult>
 ```
 
 **参数**：
 - `tableName`: 表名
 - `data`: 要插入的数据，可以是单条记录或记录数组
+- `options`: 可选配置项
+  - `mode`: 写入模式，`'append'` 或 `'overwrite'`（可选）
+  - `forceChunked`: 是否强制使用分片写入（可选）
+  - `encryptFullTable`: 是否启用整表加密（可选）
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `WriteResult`: 写入结果，包含写入字节数、总字节数等信息
@@ -295,6 +371,14 @@ await insert('users', [
   { id: 2, name: '李四', age: 30 },
   { id: 3, name: '王五', age: 35 }
 ]);
+
+// 插入加密数据
+await insert('sensitive_data', {
+  id: 1,
+  password: 'secure_password'
+}, {
+  encrypted: true
+});
 ```
 
 ##### read
@@ -303,7 +387,7 @@ await insert('users', [
 
 **签名**：
 ```typescript
-read(tableName: string, options?: ReadOptions, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<Record<string, any>[]>
+read(tableName: string, options?: ReadOptions): Promise<Record<string, any>[]>
 ```
 
 **参数**：
@@ -344,12 +428,15 @@ const paginatedUsers = await read('users', {
 
 **签名**：
 ```typescript
-findOne(tableName: string, filter: FilterCondition, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<Record<string, any> | null>
+findOne(tableName: string, filter: FilterCondition, options?: TableOptions): Promise<Record<string, any> | null>
 ```
 
 **参数**：
 - `tableName`: 表名
 - `filter`: 查询条件
+- `options`: 可选配置项
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `Record<string, any> | null`: 匹配的记录，如果没有匹配则返回 `null`
@@ -363,6 +450,12 @@ const user = await findOne('users', { id: 1 });
 const activeUser = await findOne('users', {
   $and: [{ status: 'active' }, { age: { $gte: 18 } }]
 });
+
+// 使用加密选项查询
+const encryptedUser = await findOne('sensitive_data', { id: 1 }, {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
 ```
 
 ##### findMany
@@ -371,13 +464,7 @@ const activeUser = await findOne('users', {
 
 **签名**：
 ```typescript
-findMany(tableName: string, filter?: FilterCondition, options?: {
-  skip?: number;
-  limit?: number;
-  sortBy?: string | string[];
-  order?: 'asc' | 'desc' | ('asc' | 'desc')[];
-  sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
-}, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<Record<string, any>[]>
+findMany(tableName: string, filter?: FilterCondition, options?: FindOptions): Promise<Record<string, any>[]>
 ```
 
 **参数**：
@@ -389,6 +476,8 @@ findMany(tableName: string, filter?: FilterCondition, options?: {
   - `sortBy`: 排序字段或字段数组
   - `order`: 排序方向或方向数组
   - `sortAlgorithm`: 排序算法
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `Record<string, any>[]`: 匹配的记录数组
@@ -409,6 +498,14 @@ const chineseSortedUsers = await findMany('users', {}, {
   sortBy: 'name',
   sortAlgorithm: 'slow' // 支持中文排序
 });
+
+// 使用加密选项查询
+const encryptedUsers = await findMany('sensitive_data', { status: 'active' }, {
+  encrypted: true,
+  requireAuthOnAccess: false,
+  sortBy: 'created_at',
+  order: 'desc'
+});
 ```
 
 ##### update
@@ -417,13 +514,16 @@ const chineseSortedUsers = await findMany('users', {}, {
 
 **签名**：
 ```typescript
-update(tableName: string, data: Record<string, any>, where: FilterCondition, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<number>
+update(tableName: string, data: Record<string, any>, where: FilterCondition, options?: TableOptions): Promise<number>
 ```
 
 **参数**：
 - `tableName`: 表名
 - `data`: 要更新的数据
 - `where`: 更新条件
+- `options`: 可选配置项
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `number`: 更新的记录数
@@ -440,6 +540,12 @@ const updatedCount = await update('users', { status: 'inactive' }, {
 
 // 使用操作符更新
 const updatedCount = await update('users', { balance: { $inc: 100 } }, { id: 1 });
+
+// 使用加密选项更新
+const updatedCount = await update('sensitive_data', { status: 'active' }, { id: 1 }, {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
 ```
 
 ##### remove
@@ -448,12 +554,15 @@ const updatedCount = await update('users', { balance: { $inc: 100 } }, { id: 1 }
 
 **签名**：
 ```typescript
-remove(tableName: string, where: FilterCondition, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<number>
+remove(tableName: string, where: FilterCondition, options?: TableOptions): Promise<number>
 ```
 
 **参数**：
 - `tableName`: 表名
 - `where`: 删除条件
+- `options`: 可选配置项
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `number`: 删除的记录数
@@ -467,6 +576,12 @@ const deletedCount = await remove('users', { id: 1 });
 const deletedCount = await remove('users', {
   status: 'inactive'
 });
+
+// 使用加密选项删除
+const deletedCount = await remove('sensitive_data', { id: 1 }, {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
 ```
 
 ##### bulkWrite
@@ -478,17 +593,8 @@ const deletedCount = await remove('users', {
 bulkWrite(tableName: string, operations: Array<{
   type: 'insert' | 'update' | 'delete';
   data: Record<string, any> | Record<string, any>[];
-}> | Array<{
-  type: 'insert';
-  data: Record<string, any> | Record<string, any>[];
-}> | Array<{
-  type: 'update';
-  data: Record<string, any>;
-  where: FilterCondition;
-}> | Array<{
-  type: 'delete';
-  data: FilterCondition;
-}>, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<WriteResult>
+  where?: FilterCondition;
+}>, options?: TableOptions): Promise<WriteResult>
 ```
 
 **参数**：
@@ -496,6 +602,10 @@ bulkWrite(tableName: string, operations: Array<{
 - `operations`: 操作数组
   - `type`: 操作类型，`'insert'`、`'update'` 或 `'delete'`
   - `data`: 操作数据
+  - `where`: 操作条件（update和delete操作需要）
+- `options`: 可选配置项
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `WriteResult`: 写入结果
@@ -505,8 +615,17 @@ bulkWrite(tableName: string, operations: Array<{
 await bulkWrite('users', [
   { type: 'insert', data: { id: 4, name: '赵六', age: 28 } },
   { type: 'update', data: { status: 'active' }, where: { id: 2 } },
-  { type: 'delete', data: { id: 3 } }
+  { type: 'delete', where: { id: 3 } }
 ]);
+
+// 使用加密选项执行批量操作
+await bulkWrite('sensitive_data', [
+  { type: 'insert', data: { id: 1, name: '敏感数据', value: '123456' } },
+  { type: 'update', data: { value: '789012' }, where: { id: 1 } }
+], {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
 ```
 
 #### 事务管理 API
@@ -517,8 +636,13 @@ await bulkWrite('users', [
 
 **签名**：
 ```typescript
-beginTransaction(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+beginTransaction(options?: TableOptions): Promise<void>
 ```
+
+**参数**：
+- `options`: 可选配置项
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **示例**：
 ```typescript
@@ -534,6 +658,9 @@ try {
   await rollback();
   throw error;
 }
+
+// 使用加密选项开始事务
+await beginTransaction({ encrypted: true, requireAuthOnAccess: false });
 ```
 
 ##### commit
@@ -542,8 +669,13 @@ try {
 
 **签名**：
 ```typescript
-commit(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+commit(options?: TableOptions): Promise<void>
 ```
+
+**参数**：
+- `options`: 可选配置项
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **示例**：
 ```typescript
@@ -554,6 +686,9 @@ try {
 } catch (error) {
   await rollback();
 }
+
+// 使用加密选项提交事务
+await commit({ encrypted: true, requireAuthOnAccess: false });
 ```
 
 ##### rollback
@@ -562,8 +697,13 @@ try {
 
 **签名**：
 ```typescript
-rollback(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+rollback(options?: TableOptions): Promise<void>
 ```
+
+**参数**：
+- `options`: 可选配置项
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **示例**：
 ```typescript
@@ -574,6 +714,9 @@ try {
 } catch (error) {
   await rollback();
 }
+
+// 使用加密选项回滚事务
+await rollback({ encrypted: true, requireAuthOnAccess: false });
 ```
 
 #### 自动同步 API
@@ -940,8 +1083,8 @@ const users = await findMany('users', { email: 'user@example.com' }); // 使用e
 // 使用bulkWrite进行批量操作，比多次单独操作更高效
 await bulkWrite('products', [
   { type: 'insert', data: { id: 1, name: 'Product 1' } },
-  { type: 'update', data: { id: 2, price: 29.99 } },
-  { type: 'delete', data: { id: 3 } },
+  { type: 'update', data: { price: 29.99 }, where: { id: 2 } },
+  { type: 'delete', where: { id: 3 } },
 ]);
 ```
 
@@ -966,7 +1109,7 @@ while (true) {
   if (results.length === 0) break;
 
   // 处理当前页数据
-  processPageData(results);
+  // processPageData(results);
 
   page++;
 }
@@ -974,7 +1117,7 @@ while (true) {
 
 ### 缓存优化
 
-```typescript
+```javascript
 // 配置缓存
 // liteStore.config.js
 module.exports = {
@@ -1016,11 +1159,19 @@ await insert('users', { id: 1, name: '张三' });
 - 使用 AES-CTR 加密算法
 - 不要求每次访问都进行生物识别认证
 - 适合需要加密但不需要频繁生物识别的数据
+- **默认加密方式**：字段级加密
+- **默认加密字段**：`password`、`email`、`phone`
 
 ```typescript
-// 加密模式，无需生物识别
-await createTable('users', {}, true, false);
-await insert('users', { id: 1, name: '张三' }, true, false);
+// 加密模式，无需生物识别（默认使用字段级加密）
+await createTable('users', {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
+await insert('users', { id: 1, name: '张三' }, {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
 ```
 
 #### 3. 加密模式 + 生物识别认证
@@ -1028,12 +1179,24 @@ await insert('users', { id: 1, name: '张三' }, true, false);
 - 使用 AES-CTR 加密算法
 - 要求每次访问都进行生物识别或密码认证
 - 适合高度敏感的数据
+- **默认加密方式**：字段级加密
 
 ```typescript
-// 加密模式，需要生物识别认证
-await createTable('users', {}, true, true);
-await insert('users', { id: 1, name: '张三' }, true, true);
+// 加密模式，需要生物识别认证（默认使用字段级加密）
+await createTable('users', {
+  encrypted: true,
+  requireAuthOnAccess: true
+});
+await insert('users', { id: 1, name: '张三' }, {
+  encrypted: true,
+  requireAuthOnAccess: true
+});
 ```
+
+**加密优先级说明**：
+- 当明确设置 `encryptFullTable: true` 参数时，使用整表加密
+- 否则，默认使用字段级加密（根据配置文件中的 `enableFieldLevelEncryption` 和 `encryptedFields` 设置）
+- 整表加密和字段级加密**不能同时使用**，系统会自动检测冲突并抛出明确的错误信息
 
 ### 加密参数说明
 
@@ -1041,6 +1204,9 @@ await insert('users', { id: 1, name: '张三' }, true, true);
 | -------------------- | ------- | ------ | -------------------------------------------------------------------- |
 | `encrypted`          | boolean | false  | 是否启用数据加密                                                     |
 | `requireAuthOnAccess`| boolean | false  | 是否在每次访问数据时都要求生物识别认证（仅在 `encrypted` 为 true 时生效） |
+| `encryptFullTable`   | boolean | false  | 是否启用整表加密（仅在 `encrypted` 为 true 时生效，与字段级加密互斥） |
+| `enableFieldLevelEncryption` | boolean | false | 是否启用字段级加密（仅在 `encrypted` 为 true 时生效，与整表加密互斥） |
+| `encryptedFields` | string[] | [] | 需要加密的字段列表（仅在 `enableFieldLevelEncryption` 为 true 时生效） |
 
 ### 密钥管理
 
@@ -1131,7 +1297,12 @@ A: 在配置文件中设置 `cache.autoSync.enabled: false`，或使用 `setAuto
 <details>
 <summary>Q: 加密功能如何使用？</summary>
 
-A: 当前版本的加密功能正在开发中，敬请期待。
+A: 加密功能已完全可用，支持三种使用模式：
+1. 非加密模式（默认）：不使用任何加密算法，不触发生物识别
+2. 加密模式：使用AES-CTR加密，无需生物识别
+3. 加密模式 + 生物识别认证：每次访问都需要生物识别或密码认证
+
+详细使用方法请参考文档中的"🔒 加密使用说明"章节。
 </details>
 
 <details>

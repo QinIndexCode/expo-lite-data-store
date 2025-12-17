@@ -37,6 +37,12 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 | `maxCacheSize`               | `number`   | `50`                        | Maximum number of derived keys to retain in LRU cache                                         |
 | `useBulkOperations`          | `boolean`  | `true`                      | Whether to enable bulk operation optimization                                                 |
 
+**Important Notes**: 
+- Full table encryption and field-level encryption **cannot be used simultaneously**. The system will automatically detect conflicts and throw a clear error message.
+- Full table encryption mode is enabled through the `encryptFullTable` parameter when calling the API.
+- Field-level encryption is enabled through the `enableFieldLevelEncryption` and `encryptedFields` configuration in the configuration file.
+- In non-encrypted mode, data is stored in plain text, no encryption algorithm is used, and no biometric or password authentication is triggered.
+
 ### Performance Configuration
 
 | Configuration Item        | Type      | Default Value | Description                                             |
@@ -72,39 +78,48 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 
 ### Configuration Best Practices
 
+To modify configuration, you need to edit the bundled configuration file directly:
+
+```
+node_modules/expo-lite-data-store/dist/js/liteStore.config.js
+```
+
 1. **Performance Optimization**:
 
-   ```typescript
-   setConfig({
+   ```javascript
+   // liteStore.config.js
+   module.exports = {
      performance: {
        enableQueryOptimization: true,
        maxConcurrentOperations: 8, // Adjust based on device performance
        enableBatchOptimization: true,
      },
-   });
+   };
    ```
 
 2. **Security Enhancement**:
 
-   ```typescript
-   setConfig({
+   ```javascript
+   // liteStore.config.js
+   module.exports = {
      encryption: {
        keyIterations: 200000, // Increase key derivation iterations
        cacheTimeout: 15000, // Reduce key cache time
        enableFieldLevelEncryption: true,
      },
-   });
+   };
    ```
 
 3. **Memory Optimization**:
-   ```typescript
-   setConfig({
+   ```javascript
+   // liteStore.config.js
+   module.exports = {
      cache: {
        maxSize: 500, // Reduce cache size
        enableCompression: true, // Enable cache compression
        memoryWarningThreshold: 0.7, // Lower memory warning threshold
      },
-   });
+   };
    ```
 
 ## 🎯 API Reference
@@ -144,10 +159,13 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 
 **Signature**:
 ```typescript
-createTable(tableName: string, options?: CreateTableOptions, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+createTable(tableName: string, options?: CreateTableOptions): Promise<void>
 ```
 
 **Parameters**:
+- `options`: Optional configuration
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 - `tableName`: Table name, must be unique
 - `options`: Optional configuration
   - `columns`: Column definitions (optional)
@@ -179,11 +197,17 @@ await createTable('large_data', {
 
 **Signature**:
 ```typescript
-deleteTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+deleteTable(tableName: string, options?: TableOptions): Promise<void>
 ```
 
 **Parameters**:
-- `tableName`: Table name to delete
+- `tableName`: Table name
+- `options`: Optional configuration
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional) to delete
+- `options`: Optional configuration
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Example**:
 ```typescript
@@ -196,11 +220,14 @@ await deleteTable('users');
 
 **Signature**:
 ```typescript
-hasTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<boolean>
+hasTable(tableName: string, options?: TableOptions): Promise<boolean>
 ```
 
 **Parameters**:
 - `tableName`: Table name to check
+- `options`: Optional configuration
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Returns**:
 - `boolean`: Whether the table exists
@@ -217,7 +244,7 @@ console.log(`Table users exists: ${exists}`);
 
 **Signature**:
 ```typescript
-listTables(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<string[]>
+listTables(options?: TableOptions): Promise<string[]>
 ```
 
 **Returns**:
@@ -235,7 +262,7 @@ console.log('All tables:', tables);
 
 **Signature**:
 ```typescript
-countTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<number>
+countTable(tableName: string, options?: TableOptions): Promise<number>
 ```
 
 **Parameters**:
@@ -256,11 +283,14 @@ console.log(`Table users has ${count} records`);
 
 **Signature**:
 ```typescript
-clearTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+clearTable(tableName: string, options?: TableOptions): Promise<void>
 ```
 
 **Parameters**:
 - `tableName`: Table name to clear
+- `options`: Optional configuration
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Example**:
 ```typescript
@@ -275,12 +305,18 @@ await clearTable('users');
 
 **Signature**:
 ```typescript
-insert(tableName: string, data: Record<string, any> | Record<string, any>[], encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<WriteResult>
+insert(tableName: string, data: Record<string, any> | Record<string, any>[], options?: WriteOptions): Promise<WriteResult>
 ```
 
 **Parameters**:
 - `tableName`: Table name
 - `data`: Data to insert, can be single record or array of records
+- `options`: Optional configuration
+  - `mode`: Write mode, `'append'` or `'overwrite'` (optional)
+  - `forceChunked`: Whether to force chunked writing (optional)
+  - `encryptFullTable`: Whether to enable full table encryption (optional)
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Returns**:
 - `WriteResult`: Write result, including bytes written, total bytes, etc.
@@ -303,7 +339,7 @@ await insert('users', [
 
 **Signature**:
 ```typescript
-read(tableName: string, options?: ReadOptions, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<Record<string, any>[]>
+read(tableName: string, options?: ReadOptions): Promise<Record<string, any>[]>
 ```
 
 **Parameters**:
@@ -315,6 +351,8 @@ read(tableName: string, options?: ReadOptions, encrypted: boolean = false, requi
   - `sortBy`: Sort field
   - `order`: Sort direction, `'asc'` or `'desc'`
   - `sortAlgorithm`: Sorting algorithm
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Returns**:
 - `Record<string, any>[]`: Array of matching records
@@ -344,12 +382,15 @@ const paginatedUsers = await read('users', {
 
 **Signature**:
 ```typescript
-findOne(tableName: string, filter: FilterCondition, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<Record<string, any> | null>
+findOne(tableName: string, filter: FilterCondition, options?: TableOptions): Promise<Record<string, any> | null>
 ```
 
 **Parameters**:
 - `tableName`: Table name
 - `filter`: Query condition
+- `options`: Optional configuration
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Returns**:
 - `Record<string, any> | null`: Matching record, or `null` if no match
@@ -363,6 +404,12 @@ const user = await findOne('users', { id: 1 });
 const activeUser = await findOne('users', {
   $and: [{ status: 'active' }, { age: { $gte: 18 } }]
 });
+
+// Query with encryption options
+const encryptedUser = await findOne('sensitive_data', { id: 1 }, {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
 ```
 
 ##### findMany
@@ -371,13 +418,7 @@ const activeUser = await findOne('users', {
 
 **Signature**:
 ```typescript
-findMany(tableName: string, filter?: FilterCondition, options?: {
-  skip?: number;
-  limit?: number;
-  sortBy?: string | string[];
-  order?: 'asc' | 'desc' | ('asc' | 'desc')[];
-  sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
-}, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<Record<string, any>[]>
+findMany(tableName: string, filter?: FilterCondition, options?: FindOptions): Promise<Record<string, any>[]>
 ```
 
 **Parameters**:
@@ -389,6 +430,8 @@ findMany(tableName: string, filter?: FilterCondition, options?: {
   - `sortBy`: Sort field or array of fields
   - `order`: Sort direction or array of directions
   - `sortAlgorithm`: Sorting algorithm
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Returns**:
 - `Record<string, any>[]`: Array of matching records
@@ -409,6 +452,14 @@ const chineseSortedUsers = await findMany('users', {}, {
   sortBy: 'name',
   sortAlgorithm: 'slow' // Supports Chinese sorting
 });
+
+// Query with encryption options
+const encryptedUsers = await findMany('sensitive_data', { status: 'active' }, {
+  encrypted: true,
+  requireAuthOnAccess: false,
+  sortBy: 'created_at',
+  order: 'desc'
+});
 ```
 
 ##### update
@@ -417,13 +468,16 @@ const chineseSortedUsers = await findMany('users', {}, {
 
 **Signature**:
 ```typescript
-update(tableName: string, data: Record<string, any>, where: FilterCondition, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<number>
+update(tableName: string, data: Record<string, any>, where: FilterCondition, options?: TableOptions): Promise<number>
 ```
 
 **Parameters**:
 - `tableName`: Table name
 - `data`: Data to update
 - `where`: Update condition
+- `options`: Optional configuration
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Returns**:
 - `number`: Number of updated records
@@ -440,6 +494,12 @@ const updatedCount = await update('users', { status: 'inactive' }, {
 
 // Update with operator
 const updatedCount = await update('users', { balance: { $inc: 100 } }, { id: 1 });
+
+// Update with encryption options
+const updatedCount = await update('sensitive_data', { status: 'active' }, { id: 1 }, {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
 ```
 
 ##### remove
@@ -448,12 +508,15 @@ const updatedCount = await update('users', { balance: { $inc: 100 } }, { id: 1 }
 
 **Signature**:
 ```typescript
-remove(tableName: string, where: FilterCondition, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<number>
+remove(tableName: string, where: FilterCondition, options?: TableOptions): Promise<number>
 ```
 
 **Parameters**:
 - `tableName`: Table name
 - `where`: Delete condition
+- `options`: Optional configuration
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Returns**:
 - `number`: Number of deleted records
@@ -467,6 +530,12 @@ const deletedCount = await remove('users', { id: 1 });
 const deletedCount = await remove('users', {
   status: 'inactive'
 });
+
+// Delete with encryption options
+const deletedCount = await remove('sensitive_data', { id: 1 }, {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
 ```
 
 ##### bulkWrite
@@ -479,7 +548,7 @@ bulkWrite(tableName: string, operations: Array<{
   type: 'insert' | 'update' | 'delete';
   data: Record<string, any> | Record<string, any>[];
   where?: FilterCondition;
-}>, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<WriteResult>
+}>, options?: TableOptions): Promise<WriteResult>
 ```
 
 **Parameters**:
@@ -488,6 +557,9 @@ bulkWrite(tableName: string, operations: Array<{
   - `type`: Operation type, `'insert'`, `'update'` or `'delete'`
   - `data`: Operation data
   - `where`: Operation condition (required for update and delete)
+- `options`: Optional configuration
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Returns**:
 - `WriteResult`: Write result
@@ -499,6 +571,15 @@ await bulkWrite('users', [
   { type: 'update', data: { status: 'active' }, where: { id: 2 } },
   { type: 'delete', where: { id: 3 } }
 ]);
+
+// Execute bulk operations with encryption options
+await bulkWrite('sensitive_data', [
+  { type: 'insert', data: { id: 1, name: 'Sensitive Data', value: '123456' } },
+  { type: 'update', data: { value: '789012' }, where: { id: 1 } }
+], {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
 ```
 
 #### Transaction Management APIs
@@ -509,8 +590,13 @@ await bulkWrite('users', [
 
 **Signature**:
 ```typescript
-beginTransaction(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+beginTransaction(options?: TableOptions): Promise<void>
 ```
+
+**Parameters**:
+- `options`: Optional configuration
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Example**:
 ```typescript
@@ -526,6 +612,9 @@ try {
   await rollback();
   throw error;
 }
+
+// Start transaction with encryption options
+await beginTransaction({ encrypted: true, requireAuthOnAccess: false });
 ```
 
 ##### commit
@@ -534,8 +623,13 @@ try {
 
 **Signature**:
 ```typescript
-commit(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+commit(options?: TableOptions): Promise<void>
 ```
+
+**Parameters**:
+- `options`: Optional configuration
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Example**:
 ```typescript
@@ -546,6 +640,9 @@ try {
 } catch (error) {
   await rollback();
 }
+
+// Commit transaction with encryption options
+await commit({ encrypted: true, requireAuthOnAccess: false });
 ```
 
 ##### rollback
@@ -554,8 +651,13 @@ try {
 
 **Signature**:
 ```typescript
-rollback(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+rollback(options?: TableOptions): Promise<void>
 ```
+
+**Parameters**:
+- `options`: Optional configuration
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Example**:
 ```typescript
@@ -566,6 +668,9 @@ try {
 } catch (error) {
   await rollback();
 }
+
+// Rollback transaction with encryption options
+await rollback({ encrypted: true, requireAuthOnAccess: false });
 ```
 
 #### Auto-sync APIs
@@ -932,8 +1037,8 @@ const users = await findMany('users', { email: 'user@example.com' }); // Uses em
 // Use bulkWrite for batch operations, more efficient than multiple individual operations
 await bulkWrite('products', [
   { type: 'insert', data: { id: 1, name: 'Product 1' } },
-  { type: 'update', data: { id: 2, price: 29.99 } },
-  { type: 'delete', data: { id: 3 } },
+  { type: 'update', data: { price: 29.99 }, where: { id: 2 } },
+  { type: 'delete', where: { id: 3 } },
 ]);
 ```
 
@@ -958,7 +1063,7 @@ while (true) {
   if (results.length === 0) break;
 
   // Process current page data
-  processPageData(results);
+  // processPageData(results);
 
   page++;
 }
@@ -966,7 +1071,7 @@ while (true) {
 
 ### Cache Optimization
 
-```typescript
+```javascript
 // Configure cache
 // liteStore.config.js
 module.exports = {
@@ -1008,11 +1113,19 @@ await insert('users', { id: 1, name: 'John Doe' });
 - Uses AES-CTR encryption algorithm
 - Does not require biometric authentication for each access
 - Suitable for data that needs encryption but doesn't require frequent biometric verification
+- **Default encryption method**: Field-level encryption
+- **Default encrypted fields**: `password`, `email`, `phone`
 
 ```typescript
-// Encrypted mode without biometric authentication
-await createTable('users', {}, true, false);
-await insert('users', { id: 1, name: 'John Doe' }, true, false);
+// Encrypted mode without biometric authentication (default: field-level encryption)
+await createTable('users', {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
+await insert('users', { id: 1, name: 'John Doe' }, {
+  encrypted: true,
+  requireAuthOnAccess: false
+});
 ```
 
 #### 3. Encrypted Mode + Biometric Authentication
@@ -1020,12 +1133,24 @@ await insert('users', { id: 1, name: 'John Doe' }, true, false);
 - Uses AES-CTR encryption algorithm
 - Requires biometric or password authentication for each access
 - Suitable for highly sensitive data
+- **Default encryption method**: Field-level encryption
 
 ```typescript
-// Encrypted mode with biometric authentication
-await createTable('users', {}, true, true);
-await insert('users', { id: 1, name: 'John Doe' }, true, true);
+// Encrypted mode with biometric authentication (default: field-level encryption)
+await createTable('users', {
+  encrypted: true,
+  requireAuthOnAccess: true
+});
+await insert('users', { id: 1, name: 'John Doe' }, {
+  encrypted: true,
+  requireAuthOnAccess: true
+});
 ```
+
+**Encryption Priority Explanation**:
+- When `encryptFullTable: true` parameter is explicitly set, full table encryption is used
+- Otherwise, field-level encryption is used by default (based on `enableFieldLevelEncryption` and `encryptedFields` settings in the configuration file)
+- Full table encryption and field-level encryption **cannot be used simultaneously**. The system will automatically detect conflicts and throw a clear error message
 
 ### Encryption Parameters
 
@@ -1033,6 +1158,9 @@ await insert('users', { id: 1, name: 'John Doe' }, true, true);
 | ------------------- | ------- | ------- | --------------------------------------------------------------------------- |
 | `encrypted`         | boolean | false   | Whether to enable data encryption                                           |
 | `requireAuthOnAccess` | boolean | false   | Whether to require biometric authentication for each data access (only effective when `encrypted` is true) |
+| `encryptFullTable`   | boolean | false  | Whether to enable full table encryption (only effective when `encrypted` is true, mutually exclusive with field-level encryption) |
+| `enableFieldLevelEncryption` | boolean | false | Whether to enable field-level encryption (only effective when `encrypted` is true, mutually exclusive with full table encryption) |
+| `encryptedFields` | string[] | [] | List of fields to encrypt (only effective when `enableFieldLevelEncryption` is true) |
 
 ### Key Management
 
@@ -1123,7 +1251,12 @@ A: Set `cache.autoSync.enabled: false` in the configuration file, or use the `se
 <details>
 <summary>Q: How to use encryption?</summary>
 
-A: The encryption feature in the current version is under development, stay tuned.
+A: Encryption functionality is fully available, supporting three usage modes:
+1. Non-encrypted mode (default): No encryption algorithm used, no biometric authentication triggered
+2. Encrypted mode: Uses AES-CTR encryption, no biometric authentication required
+3. Encrypted mode + biometric authentication: Biometric or password authentication required for each access
+
+Please refer to the "🔒 Encryption Usage" section in the documentation for detailed usage instructions.
 </details>
 
 <details>

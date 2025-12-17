@@ -1,37 +1,52 @@
 ## 计划内容
 
 1. **检查并清理generateConfig残留**
-   - 检查 `package-dev.json`，移除postinstall脚本中的generateConfig调用
-   - 检查 `package-env.json`，移除postinstall脚本中的generateConfig调用
-   - 删除 `src/utils/configGenerator.ts` 文件
-   - 验证 `src/core/db.ts` 中已无ConfigGenerator相关代码
+
+   * 检查 `package-dev.json`，移除postinstall脚本中的generateConfig调用
+
+   * 检查 `package-env.json`，移除postinstall脚本中的generateConfig调用
+
+   * 删除 `src/utils/configGenerator.ts` 文件
+
+   * 验证 `src/core/db.ts` 中已无ConfigGenerator相关代码
 
 2. **添加全面的配置API测试**
-   - 测试简单配置属性修改
-   - 测试嵌套配置修改
-   - 测试多个配置属性同时修改
-   - 测试配置重置功能
-   - 测试loadConfig功能
-   - 测试配置修改后的数据持久化
-   - 测试不同环境下的配置行为
+
+   * 测试简单配置属性修改
+
+   * 测试嵌套配置修改
+
+   * 测试多个配置属性同时修改
+
+   * 测试配置重置功能
+
+   * 测试loadConfig功能
+
+   * 测试配置修改后的数据持久化
+
+   * 测试不同环境下的配置行为
 
 ## 具体修改点
 
 ### 1. 清理generateConfig残留
 
 **修改package-dev.json**
-- 删除第57行的 `postinstall` 脚本
+
+* 删除第57行的 `postinstall` 脚本
 
 **修改package-env.json**
-- 删除第36行的 `postinstall` 脚本
+
+* 删除第36行的 `postinstall` 脚本
 
 **删除configGenerator.ts**
+
 ```bash
 rm src/utils/configGenerator.ts
 ```
 
 **验证db.ts**
-- 确认已无ConfigGenerator相关代码
+
+* 确认已无ConfigGenerator相关代码
 
 ### 2. 添加全面的配置API测试
 
@@ -258,9 +273,14 @@ describe('Config API Tests', () => {
 ## 预期结果
 
 * 所有generateConfig相关代码被完全清理
+
 * 构建成功，没有编译错误
+
 * 所有配置API测试通过
+
 * 测试覆盖了开发者可能使用的各种配置场景
+
 * 包在安装时不再尝试生成配置文件
+
 * 用户可以通过显式API灵活配置
 
