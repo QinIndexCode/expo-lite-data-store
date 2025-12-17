@@ -1,0 +1,43 @@
+name: Sync Wiki Descriptions
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'WIKI.md'
+      - 'WIKI_EN.md'
+      - '.github/workflows/sync-wiki.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+
+      - name: Checkout wiki repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki
+
+      - name: Copy and rename Chinese description
+        run: |
+          cp WIKI.md wiki/Description(Zh).md
+
+      - name: Copy and rename English description
+        run: |
+          cp WIKI_EN.md wiki/Description(En).md
+
+      - name: Commit and push to wiki if changed
+        run: |
+          cd wiki
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git add .
+          git diff --quiet && echo "No changes" && exit 0
+          git commit -m "Update descriptions from repository"
+          git push origin main  # Wiki 默认分支通常是 main 或 master，根据实际情况调整
