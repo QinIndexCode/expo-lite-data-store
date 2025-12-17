@@ -1,8 +1,7 @@
 // src/core/cache/__tests__/UpdateCacheTest.test.ts
 // 测试update功能是否会被缓存影响
 
-import { db } from '../../../expo-lite-data-store';
-import { createTable, insert, read, update, findOne } from '../../../expo-lite-data-store';
+import { createTable, insert, read, update, findOne, deleteTable } from '../../../expo-lite-data-store';
 
 describe('Update Cache Test', () => {
   const TABLE_NAME = 'test_update_cache';
@@ -10,7 +9,7 @@ describe('Update Cache Test', () => {
   beforeEach(async () => {
     // 确保表不存在
     try {
-      await db.deleteTable(TABLE_NAME);
+      await deleteTable(TABLE_NAME);
     } catch (error) {
       // 表不存在，忽略错误
     }
@@ -28,7 +27,7 @@ describe('Update Cache Test', () => {
   afterEach(async () => {
     // 清理表
     try {
-      await db.deleteTable(TABLE_NAME);
+      await deleteTable(TABLE_NAME);
     } catch (error) {
       // 表不存在，忽略错误
     }

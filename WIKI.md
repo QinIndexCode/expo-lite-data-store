@@ -107,6 +107,596 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
    });
    ```
 
+## 🎯 API 参考
+
+### 核心 API 列表
+
+| 类别         | API 名称          | 描述                           |
+| ------------ | ----------------- | ------------------------------ |
+| **表管理**   | `createTable`     | 创建新表                       |
+|              | `deleteTable`     | 删除表                         |
+|              | `hasTable`        | 检查表是否存在                 |
+|              | `listTables`      | 获取所有表名                   |
+|              | `countTable`      | 获取表记录数                   |
+|              | `clearTable`      | 清空表数据                     |
+| **数据操作** | `insert`          | 插入单条或多条数据             |
+|              | `read`            | 读取数据（支持过滤、分页、排序） |
+|              | `findOne`         | 查询单条记录                   |
+|              | `findMany`        | 查询多条记录（支持高级选项）   |
+|              | `update`          | 更新匹配的记录                 |
+|              | `remove`          | 删除匹配的记录                 |
+|              | `bulkWrite`       | 批量操作                       |
+| **事务管理** | `beginTransaction`| 开始新事务                     |
+|              | `commit`          | 提交当前事务                   |
+|              | `rollback`        | 回滚当前事务                   |
+| **同步管理** | `getSyncStats`    | 获取同步统计信息               |
+|              | `syncNow`         | 立即触发同步                   |
+|              | `setAutoSyncConfig`| 自定义自动同步配置             |
+| **缓存管理** | `clearKeyCache`   | 清除密钥缓存                   |
+
+### 详细 API 说明
+
+#### 表管理 API
+
+##### createTable
+
+**功能**：创建一个新的数据表
+
+**签名**：
+```typescript
+createTable(tableName: string, options?: CreateTableOptions, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+```
+
+**参数**：
+- `tableName`: 表名，必须唯一
+- `options`: 可选配置项
+  - `columns`: 列定义（可选）
+  - `initialData`: 初始数据（可选）
+  - `mode`: 存储模式，`'single'` 或 `'chunked'`（可选）
+
+**示例**：
+```typescript
+// 创建基本表
+await createTable('users');
+
+// 创建带初始数据的表
+await createTable('users', {
+  initialData: [
+    { id: 1, name: '张三', age: 25 },
+    { id: 2, name: '李四', age: 30 }
+  ]
+});
+
+// 创建分块存储的表
+await createTable('large_data', {
+  mode: 'chunked'
+});
+```
+
+##### deleteTable
+
+**功能**：删除指定的数据表
+
+**签名**：
+```typescript
+deleteTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+```
+
+**参数**：
+- `tableName`: 要删除的表名
+
+**示例**：
+```typescript
+await deleteTable('users');
+```
+
+##### hasTable
+
+**功能**：检查指定的数据表是否存在
+
+**签名**：
+```typescript
+hasTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<boolean>
+```
+
+**参数**：
+- `tableName`: 要检查的表名
+
+**返回值**：
+- `boolean`: 表是否存在
+
+**示例**：
+```typescript
+const exists = await hasTable('users');
+console.log(`表 users 存在: ${exists}`);
+```
+
+##### listTables
+
+**功能**：获取所有数据表的名称
+
+**签名**：
+```typescript
+listTables(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<string[]>
+```
+
+**返回值**：
+- `string[]`: 所有表名的数组
+
+**示例**：
+```typescript
+const tables = await listTables();
+console.log('所有表:', tables);
+```
+
+##### countTable
+
+**功能**：获取指定表的记录数
+
+**签名**：
+```typescript
+countTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<number>
+```
+
+**参数**：
+- `tableName`: 表名
+
+**返回值**：
+- `number`: 表中的记录数
+
+**示例**：
+```typescript
+const count = await countTable('users');
+console.log(`表 users 中有 ${count} 条记录`);
+```
+
+##### clearTable
+
+**功能**：清空指定表中的所有数据
+
+**签名**：
+```typescript
+clearTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+```
+
+**参数**：
+- `tableName`: 要清空的表名
+
+**示例**：
+```typescript
+await clearTable('users');
+```
+
+#### 数据操作 API
+
+##### insert
+
+**功能**：向指定表中插入单条或多条数据
+
+**签名**：
+```typescript
+insert(tableName: string, data: Record<string, any> | Record<string, any>[], encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<WriteResult>
+```
+
+**参数**：
+- `tableName`: 表名
+- `data`: 要插入的数据，可以是单条记录或记录数组
+
+**返回值**：
+- `WriteResult`: 写入结果，包含写入字节数、总字节数等信息
+
+**示例**：
+```typescript
+// 插入单条数据
+await insert('users', { id: 1, name: '张三', age: 25 });
+
+// 插入多条数据
+await insert('users', [
+  { id: 2, name: '李四', age: 30 },
+  { id: 3, name: '王五', age: 35 }
+]);
+```
+
+##### read
+
+**功能**：从指定表中读取数据，支持过滤、分页和排序
+
+**签名**：
+```typescript
+read(tableName: string, options?: ReadOptions, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<Record<string, any>[]>
+```
+
+**参数**：
+- `tableName`: 表名
+- `options`: 读取选项
+  - `filter`: 查询条件
+  - `skip`: 跳过的记录数
+  - `limit`: 返回的最大记录数
+  - `sortBy`: 排序字段
+  - `order`: 排序方向，`'asc'` 或 `'desc'`
+  - `sortAlgorithm`: 排序算法
+
+**返回值**：
+- `Record<string, any>[]`: 匹配的记录数组
+
+**示例**：
+```typescript
+// 读取所有数据
+const allUsers = await read('users');
+
+// 带过滤条件的读取
+const activeUsers = await read('users', {
+  filter: { status: 'active' }
+});
+
+// 带分页和排序的读取
+const paginatedUsers = await read('users', {
+  skip: 10,
+  limit: 20,
+  sortBy: 'age',
+  order: 'desc'
+});
+```
+
+##### findOne
+
+**功能**：查询指定表中的单条记录
+
+**签名**：
+```typescript
+findOne(tableName: string, filter: FilterCondition, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<Record<string, any> | null>
+```
+
+**参数**：
+- `tableName`: 表名
+- `filter`: 查询条件
+
+**返回值**：
+- `Record<string, any> | null`: 匹配的记录，如果没有匹配则返回 `null`
+
+**示例**：
+```typescript
+// 根据ID查询
+const user = await findOne('users', { id: 1 });
+
+// 根据条件查询
+const activeUser = await findOne('users', {
+  $and: [{ status: 'active' }, { age: { $gte: 18 } }]
+});
+```
+
+##### findMany
+
+**功能**：查询指定表中的多条记录，支持高级查询选项
+
+**签名**：
+```typescript
+findMany(tableName: string, filter?: FilterCondition, options?: {
+  skip?: number;
+  limit?: number;
+  sortBy?: string | string[];
+  order?: 'asc' | 'desc' | ('asc' | 'desc')[];
+  sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
+}, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<Record<string, any>[]>
+```
+
+**参数**：
+- `tableName`: 表名
+- `filter`: 查询条件
+- `options`: 查询选项
+  - `skip`: 跳过的记录数
+  - `limit`: 返回的最大记录数
+  - `sortBy`: 排序字段或字段数组
+  - `order`: 排序方向或方向数组
+  - `sortAlgorithm`: 排序算法
+
+**返回值**：
+- `Record<string, any>[]`: 匹配的记录数组
+
+**示例**：
+```typescript
+// 基本查询
+const users = await findMany('users', { age: { $gte: 18 } });
+
+// 多字段排序
+const sortedUsers = await findMany('users', {}, {
+  sortBy: ['department', 'name', 'age'],
+  order: ['asc', 'asc', 'desc']
+});
+
+// 使用特定排序算法
+const chineseSortedUsers = await findMany('users', {}, {
+  sortBy: 'name',
+  sortAlgorithm: 'slow' // 支持中文排序
+});
+```
+
+##### update
+
+**功能**：更新指定表中匹配条件的记录
+
+**签名**：
+```typescript
+update(tableName: string, data: Record<string, any>, where: FilterCondition, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<number>
+```
+
+**参数**：
+- `tableName`: 表名
+- `data`: 要更新的数据
+- `where`: 更新条件
+
+**返回值**：
+- `number`: 更新的记录数
+
+**示例**：
+```typescript
+// 更新单条记录
+const updatedCount = await update('users', { age: 26 }, { id: 1 });
+
+// 更新多条记录
+const updatedCount = await update('users', { status: 'inactive' }, {
+  lastLogin: { $lt: '2024-01-01' }
+});
+
+// 使用操作符更新
+const updatedCount = await update('users', { balance: { $inc: 100 } }, { id: 1 });
+```
+
+##### remove
+
+**功能**：删除指定表中匹配条件的记录
+
+**签名**：
+```typescript
+remove(tableName: string, where: FilterCondition, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<number>
+```
+
+**参数**：
+- `tableName`: 表名
+- `where`: 删除条件
+
+**返回值**：
+- `number`: 删除的记录数
+
+**示例**：
+```typescript
+// 删除单条记录
+const deletedCount = await remove('users', { id: 1 });
+
+// 删除多条记录
+const deletedCount = await remove('users', {
+  status: 'inactive'
+});
+```
+
+##### bulkWrite
+
+**功能**：执行批量操作，支持插入、更新和删除
+
+**签名**：
+```typescript
+bulkWrite(tableName: string, operations: Array<{
+  type: 'insert' | 'update' | 'delete';
+  data: Record<string, any> | Record<string, any>[];
+}> | Array<{
+  type: 'insert';
+  data: Record<string, any> | Record<string, any>[];
+}> | Array<{
+  type: 'update';
+  data: Record<string, any>;
+  where: FilterCondition;
+}> | Array<{
+  type: 'delete';
+  data: FilterCondition;
+}>, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<WriteResult>
+```
+
+**参数**：
+- `tableName`: 表名
+- `operations`: 操作数组
+  - `type`: 操作类型，`'insert'`、`'update'` 或 `'delete'`
+  - `data`: 操作数据
+
+**返回值**：
+- `WriteResult`: 写入结果
+
+**示例**：
+```typescript
+await bulkWrite('users', [
+  { type: 'insert', data: { id: 4, name: '赵六', age: 28 } },
+  { type: 'update', data: { status: 'active' }, where: { id: 2 } },
+  { type: 'delete', data: { id: 3 } }
+]);
+```
+
+#### 事务管理 API
+
+##### beginTransaction
+
+**功能**：开始一个新事务
+
+**签名**：
+```typescript
+beginTransaction(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+```
+
+**示例**：
+```typescript
+await beginTransaction();
+try {
+  // 执行一系列操作
+  await insert('users', { id: 5, name: '钱七' });
+  await update('users', { balance: { $inc: 100 } }, { id: 5 });
+  // 提交事务
+  await commit();
+} catch (error) {
+  // 回滚事务
+  await rollback();
+  throw error;
+}
+```
+
+##### commit
+
+**功能**：提交当前事务
+
+**签名**：
+```typescript
+commit(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+```
+
+**示例**：
+```typescript
+await beginTransaction();
+try {
+  // 执行操作
+  await commit();
+} catch (error) {
+  await rollback();
+}
+```
+
+##### rollback
+
+**功能**：回滚当前事务
+
+**签名**：
+```typescript
+rollback(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+```
+
+**示例**：
+```typescript
+await beginTransaction();
+try {
+  // 执行操作
+  await commit();
+} catch (error) {
+  await rollback();
+}
+```
+
+#### 自动同步 API
+
+##### getSyncStats
+
+**功能**：获取自动同步统计信息
+
+**签名**：
+```typescript
+getSyncStats(): Promise<{
+  syncCount: number;
+  totalItemsSynced: number;
+  lastSyncTime: number;
+  avgSyncTime: number;
+}>
+```
+
+**返回值**：
+- 同步统计信息对象
+  - `syncCount`: 总同步次数
+  - `totalItemsSynced`: 总同步项数
+  - `lastSyncTime`: 上次同步时间
+  - `avgSyncTime`: 平均同步耗时
+
+**示例**：
+```typescript
+const stats = await getSyncStats();
+console.log('同步统计:', stats);
+```
+
+##### syncNow
+
+**功能**：立即触发一次同步
+
+**签名**：
+```typescript
+syncNow(): Promise<void>
+```
+
+**示例**：
+```typescript
+// 手动触发同步
+await syncNow();
+```
+
+##### setAutoSyncConfig
+
+**功能**：设置自动同步配置
+
+**签名**：
+```typescript
+setAutoSyncConfig(config: Partial<{
+  enabled: boolean;
+  interval: number;
+  minItems: number;
+  batchSize: number;
+}>): Promise<void>
+```
+
+**参数**：
+- `config`: 同步配置
+  - `enabled`: 是否启用自动同步
+  - `interval`: 同步间隔（毫秒）
+  - `minItems`: 触发同步的最小脏项数量
+  - `batchSize`: 每次同步的最大项数
+
+**示例**：
+```typescript
+// 设置自动同步配置
+await setAutoSyncConfig({
+  enabled: true,
+  interval: 10000, // 10秒同步一次
+  minItems: 5, // 至少5个脏项才同步
+  batchSize: 200 // 每次最多同步200个项目
+});
+```
+
+### 接口定义
+
+#### ReadOptions 接口
+
+```typescript
+interface ReadOptions {
+  // 分页选项
+  skip?: number; // 跳过的记录数
+  limit?: number; // 返回的记录数上限
+
+  // 过滤选项
+  filter?: FilterCondition; // 查询条件
+
+  // 排序选项
+  sortBy?: string | string[]; // 排序字段
+  order?: 'asc' | 'desc' | ('asc' | 'desc')[]; // 排序方向
+  sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow'; // 排序算法
+}
+```
+
+#### FilterCondition 类型
+
+```typescript
+type FilterCondition =
+  | ((item: Record<string, any>) => boolean) // 函数条件
+  | Partial<Record<string, any>> // 简单对象条件
+  | {
+      // 高级条件
+      $or?: FilterCondition[];
+      $and?: FilterCondition[];
+      [key: string]: any;
+    };
+```
+
+#### WriteResult 接口
+
+```typescript
+interface WriteResult {
+  written: number; // 写入的字节数
+  totalAfterWrite: number; // 写入后的总字节数
+  chunked: boolean; // 是否使用了分块写入
+  chunks?: number; // 分块数量（分块写入时）
+}
+```
+
 ## 🎯 高级查询
 
 ### 条件查询操作符
@@ -178,7 +768,7 @@ const usersSorted = await findMany(
 
 ### 排序算法选择
 
-系统提供5种专业排序算法，自动选择最优：
+系统提供5种专业排序算法，根据数据量自动选择合适算法：
 
 | 算法       | 适用场景                 | 性能特点           |
 | ---------- | ------------------------ | ------------------ |
@@ -402,33 +992,83 @@ module.exports = {
 
 ### 数据加密
 
-当前版本的加密功能正在开发中，敬请期待。
+LiteStore 提供强大的加密功能，支持 AES-CTR 加密算法和 HMAC-SHA512 完整性验证。您可以根据需要灵活选择加密模式和生物识别认证选项。
 
-### 密钥配置说明
+### 加密模式
 
-1. **密钥生成方式**: 密钥由系统自动生成，不是完全自定义编写的。系统会根据设备信息和随机数生成安全的加密密钥。
+LiteStore 支持三种加密使用模式：
 
-2. **密钥获取**: 您可以通过API获取当前使用的密钥，但不能直接设置自定义密钥。
+#### 1. 非加密模式（默认）
 
-3. **密钥安全性**: 生成的密钥会被安全存储，并通过缓存机制优化性能。
+- 不使用任何加密算法
+- 不触发任何生物识别或密码认证
+- 数据以明文形式存储
+- 适合非敏感数据
+
+```typescript
+// 非加密模式（默认）
+await createTable('users');
+await insert('users', { id: 1, name: '张三' });
+```
+
+#### 2. 加密模式
+
+- 使用 AES-CTR 加密算法
+- 不要求每次访问都进行生物识别认证
+- 适合需要加密但不需要频繁生物识别的数据
+
+```typescript
+// 加密模式，无需生物识别
+await createTable('users', {}, true, false);
+await insert('users', { id: 1, name: '张三' }, true, false);
+```
+
+#### 3. 加密模式 + 生物识别认证
+
+- 使用 AES-CTR 加密算法
+- 要求每次访问都进行生物识别或密码认证
+- 适合高度敏感的数据
+
+```typescript
+// 加密模式，需要生物识别认证
+await createTable('users', {}, true, true);
+await insert('users', { id: 1, name: '张三' }, true, true);
+```
+
+### 加密参数说明
+
+| 参数名               | 类型    | 默认值 | 说明                                                                 |
+| -------------------- | ------- | ------ | -------------------------------------------------------------------- |
+| `encrypted`          | boolean | false  | 是否启用数据加密                                                     |
+| `requireAuthOnAccess`| boolean | false  | 是否在每次访问数据时都要求生物识别认证（仅在 `encrypted` 为 true 时生效） |
+
+### 密钥管理
+
+1. **密钥生成**: 系统自动生成 256 位 AES 密钥，使用设备唯一标识符和安全随机数
+2. **密钥存储**: 密钥使用系统 SecureStore 安全存储
+3. **密钥缓存**: 密钥在内存中缓存一段时间，减少生物识别请求频率
+4. **完整性验证**: 使用 HMAC-SHA512 确保数据完整性
+5. **自动轮换**: 系统会定期自动轮换密钥，增强安全性
 
 ### 安全最佳实践
 
-1. **密钥管理**: 加密密钥由系统自动生成和管理，无需您手动处理
-2. **敏感数据**: 对包含敏感信息的数据启用加密
-3. **备份安全**: 加密数据的备份也需要保护
-4. **密钥轮换**: 系统会定期自动轮换密钥
+1. **根据数据敏感性选择加密模式**: 敏感数据使用加密模式，非敏感数据使用非加密模式
+2. **合理使用生物识别**: 仅对高度敏感数据启用 `requireAuthOnAccess`
+3. **密钥管理**: 加密密钥由系统自动生成和管理，无需手动处理
+4. **备份安全**: 加密数据的备份也需要妥善保护
 5. **权限控制**: 限制数据库文件的访问权限
+6. **定期更新**: 及时更新库版本，获取最新安全修复
 
 ### 生物识别与密码识别
 
-**当前行为**: 已优化！只有在实际需要使用加密密钥时才会触发生物识别或密码识别。
+**优化后的行为**: 只有在实际需要使用加密密钥时才会触发生物识别或密码识别。
 
-**优化说明**: 我们已经修改了加密适配器的初始化逻辑，采用延迟初始化策略：
+**具体优化**:
 1. 不再在系统初始化时触发生物识别或密码识别
 2. 只有在实际执行加密操作（如解密数据）时才会请求密钥
 3. 如果项目不使用加密数据，不会触发任何生物识别或密码识别
 4. 优化后的行为提供了更好的用户体验，避免了不必要的身份验证请求
+5. 支持指纹识别、面容识别和设备密码作为备选方案
 
 ## 🎯 故障排除
 
@@ -585,586 +1225,6 @@ A: 支持 `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$like`, `$
 3. **验证表存在**：在操作前检查表是否存在
 4. **查看同步统计**：检查自动同步是否正常工作
 5. **监控性能**：使用性能监控工具查看查询耗时
-
-## 🎯 API 参考
-
-### 核心 API 列表
-
-| 类别         | API 名称          | 描述                           |
-| ------------ | ----------------- | ------------------------------ |
-| **表管理**   | `createTable`     | 创建新表                       |
-|              | `deleteTable`     | 删除表                         |
-|              | `hasTable`        | 检查表是否存在                 |
-|              | `listTables`      | 获取所有表名                   |
-|              | `countTable`      | 获取表记录数                   |
-|              | `clearTable`      | 清空表数据                     |
-| **数据操作** | `insert`          | 插入单条或多条数据             |
-|              | `read`            | 读取数据（支持过滤、分页、排序） |
-|              | `findOne`         | 查询单条记录                   |
-|              | `findMany`        | 查询多条记录（支持高级选项）   |
-|              | `update`          | 更新匹配的记录                 |
-|              | `remove`          | 删除匹配的记录                 |
-|              | `bulkWrite`       | 批量操作                       |
-| **事务管理** | `beginTransaction`| 开始新事务                     |
-|              | `commit`          | 提交当前事务                   |
-|              | `rollback`        | 回滚当前事务                   |
-| **同步管理** | `getSyncStats`    | 获取同步统计信息               |
-|              | `syncNow`         | 立即触发同步                   |
-|              | `setAutoSyncConfig`| 自定义自动同步配置             |
-| **缓存管理** | `clearKeyCache`   | 清除密钥缓存                   |
-
-### 详细 API 说明
-
-#### 表管理 API
-
-##### createTable
-
-**功能**：创建一个新的数据表
-
-**签名**：
-```typescript
-createTable(tableName: string, options?: CreateTableOptions): Promise<void>
-```
-
-**参数**：
-- `tableName`: 表名，必须唯一
-- `options`: 可选配置项
-  - `columns`: 列定义（可选）
-  - `initialData`: 初始数据（可选）
-  - `mode`: 存储模式，`'single'` 或 `'chunked'`（可选）
-
-**示例**：
-```typescript
-// 创建基本表
-await createTable('users');
-
-// 创建带初始数据的表
-await createTable('users', {
-  initialData: [
-    { id: 1, name: '张三', age: 25 },
-    { id: 2, name: '李四', age: 30 }
-  ]
-});
-
-// 创建分块存储的表
-await createTable('large_data', {
-  mode: 'chunked'
-});
-```
-
-##### deleteTable
-
-**功能**：删除指定的数据表
-
-**签名**：
-```typescript
-deleteTable(tableName: string): Promise<void>
-```
-
-**参数**：
-- `tableName`: 要删除的表名
-
-**示例**：
-```typescript
-await deleteTable('users');
-```
-
-##### hasTable
-
-**功能**：检查指定的数据表是否存在
-
-**签名**：
-```typescript
-hasTable(tableName: string): Promise<boolean>
-```
-
-**参数**：
-- `tableName`: 要检查的表名
-
-**返回值**：
-- `boolean`: 表是否存在
-
-**示例**：
-```typescript
-const exists = await hasTable('users');
-console.log(`表 users 存在: ${exists}`);
-```
-
-##### listTables
-
-**功能**：获取所有数据表的名称
-
-**签名**：
-```typescript
-listTables(): Promise<string[]>
-```
-
-**返回值**：
-- `string[]`: 所有表名的数组
-
-**示例**：
-```typescript
-const tables = await listTables();
-console.log('所有表:', tables);
-```
-
-##### countTable
-
-**功能**：获取指定表的记录数
-
-**签名**：
-```typescript
-countTable(tableName: string): Promise<number>
-```
-
-**参数**：
-- `tableName`: 表名
-
-**返回值**：
-- `number`: 表中的记录数
-
-**示例**：
-```typescript
-const count = await countTable('users');
-console.log(`表 users 中有 ${count} 条记录`);
-```
-
-##### clearTable
-
-**功能**：清空指定表中的所有数据
-
-**签名**：
-```typescript
-clearTable(tableName: string): Promise<void>
-```
-
-**参数**：
-- `tableName`: 要清空的表名
-
-**示例**：
-```typescript
-await clearTable('users');
-```
-
-#### 数据操作 API
-
-##### insert
-
-**功能**：向指定表中插入单条或多条数据
-
-**签名**：
-```typescript
-insert(tableName: string, data: Record<string, any> | Record<string, any>[]): Promise<WriteResult>
-```
-
-**参数**：
-- `tableName`: 表名
-- `data`: 要插入的数据，可以是单条记录或记录数组
-
-**返回值**：
-- `WriteResult`: 写入结果，包含写入字节数、总字节数等信息
-
-**示例**：
-```typescript
-// 插入单条数据
-await insert('users', { id: 1, name: '张三', age: 25 });
-
-// 插入多条数据
-await insert('users', [
-  { id: 2, name: '李四', age: 30 },
-  { id: 3, name: '王五', age: 35 }
-]);
-```
-
-##### read
-
-**功能**：从指定表中读取数据，支持过滤、分页和排序
-
-**签名**：
-```typescript
-read(tableName: string, options?: ReadOptions): Promise<Record<string, any>[]>
-```
-
-**参数**：
-- `tableName`: 表名
-- `options`: 读取选项
-  - `filter`: 查询条件
-  - `skip`: 跳过的记录数
-  - `limit`: 返回的最大记录数
-  - `sortBy`: 排序字段
-  - `order`: 排序方向，`'asc'` 或 `'desc'`
-  - `sortAlgorithm`: 排序算法
-
-**返回值**：
-- `Record<string, any>[]`: 匹配的记录数组
-
-**示例**：
-```typescript
-// 读取所有数据
-const allUsers = await read('users');
-
-// 带过滤条件的读取
-const activeUsers = await read('users', {
-  filter: { status: 'active' }
-});
-
-// 带分页和排序的读取
-const paginatedUsers = await read('users', {
-  skip: 10,
-  limit: 20,
-  sortBy: 'age',
-  order: 'desc'
-});
-```
-
-##### findOne
-
-**功能**：查询指定表中的单条记录
-
-**签名**：
-```typescript
-findOne(tableName: string, filter: FilterCondition): Promise<Record<string, any> | null>
-```
-
-**参数**：
-- `tableName`: 表名
-- `filter`: 查询条件
-
-**返回值**：
-- `Record<string, any> | null`: 匹配的记录，如果没有匹配则返回 `null`
-
-**示例**：
-```typescript
-// 根据ID查询
-const user = await findOne('users', { id: 1 });
-
-// 根据条件查询
-const activeUser = await findOne('users', {
-  $and: [{ status: 'active' }, { age: { $gte: 18 } }]
-});
-```
-
-##### findMany
-
-**功能**：查询指定表中的多条记录，支持高级查询选项
-
-**签名**：
-```typescript
-findMany(tableName: string, filter?: FilterCondition, options?: {
-  skip?: number;
-  limit?: number;
-  sortBy?: string | string[];
-  order?: 'asc' | 'desc' | ('asc' | 'desc')[];
-  sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
-}): Promise<Record<string, any>[]>
-```
-
-**参数**：
-- `tableName`: 表名
-- `filter`: 查询条件
-- `options`: 查询选项
-  - `skip`: 跳过的记录数
-  - `limit`: 返回的最大记录数
-  - `sortBy`: 排序字段或字段数组
-  - `order`: 排序方向或方向数组
-  - `sortAlgorithm`: 排序算法
-
-**返回值**：
-- `Record<string, any>[]`: 匹配的记录数组
-
-**示例**：
-```typescript
-// 基本查询
-const users = await findMany('users', { age: { $gte: 18 } });
-
-// 多字段排序
-const sortedUsers = await findMany('users', {}, {
-  sortBy: ['department', 'name', 'age'],
-  order: ['asc', 'asc', 'desc']
-});
-
-// 使用特定排序算法
-const chineseSortedUsers = await findMany('users', {}, {
-  sortBy: 'name',
-  sortAlgorithm: 'slow' // 支持中文排序
-});
-```
-
-##### update
-
-**功能**：更新指定表中匹配条件的记录
-
-**签名**：
-```typescript
-update(tableName: string, data: Record<string, any>, where: FilterCondition): Promise<number>
-```
-
-**参数**：
-- `tableName`: 表名
-- `data`: 要更新的数据
-- `where`: 更新条件
-
-**返回值**：
-- `number`: 更新的记录数
-
-**示例**：
-```typescript
-// 更新单条记录
-const updatedCount = await update('users', { age: 26 }, { id: 1 });
-
-// 更新多条记录
-const updatedCount = await update('users', { status: 'inactive' }, {
-  lastLogin: { $lt: '2024-01-01' }
-});
-
-// 使用操作符更新
-const updatedCount = await update('users', { balance: { $inc: 100 } }, { id: 1 });
-```
-
-##### remove
-
-**功能**：删除指定表中匹配条件的记录
-
-**签名**：
-```typescript
-remove(tableName: string, where: FilterCondition): Promise<number>
-```
-
-**参数**：
-- `tableName`: 表名
-- `where`: 删除条件
-
-**返回值**：
-- `number`: 删除的记录数
-
-**示例**：
-```typescript
-// 删除单条记录
-const deletedCount = await remove('users', { id: 1 });
-
-// 删除多条记录
-const deletedCount = await remove('users', {
-  status: 'inactive'
-});
-```
-
-##### bulkWrite
-
-**功能**：执行批量操作，支持插入、更新和删除
-
-**签名**：
-```typescript
-bulkWrite(tableName: string, operations: Array<{
-  type: 'insert' | 'update' | 'delete';
-  data: Record<string, any> | Record<string, any>[];
-}>): Promise<WriteResult>
-```
-
-**参数**：
-- `tableName`: 表名
-- `operations`: 操作数组
-  - `type`: 操作类型，`'insert'`、`'update'` 或 `'delete'`
-  - `data`: 操作数据
-
-**返回值**：
-- `WriteResult`: 写入结果
-
-**示例**：
-```typescript
-await bulkWrite('users', [
-  { type: 'insert', data: { id: 4, name: '赵六', age: 28 } },
-  { type: 'update', data: { status: 'active' }, where: { id: 2 } },
-  { type: 'delete', data: { id: 3 } }
-]);
-```
-
-#### 事务管理 API
-
-##### beginTransaction
-
-**功能**：开始一个新事务
-
-**签名**：
-```typescript
-beginTransaction(): Promise<void>
-```
-
-**示例**：
-```typescript
-await beginTransaction();
-try {
-  // 执行一系列操作
-  await insert('users', { id: 5, name: '钱七' });
-  await update('users', { balance: { $inc: 100 } }, { id: 5 });
-  // 提交事务
-  await commit();
-} catch (error) {
-  // 回滚事务
-  await rollback();
-  throw error;
-}
-```
-
-##### commit
-
-**功能**：提交当前事务
-
-**签名**：
-```typescript
-commit(): Promise<void>
-```
-
-**示例**：
-```typescript
-await beginTransaction();
-try {
-  // 执行操作
-  await commit();
-} catch (error) {
-  await rollback();
-}
-```
-
-##### rollback
-
-**功能**：回滚当前事务
-
-**签名**：
-```typescript
-rollback(): Promise<void>
-```
-
-**示例**：
-```typescript
-await beginTransaction();
-try {
-  // 执行操作
-  await commit();
-} catch (error) {
-  await rollback();
-}
-```
-
-#### 自动同步 API
-
-##### getSyncStats
-
-**功能**：获取自动同步统计信息
-
-**签名**：
-```typescript
-getSyncStats(): Promise<{
-  syncCount: number;
-  totalItemsSynced: number;
-  lastSyncTime: number;
-  avgSyncTime: number;
-}>
-```
-
-**返回值**：
-- 同步统计信息对象
-  - `syncCount`: 总同步次数
-  - `totalItemsSynced`: 总同步项数
-  - `lastSyncTime`: 上次同步时间
-  - `avgSyncTime`: 平均同步耗时
-
-**示例**：
-```typescript
-const stats = await getSyncStats();
-console.log('同步统计:', stats);
-```
-
-##### syncNow
-
-**功能**：立即触发一次同步
-
-**签名**：
-```typescript
-syncNow(): Promise<void>
-```
-
-**示例**：
-```typescript
-// 手动触发同步
-await syncNow();
-```
-
-##### setAutoSyncConfig
-
-**功能**：设置自动同步配置
-
-**签名**：
-```typescript
-setAutoSyncConfig(config: Partial<{
-  enabled: boolean;
-  interval: number;
-  minItems: number;
-  batchSize: number;
-}>): Promise<void>
-```
-
-**参数**：
-- `config`: 同步配置
-  - `enabled`: 是否启用自动同步
-  - `interval`: 同步间隔（毫秒）
-  - `minItems`: 触发同步的最小脏项数量
-  - `batchSize`: 每次同步的最大项数
-
-**示例**：
-```typescript
-// 设置自动同步配置
-await setAutoSyncConfig({
-  enabled: true,
-  interval: 10000, // 10秒同步一次
-  minItems: 5, // 至少5个脏项才同步
-  batchSize: 200 // 每次最多同步200个项目
-});
-```
-
-### 接口定义
-
-#### ReadOptions 接口
-
-```typescript
-interface ReadOptions {
-  // 分页选项
-  skip?: number; // 跳过的记录数
-  limit?: number; // 返回的记录数上限
-
-  // 过滤选项
-  filter?: FilterCondition; // 查询条件
-
-  // 排序选项
-  sortBy?: string | string[]; // 排序字段
-  order?: 'asc' | 'desc' | ('asc' | 'desc')[]; // 排序方向
-  sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow'; // 排序算法
-}
-```
-
-#### FilterCondition 类型
-
-```typescript
-type FilterCondition =
-  | ((item: Record<string, any>) => boolean) // 函数条件
-  | Partial<Record<string, any>> // 简单对象条件
-  | {
-      // 高级条件
-      $or?: FilterCondition[];
-      $and?: FilterCondition[];
-      [key: string]: any;
-    };
-```
-
-#### WriteResult 接口
-
-```typescript
-interface WriteResult {
-  written: number; // 写入的字节数
-  totalAfterWrite: number; // 写入后的总字节数
-  chunked: boolean; // 是否使用了分块写入
-  chunks?: number; // 分块数量（分块写入时）
-}
-```
 
 ## 🎯 性能基准
 

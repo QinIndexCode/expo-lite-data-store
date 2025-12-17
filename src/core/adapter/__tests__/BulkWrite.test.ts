@@ -72,9 +72,11 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
   describe('批量更新操作', () => {
     beforeEach(async () => {
       await adapter.write(tableName, [
-        { id: 1, name: 'Alice', age: 25 },
-        { id: 2, name: 'Bob', age: 30 },
-        { id: 3, name: 'Charlie', age: 35 },
+        { id: 1, name: 'Alice', age: 25, active: true },
+        { id: 2, name: 'Bob', age: 30, active: true },
+        { id: 3, name: 'Charlie', age: 35, active: false },
+        { id: 4, name: 'David', age: 28, active: true },
+        { id: 5, name: 'Eve', age: 32, active: false },
       ]);
     });
 
@@ -96,6 +98,41 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
       expect(data1?.name).toBe('Alice'); // 其他字段保持不变
     });
 
+    it('应该能够使用where条件批量更新多条数据', async () => {
+      const operations = [
+        { 
+          type: 'update' as const, 
+          data: { age: 40 }, 
+          where: { active: true } 
+        },
+      ];
+
+      const result = await adapter.bulkWrite(tableName, operations);
+
+      expect(result.written).toBe(3); // 3个active=true的用户
+
+      const activeUsers = await adapter.findMany(tableName, { active: true });
+      expect(activeUsers.every((user: any) => user.age === 40)).toBe(true);
+    });
+
+    it('应该能够使用复杂where条件批量更新数据', async () => {
+      const operations = [
+        { 
+          type: 'update' as const, 
+          data: { name: 'Updated' }, 
+          where: { $and: [{ age: { $gt: 25 } }, { active: false }] } 
+        },
+      ];
+
+      const result = await adapter.bulkWrite(tableName, operations);
+
+      expect(result.written).toBe(2); // Charlie和Eve符合条件
+
+      const updatedUsers = await adapter.findMany(tableName, { name: 'Updated' });
+      expect(updatedUsers.length).toBe(2);
+      expect(updatedUsers.every((user: any) => user.age > 25 && user.active === false)).toBe(true);
+    });
+
     it('应该能够更新不存在的记录而不报错', async () => {
       const operations = [{ type: 'update' as const, data: { id: 999, age: 99 } }];
 
@@ -108,9 +145,11 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
   describe('批量删除操作', () => {
     beforeEach(async () => {
       await adapter.write(tableName, [
-        { id: 1, name: 'Alice' },
-        { id: 2, name: 'Bob' },
-        { id: 3, name: 'Charlie' },
+        { id: 1, name: 'Alice', age: 25, active: true },
+        { id: 2, name: 'Bob', age: 30, active: true },
+        { id: 3, name: 'Charlie', age: 35, active: false },
+        { id: 4, name: 'David', age: 28, active: true },
+        { id: 5, name: 'Eve', age: 32, active: false },
       ]);
     });
 
@@ -125,8 +164,62 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
       expect(result.written).toBe(2);
 
       const allData = await adapter.read(tableName, { bypassCache: true });
-      expect(allData.length).toBe(1);
-      expect(allData[0].id).toBe(3);
+      expect(allData.length).toBe(3);
+      expect(allData.every((item: any) => item.id !== 1 && item.id !== 2)).toBe(true);
+    });
+
+    it('应该能够使用where条件批量删除多条数据', async () => {
+      const operations = [
+        { 
+          type: 'delete' as const, 
+          data: {}, 
+          where: { active: false } 
+        },
+      ];
+
+      const result = await adapter.bulkWrite(tableName, operations);
+
+      expect(result.written).toBe(2); // 2个active=false的用户
+
+      const allData = await adapter.read(tableName, { bypassCache: true });
+      expect(allData.length).toBe(3);
+      expect(allData.every((item: any) => item.active === true)).toBe(true);
+    });
+
+    it('应该能够使用复杂where条件批量删除数据', async () => {
+      const operations = [
+        { 
+          type: 'delete' as const, 
+          data: {}, 
+          where: { $or: [{ age: { $lt: 27 } }, { age: { $gt: 33 } }] } 
+        },
+      ];
+
+      const result = await adapter.bulkWrite(tableName, operations);
+
+      expect(result.written).toBe(2); // Alice(25)和Charlie(35)符合条件
+
+      const remainingData = await adapter.read(tableName, { bypassCache: true });
+      expect(remainingData.length).toBe(3);
+      expect(remainingData.every((user: any) => user.age >= 27 && user.age <= 33)).toBe(true);
+    });
+
+    it('应该能够使用多条件组合删除数据', async () => {
+      const operations = [
+        { 
+          type: 'delete' as const, 
+          data: {}, 
+          where: { $and: [{ name: 'Alice' }, { active: true }] } 
+        },
+      ];
+
+      const result = await adapter.bulkWrite(tableName, operations);
+
+      expect(result.written).toBe(1); // Alice符合条件
+
+      const remainingData = await adapter.read(tableName, { bypassCache: true });
+      expect(remainingData.length).toBe(4);
+      expect(remainingData.every((item: any) => item.name !== 'Alice')).toBe(true);
     });
   });
 

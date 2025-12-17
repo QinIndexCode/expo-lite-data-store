@@ -107,6 +107,588 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
    });
    ```
 
+## 🎯 API Reference
+
+### Core API List
+
+| Category       | API Name           | Description                                       |
+| -------------- | ------------------ | ------------------------------------------------- |
+| **Table Mgmt** | `createTable`      | Create a new table                                |
+|                | `deleteTable`      | Delete table                                      |
+|                | `hasTable`         | Check if table exists                              |
+|                | `listTables`       | Get all table names                                |
+|                | `countTable`       | Get table record count                             |
+|                | `clearTable`       | Clear table data                                   |
+| **Data Ops**   | `insert`           | Insert single or multiple records                  |
+|                | `read`             | Read data (supports filtering, pagination, sorting) |
+|                | `findOne`          | Query single record                                |
+|                | `findMany`         | Query multiple records (supports advanced options) |
+|                | `update`           | Update matching records                            |
+|                | `remove`           | Delete matching records                            |
+|                | `bulkWrite`        | Batch operations                                   |
+| **Transactions**| `beginTransaction` | Start new transaction                              |
+|                | `commit`           | Commit current transaction                         |
+|                | `rollback`         | Rollback current transaction                       |
+| **Sync Mgmt**  | `getSyncStats`     | Get sync statistics                                |
+|                | `syncNow`          | Trigger sync immediately                           |
+|                | `setAutoSyncConfig`| Customize auto-sync configuration                  |
+| **Cache Mgmt** | `clearKeyCache`    | Clear key cache                                    |
+
+### Detailed API Documentation
+
+#### Table Management APIs
+
+##### createTable
+
+**Functionality**: Create a new data table
+
+**Signature**:
+```typescript
+createTable(tableName: string, options?: CreateTableOptions, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+```
+
+**Parameters**:
+- `tableName`: Table name, must be unique
+- `options`: Optional configuration
+  - `columns`: Column definitions (optional)
+  - `initialData`: Initial data (optional)
+  - `mode`: Storage mode, `'single'` or `'chunked'` (optional)
+
+**Examples**:
+```typescript
+// Create basic table
+await createTable('users');
+
+// Create table with initial data
+await createTable('users', {
+  initialData: [
+    { id: 1, name: 'John Doe', age: 25 },
+    { id: 2, name: 'Jane Smith', age: 30 }
+  ]
+});
+
+// Create chunked storage table
+await createTable('large_data', {
+  mode: 'chunked'
+});
+```
+
+##### deleteTable
+
+**Functionality**: Delete a specified data table
+
+**Signature**:
+```typescript
+deleteTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+```
+
+**Parameters**:
+- `tableName`: Table name to delete
+
+**Example**:
+```typescript
+await deleteTable('users');
+```
+
+##### hasTable
+
+**Functionality**: Check if a specified data table exists
+
+**Signature**:
+```typescript
+hasTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<boolean>
+```
+
+**Parameters**:
+- `tableName`: Table name to check
+
+**Returns**:
+- `boolean`: Whether the table exists
+
+**Example**:
+```typescript
+const exists = await hasTable('users');
+console.log(`Table users exists: ${exists}`);
+```
+
+##### listTables
+
+**Functionality**: Get all data table names
+
+**Signature**:
+```typescript
+listTables(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<string[]>
+```
+
+**Returns**:
+- `string[]`: Array of all table names
+
+**Example**:
+```typescript
+const tables = await listTables();
+console.log('All tables:', tables);
+```
+
+##### countTable
+
+**Functionality**: Get record count for a specified table
+
+**Signature**:
+```typescript
+countTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<number>
+```
+
+**Parameters**:
+- `tableName`: Table name
+
+**Returns**:
+- `number`: Number of records in the table
+
+**Example**:
+```typescript
+const count = await countTable('users');
+console.log(`Table users has ${count} records`);
+```
+
+##### clearTable
+
+**Functionality**: Clear all data from a specified table
+
+**Signature**:
+```typescript
+clearTable(tableName: string, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+```
+
+**Parameters**:
+- `tableName`: Table name to clear
+
+**Example**:
+```typescript
+await clearTable('users');
+```
+
+#### Data Operation APIs
+
+##### insert
+
+**Functionality**: Insert single or multiple records into a specified table
+
+**Signature**:
+```typescript
+insert(tableName: string, data: Record<string, any> | Record<string, any>[], encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<WriteResult>
+```
+
+**Parameters**:
+- `tableName`: Table name
+- `data`: Data to insert, can be single record or array of records
+
+**Returns**:
+- `WriteResult`: Write result, including bytes written, total bytes, etc.
+
+**Examples**:
+```typescript
+// Insert single record
+await insert('users', { id: 1, name: 'John Doe', age: 25 });
+
+// Insert multiple records
+await insert('users', [
+  { id: 2, name: 'Jane Smith', age: 30 },
+  { id: 3, name: 'Bob Johnson', age: 35 }
+]);
+```
+
+##### read
+
+**Functionality**: Read data from a specified table, supporting filtering, pagination and sorting
+
+**Signature**:
+```typescript
+read(tableName: string, options?: ReadOptions, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<Record<string, any>[]>
+```
+
+**Parameters**:
+- `tableName`: Table name
+- `options`: Read options
+  - `filter`: Query condition
+  - `skip`: Number of records to skip
+  - `limit`: Maximum number of records to return
+  - `sortBy`: Sort field
+  - `order`: Sort direction, `'asc'` or `'desc'`
+  - `sortAlgorithm`: Sorting algorithm
+
+**Returns**:
+- `Record<string, any>[]`: Array of matching records
+
+**Examples**:
+```typescript
+// Read all data
+const allUsers = await read('users');
+
+// Read with filter
+const activeUsers = await read('users', {
+  filter: { status: 'active' }
+});
+
+// Read with pagination and sorting
+const paginatedUsers = await read('users', {
+  skip: 10,
+  limit: 20,
+  sortBy: 'age',
+  order: 'desc'
+});
+```
+
+##### findOne
+
+**Functionality**: Query single record from a specified table
+
+**Signature**:
+```typescript
+findOne(tableName: string, filter: FilterCondition, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<Record<string, any> | null>
+```
+
+**Parameters**:
+- `tableName`: Table name
+- `filter`: Query condition
+
+**Returns**:
+- `Record<string, any> | null`: Matching record, or `null` if no match
+
+**Examples**:
+```typescript
+// Query by ID
+const user = await findOne('users', { id: 1 });
+
+// Query by condition
+const activeUser = await findOne('users', {
+  $and: [{ status: 'active' }, { age: { $gte: 18 } }]
+});
+```
+
+##### findMany
+
+**Functionality**: Query multiple records from a specified table, supporting advanced query options
+
+**Signature**:
+```typescript
+findMany(tableName: string, filter?: FilterCondition, options?: {
+  skip?: number;
+  limit?: number;
+  sortBy?: string | string[];
+  order?: 'asc' | 'desc' | ('asc' | 'desc')[];
+  sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
+}, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<Record<string, any>[]>
+```
+
+**Parameters**:
+- `tableName`: Table name
+- `filter`: Query condition
+- `options`: Query options
+  - `skip`: Number of records to skip
+  - `limit`: Maximum number of records to return
+  - `sortBy`: Sort field or array of fields
+  - `order`: Sort direction or array of directions
+  - `sortAlgorithm`: Sorting algorithm
+
+**Returns**:
+- `Record<string, any>[]`: Array of matching records
+
+**Examples**:
+```typescript
+// Basic query
+const users = await findMany('users', { age: { $gte: 18 } });
+
+// Multi-field sorting
+const sortedUsers = await findMany('users', {}, {
+  sortBy: ['department', 'name', 'age'],
+  order: ['asc', 'asc', 'desc']
+});
+
+// Using specific sorting algorithm
+const chineseSortedUsers = await findMany('users', {}, {
+  sortBy: 'name',
+  sortAlgorithm: 'slow' // Supports Chinese sorting
+});
+```
+
+##### update
+
+**Functionality**: Update matching records in a specified table
+
+**Signature**:
+```typescript
+update(tableName: string, data: Record<string, any>, where: FilterCondition, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<number>
+```
+
+**Parameters**:
+- `tableName`: Table name
+- `data`: Data to update
+- `where`: Update condition
+
+**Returns**:
+- `number`: Number of updated records
+
+**Examples**:
+```typescript
+// Update single record
+const updatedCount = await update('users', { age: 26 }, { id: 1 });
+
+// Update multiple records
+const updatedCount = await update('users', { status: 'inactive' }, {
+  lastLogin: { $lt: '2024-01-01' }
+});
+
+// Update with operator
+const updatedCount = await update('users', { balance: { $inc: 100 } }, { id: 1 });
+```
+
+##### remove
+
+**Functionality**: Delete matching records from a specified table
+
+**Signature**:
+```typescript
+remove(tableName: string, where: FilterCondition, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<number>
+```
+
+**Parameters**:
+- `tableName`: Table name
+- `where`: Delete condition
+
+**Returns**:
+- `number`: Number of deleted records
+
+**Examples**:
+```typescript
+// Delete single record
+const deletedCount = await remove('users', { id: 1 });
+
+// Delete multiple records
+const deletedCount = await remove('users', {
+  status: 'inactive'
+});
+```
+
+##### bulkWrite
+
+**Functionality**: Execute batch operations, supporting insert, update and delete
+
+**Signature**:
+```typescript
+bulkWrite(tableName: string, operations: Array<{
+  type: 'insert' | 'update' | 'delete';
+  data: Record<string, any> | Record<string, any>[];
+  where?: FilterCondition;
+}>, encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<WriteResult>
+```
+
+**Parameters**:
+- `tableName`: Table name
+- `operations`: Array of operations
+  - `type`: Operation type, `'insert'`, `'update'` or `'delete'`
+  - `data`: Operation data
+  - `where`: Operation condition (required for update and delete)
+
+**Returns**:
+- `WriteResult`: Write result
+
+**Example**:
+```typescript
+await bulkWrite('users', [
+  { type: 'insert', data: { id: 4, name: 'Alice Brown', age: 28 } },
+  { type: 'update', data: { status: 'active' }, where: { id: 2 } },
+  { type: 'delete', where: { id: 3 } }
+]);
+```
+
+#### Transaction Management APIs
+
+##### beginTransaction
+
+**Functionality**: Start a new transaction
+
+**Signature**:
+```typescript
+beginTransaction(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+```
+
+**Example**:
+```typescript
+await beginTransaction();
+try {
+  // Execute a series of operations
+  await insert('users', { id: 5, name: 'Charlie Davis' });
+  await update('users', { balance: { $inc: 100 } }, { id: 5 });
+  // Commit the transaction
+  await commit();
+} catch (error) {
+  // Rollback the transaction
+  await rollback();
+  throw error;
+}
+```
+
+##### commit
+
+**Functionality**: Commit the current transaction
+
+**Signature**:
+```typescript
+commit(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+```
+
+**Example**:
+```typescript
+await beginTransaction();
+try {
+  // Execute operations
+  await commit();
+} catch (error) {
+  await rollback();
+}
+```
+
+##### rollback
+
+**Functionality**: Rollback the current transaction
+
+**Signature**:
+```typescript
+rollback(encrypted: boolean = false, requireAuthOnAccess: boolean = false): Promise<void>
+```
+
+**Example**:
+```typescript
+await beginTransaction();
+try {
+  // Execute operations
+  await commit();
+} catch (error) {
+  await rollback();
+}
+```
+
+#### Auto-sync APIs
+
+##### getSyncStats
+
+**Functionality**: Get auto-sync statistics
+
+**Signature**:
+```typescript
+getSyncStats(): Promise<{
+  syncCount: number;
+  totalItemsSynced: number;
+  lastSyncTime: number;
+  avgSyncTime: number;
+}>
+```
+
+**Returns**:
+- Sync statistics object
+  - `syncCount`: Total sync count
+  - `totalItemsSynced`: Total items synced
+  - `lastSyncTime`: Last sync time
+  - `avgSyncTime`: Average sync time (milliseconds)
+
+**Example**:
+```typescript
+const stats = await getSyncStats();
+console.log('Sync statistics:', stats);
+```
+
+##### syncNow
+
+**Functionality**: Trigger sync immediately
+
+**Signature**:
+```typescript
+syncNow(): Promise<void>
+```
+
+**Example**:
+```typescript
+// Manually trigger sync
+await syncNow();
+```
+
+##### setAutoSyncConfig
+
+**Functionality**: Set auto-sync configuration
+
+**Signature**:
+```typescript
+setAutoSyncConfig(config: Partial<{
+  enabled: boolean;
+  interval: number;
+  minItems: number;
+  batchSize: number;
+}>): Promise<void>
+```
+
+**Parameters**:
+- `config`: Sync configuration
+  - `enabled`: Whether to enable auto-sync
+  - `interval`: Sync interval (milliseconds)
+  - `minItems`: Minimum number of dirty items to trigger sync
+  - `batchSize`: Maximum number of items per sync
+
+**Example**:
+```typescript
+// Set auto-sync configuration
+await setAutoSyncConfig({
+  enabled: true,
+  interval: 10000, // Sync every 10 seconds
+  minItems: 5, // Sync at least 5 dirty items
+  batchSize: 200 // Max 200 items per sync
+});
+```
+
+### Interface Definitions
+
+#### ReadOptions Interface
+
+```typescript
+interface ReadOptions {
+  // Pagination options
+  skip?: number; // Number of records to skip
+  limit?: number; // Maximum number of records to return
+
+  // Filter options
+  filter?: FilterCondition; // Query condition
+
+  // Sorting options
+  sortBy?: string | string[]; // Sort field(s)
+  order?: 'asc' | 'desc' | ('asc' | 'desc')[]; // Sort direction
+  sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow'; // Sorting algorithm
+}
+```
+
+#### FilterCondition Type
+
+```typescript
+type FilterCondition =
+  | ((item: Record<string, any>) => boolean) // Function condition
+  | Partial<Record<string, any>> // Simple object condition
+  | {
+      // Advanced conditions
+      $or?: FilterCondition[];
+      $and?: FilterCondition[];
+      [key: string]: any;
+    };
+```
+
+#### WriteResult Interface
+
+```typescript
+interface WriteResult {
+  written: number; // Number of bytes written
+  totalAfterWrite: number; // Total bytes after write
+  chunked: boolean; // Whether chunked writing was used
+  chunks?: number; // Number of chunks (when chunked writing)
+}
+```
+
 ## 🎯 Advanced Queries
 
 ### Query Operators
@@ -402,33 +984,83 @@ module.exports = {
 
 ### Data Encryption
 
-The encryption feature in the current version is under development, stay tuned.
+LiteStore provides robust encryption functionality, supporting AES-CTR encryption algorithm and HMAC-SHA512 integrity verification. You can flexibly choose encryption modes and biometric authentication options based on your needs.
 
-### Key Configuration Notes
+### Encryption Modes
 
-1. **Key Generation**: Keys are automatically generated by the system, not fully custom-written. The system generates secure encryption keys based on device information and random numbers.
+LiteStore supports three encryption usage modes:
 
-2. **Key Access**: You can obtain the currently used key through API, but cannot directly set a custom key.
+#### 1. Non-encrypted Mode (Default)
 
-3. **Key Security**: Generated keys are securely stored and optimized for performance through a caching mechanism.
+- No encryption algorithm used
+- No biometric or password authentication triggered
+- Data stored in plain text
+- Suitable for non-sensitive data
+
+```typescript
+// Non-encrypted mode (default)
+await createTable('users');
+await insert('users', { id: 1, name: 'John Doe' });
+```
+
+#### 2. Encrypted Mode
+
+- Uses AES-CTR encryption algorithm
+- Does not require biometric authentication for each access
+- Suitable for data that needs encryption but doesn't require frequent biometric verification
+
+```typescript
+// Encrypted mode without biometric authentication
+await createTable('users', {}, true, false);
+await insert('users', { id: 1, name: 'John Doe' }, true, false);
+```
+
+#### 3. Encrypted Mode + Biometric Authentication
+
+- Uses AES-CTR encryption algorithm
+- Requires biometric or password authentication for each access
+- Suitable for highly sensitive data
+
+```typescript
+// Encrypted mode with biometric authentication
+await createTable('users', {}, true, true);
+await insert('users', { id: 1, name: 'John Doe' }, true, true);
+```
+
+### Encryption Parameters
+
+| Parameter           | Type    | Default | Description                                                                 |
+| ------------------- | ------- | ------- | --------------------------------------------------------------------------- |
+| `encrypted`         | boolean | false   | Whether to enable data encryption                                           |
+| `requireAuthOnAccess` | boolean | false   | Whether to require biometric authentication for each data access (only effective when `encrypted` is true) |
+
+### Key Management
+
+1. **Key Generation**: System automatically generates 256-bit AES keys using device unique identifiers and secure random numbers
+2. **Key Storage**: Keys are securely stored using system SecureStore
+3. **Key Caching**: Keys are cached in memory for a period to reduce biometric request frequency
+4. **Integrity Verification**: Uses HMAC-SHA512 to ensure data integrity
+5. **Auto Rotation**: System automatically rotates keys periodically to enhance security
 
 ### Security Best Practices
 
-1. **Key management**: Encryption keys are automatically generated and managed by the system, no manual handling required
-2. **Sensitive data**: Enable encryption for data containing sensitive information
-3. **Backup security**: Protect backups of encrypted data
-4. **Key rotation**: The system automatically rotates keys periodically
-5. **Permission control**: Limit access permissions to database files
+1. **Choose encryption mode based on data sensitivity**: Use encrypted mode for sensitive data, non-encrypted mode for non-sensitive data
+2. **Use biometric appropriately**: Enable `requireAuthOnAccess` only for highly sensitive data
+3. **Key management**: Encryption keys are automatically generated and managed by the system, no manual handling required
+4. **Backup security**: Backups of encrypted data need to be properly protected
+5. **Permission control**: Restrict access permissions to database files
+6. **Regular updates**: Keep the library updated to get the latest security fixes
 
 ### Biometric and Password Authentication
 
-**Current Behavior**: Optimized! Biometric or password authentication is only triggered when actually needed for encryption operations.
+**Optimized Behavior**: Biometric or password authentication is only triggered when actually needed for encryption operations.
 
-**Optimization Description**: We have modified the encryption adapter initialization logic to use a lazy initialization strategy:
+**Specific Optimizations**:
 1. No longer triggers biometric or password authentication during system initialization
 2. Only requests encryption keys when actually performing encryption operations (such as decrypting data)
 3. No biometric or password authentication is triggered if the project does not use encrypted data
 4. The optimized behavior provides a better user experience by avoiding unnecessary authentication requests
+5. Supports fingerprint recognition, face recognition, and device passwords as alternatives
 
 ## 🎯 Troubleshooting
 
@@ -585,588 +1217,6 @@ A: Supports `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$like`, 
 3. **Verify table existence**: Check if table exists before operation
 4. **View sync statistics**: Check if auto-sync is working properly
 5. **Monitor performance**: Use performance monitoring tools to check query time
-
-## 🎯 API Reference
-
-### Core API List
-
-| Category       | API Name           | Description                                       |
-| -------------- | ------------------ | ------------------------------------------------- |
-| **Table Mgmt** | `createTable`      | Create a new table                                |
-|                | `deleteTable`      | Delete table                                      |
-|                | `hasTable`         | Check if table exists                              |
-|                | `listTables`       | Get all table names                                |
-|                | `countTable`       | Get table record count                             |
-|                | `clearTable`       | Clear table data                                   |
-| **Data Ops**   | `insert`           | Insert single or multiple records                  |
-|                | `read`             | Read data (supports filtering, pagination, sorting) |
-|                | `findOne`          | Query single record                                |
-|                | `findMany`         | Query multiple records (supports advanced options) |
-|                | `update`           | Update matching records                            |
-|                | `remove`           | Delete matching records                            |
-|                | `bulkWrite`        | Batch operations                                   |
-| **Transactions**| `beginTransaction` | Start new transaction                              |
-|                | `commit`           | Commit current transaction                         |
-|                | `rollback`         | Rollback current transaction                       |
-| **Sync Mgmt**  | `getSyncStats`     | Get sync statistics                                |
-|                | `syncNow`          | Trigger sync immediately                           |
-|                | `setAutoSyncConfig`| Customize auto-sync configuration                  |
-| **Cache Mgmt** | `clearKeyCache`    | Clear key cache                                    |
-
-### Detailed API Documentation
-
-#### Table Management APIs
-
-##### createTable
-
-**Functionality**: Create a new data table
-
-**Signature**:
-```typescript
-createTable(tableName: string, options?: CreateTableOptions): Promise<void>
-```
-
-**Parameters**:
-- `tableName`: Table name, must be unique
-- `options`: Optional configuration
-  - `columns`: Column definitions (optional)
-  - `initialData`: Initial data (optional)
-  - `mode`: Storage mode, `'single'` or `'chunked'` (optional)
-
-**Examples**:
-```typescript
-// Create basic table
-await createTable('users');
-
-// Create table with initial data
-await createTable('users', {
-  initialData: [
-    { id: 1, name: 'John Doe', age: 25 },
-    { id: 2, name: 'Jane Smith', age: 30 }
-  ]
-});
-
-// Create chunked storage table
-await createTable('large_data', {
-  mode: 'chunked'
-});
-```
-
-##### deleteTable
-
-**Functionality**: Delete a specified data table
-
-**Signature**:
-```typescript
-deleteTable(tableName: string): Promise<void>
-```
-
-**Parameters**:
-- `tableName`: Table name to delete
-
-**Example**:
-```typescript
-await deleteTable('users');
-```
-
-##### hasTable
-
-**Functionality**: Check if a specified data table exists
-
-**Signature**:
-```typescript
-hasTable(tableName: string): Promise<boolean>
-```
-
-**Parameters**:
-- `tableName`: Table name to check
-
-**Returns**:
-- `boolean`: Whether the table exists
-
-**Example**:
-```typescript
-const exists = await hasTable('users');
-console.log(`Table users exists: ${exists}`);
-```
-
-##### listTables
-
-**Functionality**: Get all data table names
-
-**Signature**:
-```typescript
-listTables(): Promise<string[]>
-```
-
-**Returns**:
-- `string[]`: Array of all table names
-
-**Example**:
-```typescript
-const tables = await listTables();
-console.log('All tables:', tables);
-```
-
-##### countTable
-
-**Functionality**: Get record count for a specified table
-
-**Signature**:
-```typescript
-countTable(tableName: string): Promise<number>
-```
-
-**Parameters**:
-- `tableName`: Table name
-
-**Returns**:
-- `number`: Number of records in the table
-
-**Example**:
-```typescript
-const count = await countTable('users');
-console.log(`Table users has ${count} records`);
-```
-
-##### clearTable
-
-**Functionality**: Clear all data from a specified table
-
-**Signature**:
-```typescript
-clearTable(tableName: string): Promise<void>
-```
-
-**Parameters**:
-- `tableName`: Table name to clear
-
-**Example**:
-```typescript
-await clearTable('users');
-```
-
-#### Data Operation APIs
-
-##### insert
-
-**Functionality**: Insert single or multiple records into a specified table
-
-**Signature**:
-```typescript
-insert(tableName: string, data: Record<string, any> | Record<string, any>[]): Promise<WriteResult>
-```
-
-**Parameters**:
-- `tableName`: Table name
-- `data`: Data to insert, can be single record or array of records
-
-**Returns**:
-- `WriteResult`: Write result, including bytes written, total bytes, etc.
-
-**Examples**:
-```typescript
-// Insert single record
-await insert('users', { id: 1, name: 'John Doe', age: 25 });
-
-// Insert multiple records
-await insert('users', [
-  { id: 2, name: 'Jane Smith', age: 30 },
-  { id: 3, name: 'Bob Johnson', age: 35 }
-]);
-```
-
-##### read
-
-**Functionality**: Read data from a specified table, supporting filtering, pagination and sorting
-
-**Signature**:
-```typescript
-read(tableName: string, options?: ReadOptions): Promise<Record<string, any>[]>
-```
-
-**Parameters**:
-- `tableName`: Table name
-- `options`: Read options
-  - `filter`: Query condition
-  - `skip`: Number of records to skip
-  - `limit`: Maximum number of records to return
-  - `sortBy`: Sort field
-  - `order`: Sort direction, `'asc'` or `'desc'`
-  - `sortAlgorithm`: Sorting algorithm
-
-**Returns**:
-- `Record<string, any>[]`: Array of matching records
-
-**Examples**:
-```typescript
-// Read all data
-const allUsers = await read('users');
-
-// Read with filter
-const activeUsers = await read('users', {
-  filter: { status: 'active' }
-});
-
-// Read with pagination and sorting
-const paginatedUsers = await read('users', {
-  skip: 10,
-  limit: 20,
-  sortBy: 'age',
-  order: 'desc'
-});
-```
-
-##### findOne
-
-**Functionality**: Query single record from a specified table
-
-**Signature**:
-```typescript
-findOne(tableName: string, filter: FilterCondition): Promise<Record<string, any> | null>
-```
-
-**Parameters**:
-- `tableName`: Table name
-- `filter`: Query condition
-
-**Returns**:
-- `Record<string, any> | null`: Matching record, or `null` if no match
-
-**Examples**:
-```typescript
-// Query by ID
-const user = await findOne('users', { id: 1 });
-
-// Query by condition
-const activeUser = await findOne('users', {
-  $and: [{ status: 'active' }, { age: { $gte: 18 } }]
-});
-```
-
-##### findMany
-
-**Functionality**: Query multiple records from a specified table, supporting advanced query options
-
-**Signature**:
-```typescript
-findMany(tableName: string, filter?: FilterCondition, options?: {
-  skip?: number;
-  limit?: number;
-  sortBy?: string | string[];
-  order?: 'asc' | 'desc' | ('asc' | 'desc')[];
-  sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
-}): Promise<Record<string, any>[]>
-```
-
-**Parameters**:
-- `tableName`: Table name
-- `filter`: Query condition
-- `options`: Query options
-  - `skip`: Number of records to skip
-  - `limit`: Maximum number of records to return
-  - `sortBy`: Sort field or array of fields
-  - `order`: Sort direction or array of directions
-  - `sortAlgorithm`: Sorting algorithm
-
-**Returns**:
-- `Record<string, any>[]`: Array of matching records
-
-**Examples**:
-```typescript
-// Basic query
-const users = await findMany('users', { age: { $gte: 18 } });
-
-// Multi-field sorting
-const sortedUsers = await findMany('users', {}, {
-  sortBy: ['department', 'name', 'age'],
-  order: ['asc', 'asc', 'desc']
-});
-
-// Using specific sorting algorithm
-const chineseSortedUsers = await findMany('users', {}, {
-  sortBy: 'name',
-  sortAlgorithm: 'slow' // Supports Chinese sorting
-});
-```
-
-##### update
-
-**Functionality**: Update matching records in a specified table
-
-**Signature**:
-```typescript
-update(tableName: string, data: Record<string, any>, where: FilterCondition): Promise<number>
-```
-
-**Parameters**:
-- `tableName`: Table name
-- `data`: Data to update
-- `where`: Update condition
-
-**Returns**:
-- `number`: Number of updated records
-
-**Examples**:
-```typescript
-// Update single record
-const updatedCount = await update('users', { age: 26 }, { id: 1 });
-
-// Update multiple records
-const updatedCount = await update('users', { status: 'inactive' }, {
-  lastLogin: { $lt: '2024-01-01' }
-});
-
-// Update with operator
-const updatedCount = await update('users', { balance: { $inc: 100 } }, { id: 1 });
-```
-
-##### remove
-
-**Functionality**: Delete matching records from a specified table
-
-**Signature**:
-```typescript
-remove(tableName: string, where: FilterCondition): Promise<number>
-```
-
-**Parameters**:
-- `tableName`: Table name
-- `where`: Delete condition
-
-**Returns**:
-- `number`: Number of deleted records
-
-**Examples**:
-```typescript
-// Delete single record
-const deletedCount = await remove('users', { id: 1 });
-
-// Delete multiple records
-const deletedCount = await remove('users', {
-  status: 'inactive'
-});
-```
-
-##### bulkWrite
-
-**Functionality**: Execute batch operations, supporting insert, update and delete
-
-**Signature**:
-```typescript
-bulkWrite(tableName: string, operations: Array<{
-  type: 'insert' | 'update' | 'delete';
-  data: Record<string, any> | Record<string, any>[];
-  where?: FilterCondition;
-}>): Promise<WriteResult>
-```
-
-**Parameters**:
-- `tableName`: Table name
-- `operations`: Array of operations
-  - `type`: Operation type, `'insert'`, `'update'` or `'delete'`
-  - `data`: Operation data
-  - `where`: Operation condition (required for update and delete)
-
-**Returns**:
-- `WriteResult`: Write result
-
-**Example**:
-```typescript
-await bulkWrite('users', [
-  { type: 'insert', data: { id: 4, name: 'Alice Brown', age: 28 } },
-  { type: 'update', data: { status: 'active' }, where: { id: 2 } },
-  { type: 'delete', where: { id: 3 } }
-]);
-```
-
-#### Transaction Management APIs
-
-##### beginTransaction
-
-**Functionality**: Start a new transaction
-
-**Signature**:
-```typescript
-beginTransaction(): Promise<void>
-```
-
-**Example**:
-```typescript
-await beginTransaction();
-try {
-  // Execute a series of operations
-  await insert('users', { id: 5, name: 'Charlie Davis' });
-  await update('users', { balance: { $inc: 100 } }, { id: 5 });
-  // Commit the transaction
-  await commit();
-} catch (error) {
-  // Rollback the transaction
-  await rollback();
-  throw error;
-}
-```
-
-##### commit
-
-**Functionality**: Commit the current transaction
-
-**Signature**:
-```typescript
-commit(): Promise<void>
-```
-
-**Example**:
-```typescript
-await beginTransaction();
-try {
-  // Execute operations
-  await commit();
-} catch (error) {
-  await rollback();
-}
-```
-
-##### rollback
-
-**Functionality**: Rollback the current transaction
-
-**Signature**:
-```typescript
-rollback(): Promise<void>
-```
-
-**Example**:
-```typescript
-await beginTransaction();
-try {
-  // Execute operations
-  await commit();
-} catch (error) {
-  await rollback();
-}
-```
-
-#### Auto-sync APIs
-
-##### getSyncStats
-
-**Functionality**: Get auto-sync statistics
-
-**Signature**:
-```typescript
-getSyncStats(): Promise<{
-  syncCount: number;
-  totalItemsSynced: number;
-  lastSyncTime: number;
-  avgSyncTime: number;
-}>
-```
-
-**Returns**:
-- Sync statistics object
-  - `syncCount`: Total sync count
-  - `totalItemsSynced`: Total items synced
-  - `lastSyncTime`: Last sync time
-  - `avgSyncTime`: Average sync time (milliseconds)
-
-**Example**:
-```typescript
-const stats = await getSyncStats();
-console.log('Sync statistics:', stats);
-```
-
-##### syncNow
-
-**Functionality**: Trigger sync immediately
-
-**Signature**:
-```typescript
-syncNow(): Promise<void>
-```
-
-**Example**:
-```typescript
-// Manually trigger sync
-await syncNow();
-```
-
-##### setAutoSyncConfig
-
-**Functionality**: Set auto-sync configuration
-
-**Signature**:
-```typescript
-setAutoSyncConfig(config: Partial<{
-  enabled: boolean;
-  interval: number;
-  minItems: number;
-  batchSize: number;
-}>): Promise<void>
-```
-
-**Parameters**:
-- `config`: Sync configuration
-  - `enabled`: Whether to enable auto-sync
-  - `interval`: Sync interval (milliseconds)
-  - `minItems`: Minimum number of dirty items to trigger sync
-  - `batchSize`: Maximum number of items per sync
-
-**Example**:
-```typescript
-// Set auto-sync configuration
-await setAutoSyncConfig({
-  enabled: true,
-  interval: 10000, // Sync every 10 seconds
-  minItems: 5, // Sync at least 5 dirty items
-  batchSize: 200 // Max 200 items per sync
-});
-```
-
-### Interface Definitions
-
-#### ReadOptions Interface
-
-```typescript
-interface ReadOptions {
-  // Pagination options
-  skip?: number; // Number of records to skip
-  limit?: number; // Maximum number of records to return
-
-  // Filter options
-  filter?: FilterCondition; // Query condition
-
-  // Sorting options
-  sortBy?: string | string[]; // Sort field(s)
-  order?: 'asc' | 'desc' | ('asc' | 'desc')[]; // Sort direction
-  sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow'; // Sorting algorithm
-}
-```
-
-#### FilterCondition Type
-
-```typescript
-type FilterCondition =
-  | ((item: Record<string, any>) => boolean) // Function condition
-  | Partial<Record<string, any>> // Simple object condition
-  | {
-      // Advanced conditions
-      $or?: FilterCondition[];
-      $and?: FilterCondition[];
-      [key: string]: any;
-    };
-```
-
-#### WriteResult Interface
-
-```typescript
-interface WriteResult {
-  written: number; // Number of bytes written
-  totalAfterWrite: number; // Total bytes after write
-  chunked: boolean; // Whether chunked writing was used
-  chunks?: number; // Number of chunks (when chunked writing)
-}
-```
 
 ## 🎯 Performance Benchmarks
 

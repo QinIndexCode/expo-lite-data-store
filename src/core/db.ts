@@ -2,23 +2,67 @@
 // 数据库实例初始化文件，负责创建和导出数据库实例
 // 根据环境配置决定是否使用加密存储
 // 创建于: 2025-11-23
-// 最后修改: 2025-12-11
+// 最后修改: 2025-12-16
 
 import storage from './adapter/FileSystemStorageAdapter';
 import { EncryptedStorageAdapter } from './EncryptedStorageAdapter';
+import type { IStorageAdapter } from '../types/storageAdapterInfc';
 
 /**
- * 是否启用加密存储
- * 生产环境建议设置为 true，开发环境可设置为 false 以便调试
- * 测试环境自动禁用加密，避免复杂的加密依赖问题
+ * 数据库实例管理器
+ * 允许动态切换加密模式
  */
-const USE_ENCRYPTION = !(typeof process !== 'undefined' && process.env.NODE_ENV === 'test') && true;
+export class DbInstanceManager {
+  private static instance: DbInstanceManager;
+  private defaultInstance: IStorageAdapter = storage;
+  private encryptedInstances: Map<boolean, EncryptedStorageAdapter> = new Map();
+
+  private constructor() {}
+
+  /**
+   * 获取单例实例
+   */
+  public static getInstance(): DbInstanceManager {
+    if (!DbInstanceManager.instance) {
+      DbInstanceManager.instance = new DbInstanceManager();
+    }
+    return DbInstanceManager.instance;
+  }
+
+  /**
+   * 获取存储实例
+   * @param encrypted 是否启用加密存储
+   * @param requireAuthOnAccess 是否需要生物识别验证
+   */
+  public getDbInstance(encrypted: boolean = false, requireAuthOnAccess: boolean = false): IStorageAdapter {
+    if (!encrypted) {
+      return this.defaultInstance;
+    }
+
+    // 根据requireAuthOnAccess参数获取或创建对应的加密实例
+    const instanceKey = requireAuthOnAccess;
+    if (!this.encryptedInstances.has(instanceKey)) {
+      this.encryptedInstances.set(instanceKey, new EncryptedStorageAdapter({ requireAuthOnAccess }));
+    }
+
+    return this.encryptedInstances.get(instanceKey)!;
+  }
+
+  /**
+   * 获取当前数据库实例（兼容旧API）
+   */
+  public getDefaultInstance(): IStorageAdapter {
+    return this.defaultInstance;
+  }
+}
+
+// 创建单例实例
+export const dbManager = DbInstanceManager.getInstance();
 
 /**
- * 默认数据库实例
- * 根据 USE_ENCRYPTION 配置决定使用加密存储还是普通存储
+ * 默认数据库实例（初始为非加密存储）
  */
-export const db = USE_ENCRYPTION ? new EncryptedStorageAdapter() : storage;
+export const db = dbManager.getDbInstance();
 
 /**
  * 明文存储实例（用于调试）

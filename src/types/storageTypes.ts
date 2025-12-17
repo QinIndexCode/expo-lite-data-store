@@ -45,6 +45,8 @@ export type CreateTableOptions = {
   columns?: Record<string, string>; // 列定义，键为列名，值为数据类型
   intermediates?: boolean; // 是否自动创建中间目录
   chunkSize?: number; // 分片大小阈值，超过此值将使用分片写入
+  encrypted?: boolean; // 是否启用加密存储，默认为 false
+  requireAuthOnAccess?: boolean; // 是否需要生物识别验证，默认为 false
 };
 
 /**
@@ -54,6 +56,8 @@ export type CreateTableOptions = {
 export type WriteOptions = {
   mode?: 'append' | 'overwrite'; // 写入模式：追加或覆盖
   forceChunked?: boolean; // 是否强制使用分片写入
+  encrypted?: boolean; // 是否启用加密存储，默认为 false
+  requireAuthOnAccess?: boolean; // 是否需要生物识别验证，默认为 false
 };
 
 /**
@@ -66,6 +70,8 @@ export interface TableMeta {
   size?: number; // 表的总字节数
   chunk?: number; // 分片大小（仅在分片模式下存在）
   updateAt: number; // 最后更新时间戳（毫秒）
+  encrypted?: boolean; // 是否启用加密存储
+  requireAuthOnAccess?: boolean; // 是否需要生物识别验证
 }
 
 /**

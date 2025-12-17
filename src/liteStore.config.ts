@@ -45,6 +45,9 @@ const defaultConfig: LiteStoreConfig = {
 
     // Bulk Operations
     useBulkOperations: true, // Keep enabled for 5~10x performance improvement
+
+    // Biometric Authentication
+    requireAuthOnAccess: false, // 是否每次访问都需要生物识别验证，默认为 false
   },
 
   // Performance Configuration

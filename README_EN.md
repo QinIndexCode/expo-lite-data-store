@@ -20,7 +20,7 @@ Designed specifically for React Native + Expo projects, with no native dependenc
 | Feature                          | Description                                                                     |
 | -------------------------------- | ------------------------------------------------------------------------------- |
 | 🚀 **Easy configuration**        | Only depends on React Native FS, no Metro configuration                         |
-| 🔒 **Optional encryption**       | AES-CTR encryption, keys automatically generated and managed by the system      |
+| 🔒 **Optional encryption**       | AES-CTR encryption with optional biometric authentication, keys automatically generated and managed by the system      |
 | 📦 **Intelligent chunking**      | Automatically handles >5MB files, avoiding RN FS limits                         |
 | 🔄 **Transaction support**       | Transaction support, data consistency ensured                                   |
 | 📝 **TypeScript native support** | Complete type definitions, ready to use                                         |
@@ -98,38 +98,80 @@ const users = await findMany(
 console.log(users);
 ```
 
+## 🔒 Encryption Usage
+
+### Non-encrypted Mode
+
+By default, the database uses non-encrypted mode and will not trigger any biometric authentication:
+
+```typescript
+// Non-encrypted mode (default)
+await createTable('users');
+await insert('users', { id: 1, name: 'John Doe' });
+const user = await findOne('users', { id: 1 });
+```
+
+### Encrypted Mode
+
+Enable encrypted mode without requiring biometric authentication for each access:
+
+```typescript
+// Encrypted mode without biometric authentication
+await createTable('users', {}, true, false);
+await insert('users', { id: 1, name: 'John Doe' }, true, false);
+const user = await findOne('users', { id: 1 }, true, false);
+```
+
+### Encrypted Mode + Biometric Authentication
+
+Enable encrypted mode and require biometric authentication for each access:
+
+```typescript
+// Encrypted mode with biometric authentication
+await createTable('users', {}, true, true);
+await insert('users', { id: 1, name: 'John Doe' }, true, true);
+const user = await findOne('users', { id: 1 }, true, true);
+```
+
+### Encryption Parameters
+
+| Parameter           | Type    | Default | Description                                                                 |
+| ------------------- | ------- | ------ | --------------------------------------------------------------------------- |
+| `encrypted`         | boolean | false  | Whether to enable data encryption                                           |
+| `requireAuthOnAccess` | boolean | false   | Whether to require biometric authentication for each access (only effective when `encrypted` is true) |
+
 ## 📚 Basic API Reference
 
 ### 🗂️ Table Management
 
-| Method        | Signature                                | Description            |
-| ------------- | ---------------------------------------- | ---------------------- |
-| `createTable` | `(tableName, options?) => Promise<void>` | Create new table       |
-| `deleteTable` | `(tableName) => Promise<void>`           | Delete table           |
-| `hasTable`    | `(tableName) => Promise<boolean>`        | Check if table exists  |
-| `listTables`  | `() => Promise<string[]>`                | Get all table names    |
-| `countTable`  | `(tableName) => Promise<number>`         | Get table record count |
-| `clearTable`  | `(tableName) => Promise<void>`           | Clear table data       |
+| Method        | Signature                                                                                | Description            |
+| ------------- | ----------------------------------------------------------------------------------------- | ---------------------- |
+| `createTable` | `(tableName, options?, encrypted = false, requireAuthOnAccess = false) => Promise<void>` | Create new table       |
+| `deleteTable` | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<void>`           | Delete table           |
+| `hasTable`    | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<boolean>`        | Check if table exists  |
+| `listTables`  | `(encrypted = false, requireAuthOnAccess = false) => Promise<string[]>`                  | Get all table names    |
+| `countTable`  | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<number>`         | Get table record count |
+| `clearTable`  | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<void>`           | Clear table data       |
 
 ### 💾 Data Operations
 
-| Method      | Signature                                          | Description                                         |
-| ----------- | -------------------------------------------------- | --------------------------------------------------- | ------------------- |
-| `insert`    | `(tableName, data) => Promise<WriteResult>`        | Insert single or multiple records                   |
-| `read`      | `(tableName, options?) => Promise<any[]>`          | Read data (supports filtering, pagination, sorting) |
-| `findOne`   | `(tableName, filter) => Promise<any                | null>`                                              | Query single record |
-| `findMany`  | `(tableName, filter?, options?) => Promise<any[]>` | Query multiple records (supports advanced options)  |
-| `update`    | `(tableName, data, where) => Promise<number>`      | Update matching records                             |
-| `remove`    | `(tableName, where) => Promise<number>`            | Delete matching records                             |
-| `bulkWrite` | `(tableName, operations) => Promise<WriteResult>`  | Batch operations                                    |
+| Method      | Signature                                                                                           | Description                                         |
+| ----------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `insert`    | `(tableName, data, encrypted = false, requireAuthOnAccess = false) => Promise<WriteResult>`        | Insert single or multiple records                   |
+| `read`      | `(tableName, options?, encrypted = false, requireAuthOnAccess = false) => Promise<any[]>`          | Read data (supports filtering, pagination, sorting) |
+| `findOne`   | `(tableName, filter, encrypted = false, requireAuthOnAccess = false) => Promise<any \| null>`      | Query single record                                 |
+| `findMany`  | `(tableName, filter?, options?, encrypted = false, requireAuthOnAccess = false) => Promise<any[]>` | Query multiple records (supports advanced options)  |
+| `update`    | `(tableName, data, where, encrypted = false, requireAuthOnAccess = false) => Promise<number>`      | Update matching records                             |
+| `remove`    | `(tableName, where, encrypted = false, requireAuthOnAccess = false) => Promise<number>`            | Delete matching records                             |
+| `bulkWrite` | `(tableName, operations, encrypted = false, requireAuthOnAccess = false) => Promise<WriteResult>`  | Batch operations                                    |
 
 ### 🔄 Transaction Management
 
-| Method             | Signature             | Description                  |
-| ------------------ | --------------------- | ---------------------------- |
-| `beginTransaction` | `() => Promise<void>` | Start new transaction        |
-| `commit`           | `() => Promise<void>` | Commit current transaction   |
-| `rollback`         | `() => Promise<void>` | Rollback current transaction |
+| Method             | Signature                                                                       | Description                  |
+| ------------------ | --------------------------------------------------------------------------------| ---------------------------- |
+| `beginTransaction` | `(encrypted = false, requireAuthOnAccess = false) => Promise<void>` | Start new transaction        |
+| `commit`           | `(encrypted = false, requireAuthOnAccess = false) => Promise<void>` | Commit current transaction   |
+| `rollback`         | `(encrypted = false, requireAuthOnAccess = false) => Promise<void>` | Rollback current transaction |
 
 ## 📖 Detailed Documentation
 

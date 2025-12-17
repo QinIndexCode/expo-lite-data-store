@@ -13,13 +13,22 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   private cachedData: Map<string, { data: Record<string, any>[]; timestamp: number }> = new Map();
   private cacheTimeout = config.encryption.cacheTimeout; // 从配置读取缓存超时时间
   private maxCacheSize = config.encryption.maxCacheSize; // 从配置读取最大缓存大小
+  private readonly requireAuthOnAccess: boolean;
 
   // 优化：添加查询索引缓存
   private queryIndexes: Map<string, Map<string, Map<string | number, Record<string, any>[]>>> = new Map();
 
-  constructor() {
+  /**
+   * 构造函数
+   * @param options 加密存储适配器配置选项
+   */
+  constructor(options: { requireAuthOnAccess?: boolean } = {}) {
     // 配置验证
     this.validateConfig();
+    // 优先使用选项中的配置，否则使用全局配置中的默认值
+    this.requireAuthOnAccess = options.requireAuthOnAccess !== undefined 
+      ? options.requireAuthOnAccess 
+      : config.encryption.requireAuthOnAccess;
   }
 
   /**
@@ -28,7 +37,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
    */
   private async getOrInitKey(): Promise<string> {
     if (!this.keyPromise) {
-      this.keyPromise = getMasterKey();
+      this.keyPromise = getMasterKey(this.requireAuthOnAccess);
     }
     return this.keyPromise;
   }

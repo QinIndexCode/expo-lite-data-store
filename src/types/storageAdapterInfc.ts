@@ -213,6 +213,7 @@ export interface IStorageAdapter {
     operations: Array<{
       type: 'insert' | 'update' | 'delete';
       data: Record<string, any> | Record<string, any>[];
+      where?: Record<string, any>;
     }>
   ): Promise<WriteResult>;
 
@@ -262,6 +263,48 @@ export interface IStorageAdapter {
    * @returns Promise<void>
    */
   clearTable(tableName: string): Promise<void>;
+
+  /**
+   * zh-CN:
+   * 删除数据
+   * en:
+   * delete data
+   * ————————
+   * @param tableName table name / 表名
+   * @param where delete condition / 删除条件
+   * @returns Promise<number> number of deleted records / 删除的记录数
+   */
+  delete(tableName: string, where: Record<string, any>): Promise<number>;
+
+  /**
+   * zh-CN:
+   * 开始事务
+   * en:
+   * begin transaction
+   * ————————
+   * @returns Promise<void>
+   */
+  beginTransaction(): Promise<void>;
+
+  /**
+   * zh-CN:
+   * 提交事务
+   * en:
+   * commit transaction
+   * ————————
+   * @returns Promise<void>
+   */
+  commit(): Promise<void>;
+
+  /**
+   * zh-CN:
+   * 回滚事务
+   * en:
+   * rollback transaction
+   * ————————
+   * @returns Promise<void>
+   */
+  rollback(): Promise<void>;
 }
 
 // StorageError 存储层错误类

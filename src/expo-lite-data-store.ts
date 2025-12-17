@@ -2,15 +2,11 @@
 // Expo Lite Data Store 主要API导出文件
 // 提供数据库操作的所有公共接口，包括表管理、数据读写、查询、事务等
 // 创建于: 2025-11-19
-// 最后修改: 2025-12-12
+// 最后修改: 2025-12-16
 // 直接导入数据库实例
-import { db, plainStorage } from './core/db';
+import { plainStorage, dbManager } from './core/db';
+import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from './types/storageTypes';
 // AutoSyncService 类型用于类型检查
-
-/**
- * 数据库实例，支持加密存储
- */
-export { db };
 
 /**
  * 普通存储实例，不支持加密
@@ -21,77 +17,168 @@ export { plainStorage };
  * 创建表
  * @param tableName 表名
  * @param options 创建表选项
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<void>
  */
-export const createTable = db.createTable.bind(db);
+export const createTable = async (
+  tableName: string,
+  options?: CreateTableOptions & {
+    columns?: Record<string, string>;
+    initialData?: Record<string, any>[];
+    mode?: 'single' | 'chunked';
+  },
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<void> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.createTable(tableName, options);
+};
 
 /**
  * 删除表
  * @param tableName 表名
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<void>
  */
-export const deleteTable = db.deleteTable.bind(db);
+export const deleteTable = async (
+  tableName: string,
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<void> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.deleteTable(tableName);
+};
 
 /**
  * 检查表是否存在
  * @param tableName 表名
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<boolean>
  */
-export const hasTable = db.hasTable.bind(db);
+export const hasTable = async (
+  tableName: string,
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<boolean> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.hasTable(tableName);
+};
 
 /**
  * 列出所有表
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<string[]>
  */
-export const listTables = db.listTables.bind(db);
+export const listTables = async (
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<string[]> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.listTables();
+};
 
 /**
  * 插入数据
  * @param tableName 表名
  * @param data 要插入的数据
  * @param options 写入选项
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<WriteResult>
  */
-export const insert = db.write.bind(db);
+export const insert = async (
+  tableName: string,
+  data: Record<string, any> | Record<string, any>[],
+  options?: WriteOptions,
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<WriteResult> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.write(tableName, data, options);
+};
 
 /**
  * 读取数据
  * @param tableName 表名
  * @param options 读取选项
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<Record<string, any>[]>
  */
-export const read = db.read.bind(db);
+export const read = async (
+  tableName: string,
+  options?: ReadOptions,
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<Record<string, any>[]> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.read(tableName, options);
+};
 
 /**
  * 统计表数据行数
  * @param tableName 表名
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<number>
  */
-export const countTable = db.count.bind(db);
+export const countTable = async (
+  tableName: string,
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<number> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.count(tableName);
+};
 
 /**
  * 验证表计数准确性
  * @param tableName 表名
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<{ metadata: number; actual: number; match: boolean }>
  */
-export const verifyCountTable = db.verifyCount.bind(db);
+export const verifyCountTable = async (
+  tableName: string,
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<{ metadata: number; actual: number; match: boolean }> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.verifyCount(tableName);
+};
 
 /**
  * 查找单条记录
  * @param tableName 表名
  * @param filter 过滤条件
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<Record<string, any> | null>
  */
-export const findOne = db.findOne.bind(db);
+export const findOne = async (
+  tableName: string,
+  filter: Record<string, any>,
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<Record<string, any> | null> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.findOne(tableName, filter);
+};
 
 /**
  * 查找多条记录
  * @param tableName 表名
  * @param filter 过滤条件
  * @param options 查询选项，包括skip、limit、sortBy、order和sortAlgorithm
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<Record<string, any>[]>
  */
-export const findMany = (
+export const findMany = async (
   tableName: string,
   filter?: Record<string, any>,
   options?: {
@@ -100,65 +187,146 @@ export const findMany = (
     sortBy?: string | string[];
     order?: 'asc' | 'desc' | ('asc' | 'desc')[];
     sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
-  }
-) => db.findMany(tableName, filter, options);
+  },
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<Record<string, any>[]> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.findMany(tableName, filter, options);
+};
 
 /**
  * 删除数据
  * @param tableName 表名
  * @param where 删除条件
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<number>
  */
-export const remove = db.delete.bind(db);
+export const remove = async (
+  tableName: string,
+  where: Record<string, any>,
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<number> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.delete(tableName, where);
+};
 
 /**
  * 批量操作
  * @param tableName 表名
  * @param operations 操作数组
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<WriteResult>
  */
-export const bulkWrite = db.bulkWrite.bind(db);
+export const bulkWrite = async (
+  tableName: string,
+  operations: Array<{
+    type: 'insert' | 'update' | 'delete';
+    data: Record<string, any> | Record<string, any>[];
+  }>,
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<WriteResult> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.bulkWrite(tableName, operations);
+};
 
 /**
  * 开始事务
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<void>
  */
-export const beginTransaction = db.beginTransaction.bind(db);
+export const beginTransaction = async (
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<void> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.beginTransaction();
+};
 
 /**
  * 提交事务
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<void>
  */
-export const commit = db.commit.bind(db);
+export const commit = async (
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<void> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.commit();
+};
 
 /**
  * 回滚事务
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<void>
  */
-export const rollback = db.rollback.bind(db);
+export const rollback = async (
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<void> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.rollback();
+};
 
 /**
  * 迁移表到分片模式
  * @param tableName 表名
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<void>
  */
-export const migrateToChunked = db.migrateToChunked.bind(db);
+export const migrateToChunked = async (
+  tableName: string,
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<void> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.migrateToChunked(tableName);
+};
 
 /**
  * 更新匹配的数据
  * @param tableName 表名
  * @param data 要更新的数据
  * @param where 更新条件，只支持基本的相等匹配
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<number> 更新的记录数
  */
-export const update = db.update.bind(db);
+export const update = async (
+  tableName: string,
+  data: Record<string, any>,
+  where: Record<string, any>,
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<number> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.update(tableName, data, where);
+};
 
 /**
  * 清空表数据
  * @param tableName 表名
+ * @param encrypted 是否启用加密存储，默认为 false
+ * @param requireAuthOnAccess 是否需要生物识别验证，默认为 false
  * @returns Promise<void>
  */
-export const clearTable = db.clearTable.bind(db);
+export const clearTable = async (
+  tableName: string,
+  encrypted: boolean = false,
+  requireAuthOnAccess: boolean = false
+): Promise<void> => {
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.clearTable(tableName);
+};
 
 // 自动同步相关类型定义
 
@@ -196,7 +364,7 @@ export interface AutoSyncConfig {
  */
 export function getSyncStats(): SyncStats {
   // 获取真实的同步统计信息
-  const storageAdapter = db as any;
+  const storageAdapter = plainStorage as any;
   if (storageAdapter.autoSyncService && typeof storageAdapter.autoSyncService.getStats === 'function') {
     return storageAdapter.autoSyncService.getStats();
   }
@@ -216,7 +384,7 @@ export function getSyncStats(): SyncStats {
  */
 export async function syncNow(): Promise<void> {
   // 触发真实的同步操作
-  const storageAdapter = db as any;
+  const storageAdapter = plainStorage as any;
   if (storageAdapter.autoSyncService && typeof storageAdapter.autoSyncService.sync === 'function') {
     await storageAdapter.autoSyncService.sync();
   }
@@ -228,7 +396,7 @@ export async function syncNow(): Promise<void> {
  */
 export function setAutoSyncConfig(config: Partial<AutoSyncConfig>): void {
   // 更新真实的同步配置
-  const storageAdapter = db as any;
+  const storageAdapter = plainStorage as any;
   if (storageAdapter.autoSyncService && typeof storageAdapter.autoSyncService.updateConfig === 'function') {
     storageAdapter.autoSyncService.updateConfig(config);
   }

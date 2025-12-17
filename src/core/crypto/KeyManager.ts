@@ -7,6 +7,17 @@ import * as SecureStore from 'expo-secure-store';
 import { generateMasterKey } from '../../utils/crypto.js';
 
 /**
+ * 密钥管理器配置选项
+ */
+export interface KeyManagerOptions {
+  /**
+   * 是否每次访问密钥都需要生物识别验证
+   * 默认值: false
+   */
+  requireAuthOnAccess?: boolean;
+}
+
+/**
  * 密钥类型枚举
  */
 export enum KeyType {
@@ -75,6 +86,19 @@ export class KeyManager {
   private readonly METADATA_KEY = 'expo_litedb_key_metadata';
 
   /**
+   * 是否每次访问密钥都需要生物识别验证
+   */
+  private readonly requireAuthOnAccess: boolean;
+
+  /**
+   * 构造函数
+   * @param options 密钥管理器配置选项
+   */
+  constructor(options: KeyManagerOptions = {}) {
+    this.requireAuthOnAccess = options.requireAuthOnAccess || false;
+  }
+
+  /**
    * 获取密钥存储键
    * @param keyId 密钥ID
    * @returns 密钥存储键
@@ -98,7 +122,7 @@ export class KeyManager {
     try {
       // 保存密钥内容
       await SecureStore.setItemAsync(this.getKeyStorageKey(keyId), key, {
-        requireAuthentication: true,
+        requireAuthentication: this.requireAuthOnAccess,
         authenticationPrompt: '验证身份访问密钥',
       });
 
@@ -127,7 +151,7 @@ export class KeyManager {
   async getKey(keyId: string): Promise<string | undefined> {
     try {
       const result = await SecureStore.getItemAsync(this.getKeyStorageKey(keyId), {
-        requireAuthentication: true,
+        requireAuthentication: this.requireAuthOnAccess,
         authenticationPrompt: '验证身份访问密钥',
       });
       return result || undefined;
@@ -294,7 +318,7 @@ export class KeyManager {
 
       // 更新密钥内容
       await SecureStore.setItemAsync(this.getKeyStorageKey(keyId), newKey, {
-        requireAuthentication: true,
+        requireAuthentication: this.requireAuthOnAccess,
         authenticationPrompt: '验证身份更新密钥',
       });
 
@@ -389,7 +413,7 @@ export class KeyManager {
     try {
       // 保存密钥内容
       await SecureStore.setItemAsync(this.getKeyStorageKey(keyData.metadata.id), keyData.key, {
-        requireAuthentication: true,
+        requireAuthentication: this.requireAuthOnAccess,
         authenticationPrompt: '验证身份导入密钥',
       });
 
@@ -405,4 +429,4 @@ export class KeyManager {
 }
 
 // 密钥管理器单例
-export const keyManager = new KeyManager();
+export const keyManager = new KeyManager({ requireAuthOnAccess: false });

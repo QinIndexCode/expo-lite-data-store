@@ -3,7 +3,7 @@
 // 实现了IStorageAdapter接口，负责处理数据库的文件系统存储操作
 // 支持事务管理、缓存机制、索引管理和自动同步功能
 // 创建于: 2025-11-23
-// 最后修改: 2025-12-11
+// 最后修改: 2025-12-17
 
 import config from '../../liteStore.config';
 import { StorageTaskProcessor } from '../../taskQueue/StorageTaskProcessor';
@@ -25,7 +25,7 @@ import { CacheService } from '../service/CacheService';
 import { TransactionService } from '../service/TransactionService';
 import { AutoSyncService } from '../service/AutoSyncService';
 import { ErrorHandler } from '../../utils/errorHandler';
-
+import { QueryEngine } from '../query/QueryEngine';
 /**
  * 文件系统存储适配器
  * 实现了IStorageAdapter接口，负责处理数据库的文件系统存储操作
@@ -549,6 +549,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     operations: Array<{
       type: 'insert' | 'update' | 'delete';
       data: Record<string, any> | Record<string, any>[];
+      where?: Record<string, any>;
     }>
   ): Promise<WriteResult> {
     const startTime = Date.now();
@@ -617,23 +618,58 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
             });
             break;
           case 'update':
-            items.forEach((item: Record<string, any>) => {
-              if (item.id !== undefined) {
-                const existing = dataMap.get(item['id']);
-                if (existing) {
-                  dataMap.set(item['id'], { ...existing, ...item });
+            // 处理所有数据项
+            const updateData = items.length > 0 ? items[0] : {};
+            
+            if (op.where) {
+              // 使用QueryEngine进行复杂条件过滤，确保与findOne/findMany一致
+              // 将Map转换为数组进行过滤
+              const allData = Array.from(dataMap.values());
+              const matchedItems = QueryEngine.filter(allData, op.where);
+              
+              // 更新所有匹配的记录
+              for (const matchedItem of matchedItems) {
+                if (matchedItem.id !== undefined) {
+                  dataMap.set(matchedItem.id, { ...matchedItem, ...updateData });
                   writtenCount++;
                 }
               }
-            });
+            } else {
+              // 原逻辑：通过id更新记录
+              items.forEach((item: Record<string, any>) => {
+                if (item.id !== undefined) {
+                  const existing = dataMap.get(item['id']);
+                  if (existing) {
+                    dataMap.set(item['id'], { ...existing, ...item });
+                    writtenCount++;
+                  }
+                }
+              });
+            }
             break;
           case 'delete':
-            items.forEach((item: Record<string, any>) => {
-              if (item['id'] !== undefined && dataMap.has(item['id'])) {
-                dataMap.delete(item['id']);
-                writtenCount++;
+            if (op.where) {
+              // 使用QueryEngine进行复杂条件过滤，确保与findOne/findMany一致
+              // 将Map转换为数组进行过滤
+              const allData = Array.from(dataMap.values());
+              const matchedItems = QueryEngine.filter(allData, op.where);
+              
+              // 删除所有匹配的记录
+              for (const matchedItem of matchedItems) {
+                if (matchedItem.id !== undefined) {
+                  dataMap.delete(matchedItem.id);
+                  writtenCount++;
+                }
               }
-            });
+            } else {
+              // 原逻辑：通过id删除记录
+              items.forEach((item: Record<string, any>) => {
+                if (item['id'] !== undefined && dataMap.has(item['id'])) {
+                  dataMap.delete(item['id']);
+                  writtenCount++;
+                }
+              });
+            }
             break;
         }
       }

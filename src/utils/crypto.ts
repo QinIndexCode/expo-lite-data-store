@@ -389,17 +389,21 @@ export const decrypt = async (encryptedBase64: string, masterKey: string): Promi
   }
 };
 
-// 获取主密钥（SecureStore + 生物识别）
-export const getMasterKey = async (): Promise<string> => {
+// 获取主密钥
+/**
+ * 获取主密钥
+ * @param requireAuthOnAccess 是否每次访问都需要生物识别验证，默认为 false
+ */
+export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promise<string> => {
   let key = await SecureStore.getItemAsync(MASTER_KEY_ALIAS, {
-    requireAuthentication: true,
+    requireAuthentication: requireAuthOnAccess,
     authenticationPrompt: '验证身份访问数据库', // Authenticate to access database
   });
 
   if (!key) {
     key = await generateMasterKey();
     await SecureStore.setItemAsync(MASTER_KEY_ALIAS, key, {
-      requireAuthentication: true,
+      requireAuthentication: requireAuthOnAccess,
       authenticationPrompt: '设置加密密钥', // Set encryption key
     });
   }

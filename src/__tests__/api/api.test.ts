@@ -84,6 +84,11 @@ describe('Public API Tests', () => {
       expect(result.totalAfterWrite).toBe(TEST_DATA.length);
     });
 
+    it('should insert data with options parameter', async () => {
+      const result = await insert(TEST_TABLE, TEST_DATA, { encrypted: false, requireAuthOnAccess: false });
+      expect(result.written).toBe(TEST_DATA.length);
+    });
+
     it('should read all data from table', async () => {
       await insert(TEST_TABLE, TEST_DATA);
       const data = await read(TEST_TABLE);
@@ -495,9 +500,21 @@ describe('Public API Tests', () => {
       expect(updatedUsers.every((user: any) => user.age === 40)).toBe(true);
     });
 
+    it('should update records with options parameter', async () => {
+      const updatedCount = await update(TEST_TABLE, { age: 40 }, { active: true }, { encrypted: false, requireAuthOnAccess: false });
+      expect(updatedCount).toBe(2);
+    });
+
     it('should delete records by filter', async () => {
       const initialCount = await countTable(TEST_TABLE);
       await remove(TEST_TABLE, { active: false });
+      const finalCount = await countTable(TEST_TABLE);
+      expect(finalCount).toBe(initialCount - 1);
+    });
+
+    it('should delete records with options parameter', async () => {
+      const initialCount = await countTable(TEST_TABLE);
+      await remove(TEST_TABLE, { active: false }, { encrypted: false, requireAuthOnAccess: false });
       const finalCount = await countTable(TEST_TABLE);
       expect(finalCount).toBe(initialCount - 1);
     });
@@ -512,6 +529,7 @@ describe('Public API Tests', () => {
   describe('Bulk Write API', () => {
     beforeEach(async () => {
       await createTable(TEST_TABLE);
+      await insert(TEST_TABLE, TEST_DATA);
     });
 
     it('should perform bulk write operations', async () => {
@@ -527,7 +545,200 @@ describe('Public API Tests', () => {
       expect(result.written).toBe(operations.length);
 
       const count = await countTable(TEST_TABLE);
-      expect(count).toBe(operations.length);
+      expect(count).toBe(TEST_DATA.length + operations.length);
+    });
+
+    it('should perform bulk write with where parameter for update', async () => {
+      const operations: Array<{
+        type: 'insert' | 'update' | 'delete';
+        data: Record<string, any> | Record<string, any>[];
+        where?: Record<string, any>;
+      }> = [
+        { 
+          type: 'update', 
+          data: { age: 40 }, 
+          where: { active: true } 
+        },
+      ];
+
+      const result = await bulkWrite(TEST_TABLE, operations);
+      expect(result.written).toBe(2); // Should update 2 active users
+
+      const activeUsers = await findMany(TEST_TABLE, { active: true });
+      expect(activeUsers.every((user: any) => user.age === 40)).toBe(true);
+    });
+
+    it('should perform bulk write with where parameter for delete', async () => {
+      const operations: Array<{
+        type: 'insert' | 'update' | 'delete';
+        data: Record<string, any> | Record<string, any>[];
+        where?: Record<string, any>;
+      }> = [
+        { 
+          type: 'delete', 
+          data: {}, 
+          where: { active: false } 
+        },
+      ];
+
+      const result = await bulkWrite(TEST_TABLE, operations);
+      expect(result.written).toBe(1); // Should delete 1 inactive user
+
+      const inactiveUsers = await findMany(TEST_TABLE, { active: false });
+      expect(inactiveUsers.length).toBe(0);
+    });
+
+    it('should perform mixed bulk write operations with where parameters', async () => {
+      const operations: Array<{
+        type: 'insert' | 'update' | 'delete';
+        data: Record<string, any> | Record<string, any>[];
+        where?: Record<string, any>;
+      }> = [
+        { 
+          type: 'insert', 
+          data: { id: 4, name: 'New User', age: 25, active: true } 
+        },
+        { 
+          type: 'update', 
+          data: { age: 35 }, 
+          where: { id: 1 } 
+        },
+        { 
+          type: 'delete', 
+          data: {}, 
+          where: { id: 2 } 
+        },
+      ];
+
+      const result = await bulkWrite(TEST_TABLE, operations);
+      expect(result.written).toBe(operations.length); // Should process all 3 operations
+
+      const count = await countTable(TEST_TABLE);
+      expect(count).toBe(TEST_DATA.length + 1 - 1); // Insert 1, delete 1
+
+      const user1 = await findOne(TEST_TABLE, { id: 1 });
+      expect(user1?.['age']).toBe(35); // Should be updated
+
+      const user2 = await findOne(TEST_TABLE, { id: 2 });
+      expect(user2).toBeNull(); // Should be deleted
+
+      const user4 = await findOne(TEST_TABLE, { id: 4 });
+      expect(user4).toBeDefined(); // Should be inserted
+    });
+
+    it('should handle multiple update operations with different where conditions', async () => {
+      const operations: Array<{
+        type: 'insert' | 'update' | 'delete';
+        data: Record<string, any> | Record<string, any>[];
+        where?: Record<string, any>;
+      }> = [
+        { 
+          type: 'update', 
+          data: { age: 100 }, 
+          where: { id: 1 } 
+        },
+        { 
+          type: 'update', 
+          data: { age: 200 }, 
+          where: { id: 3 } 
+        },
+        { 
+          type: 'update', 
+          data: { active: true }, 
+          where: { id: 2 } 
+        },
+      ];
+
+      const result = await bulkWrite(TEST_TABLE, operations);
+      expect(result.written).toBe(3); // Should update all 3 users
+
+      const user1 = await findOne(TEST_TABLE, { id: 1 });
+      const user2 = await findOne(TEST_TABLE, { id: 2 });
+      const user3 = await findOne(TEST_TABLE, { id: 3 });
+
+      expect(user1?.['age']).toBe(100);
+      expect(user2?.['active']).toBe(true);
+      expect(user3?.['age']).toBe(200);
+    });
+
+    it('should handle options parameter in bulkWrite', async () => {
+      const operations: Array<{
+        type: 'insert' | 'update' | 'delete';
+        data: Record<string, any> | Record<string, any>[];
+        where?: Record<string, any>;
+      }> = [
+        { 
+          type: 'update', 
+          data: { age: 50 }, 
+          where: { id: 1 } 
+        },
+      ];
+
+      // Test with options parameter (though bulkWrite doesn't currently use it for anything beyond common options)
+      // This test ensures the parameter is accepted without errors
+      const result = await bulkWrite(TEST_TABLE, operations, { encrypted: false, requireAuthOnAccess: false });
+      expect(result.written).toBe(1);
+    });
+
+    it('should support complex where conditions with $and for update', async () => {
+      const operations: Array<{
+        type: 'insert' | 'update' | 'delete';
+        data: Record<string, any> | Record<string, any>[];
+        where?: Record<string, any>;
+      }> = [
+        { 
+          type: 'update', 
+          data: { age: 60 }, 
+          where: { $and: [{ active: true }, { age: { $gt: 25 } }] } 
+        },
+      ];
+
+      const result = await bulkWrite(TEST_TABLE, operations);
+      expect(result.written).toBe(1); // Should update 1 user with active=true and age>25
+
+      const users = await findMany(TEST_TABLE, { $and: [{ active: true }, { age: { $gt: 25 } }] });
+      expect(users.every((user: any) => user.age === 60)).toBe(true);
+    });
+
+    it('should support complex where conditions with $or for delete', async () => {
+      const operations: Array<{
+        type: 'insert' | 'update' | 'delete';
+        data: Record<string, any> | Record<string, any>[];
+        where?: Record<string, any>;
+      }> = [
+        { 
+          type: 'delete', 
+          data: {}, 
+          where: { $or: [{ age: { $lt: 30 } }, { id: 3 }] } 
+        },
+      ];
+
+      const initialCount = await countTable(TEST_TABLE);
+      const result = await bulkWrite(TEST_TABLE, operations);
+      expect(result.written).toBe(2); // Should delete 2 users: id=1 (age=25) and id=3 (age=35)
+
+      const finalCount = await countTable(TEST_TABLE);
+      expect(finalCount).toBe(initialCount - 2);
+    });
+
+    it('should support numeric comparison operators in where conditions', async () => {
+      const operations: Array<{
+        type: 'insert' | 'update' | 'delete';
+        data: Record<string, any> | Record<string, any>[];
+        where?: Record<string, any>;
+      }> = [
+        { 
+          type: 'update', 
+          data: { active: false }, 
+          where: { age: { $gte: 30, $lte: 40 } } 
+        },
+      ];
+
+      const result = await bulkWrite(TEST_TABLE, operations);
+      expect(result.written).toBe(2); // Should update 2 users with age between 30 and 40
+
+      const users = await findMany(TEST_TABLE, { age: { $gte: 30, $lte: 40 } });
+      expect(users.every((user: any) => user.active === false)).toBe(true);
     });
   });
 

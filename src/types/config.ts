@@ -26,6 +26,7 @@ export interface LiteStoreConfig {
     cacheTimeout: number;
     maxCacheSize: number;
     useBulkOperations: boolean;
+    requireAuthOnAccess: boolean;
   };
 
   /** 性能配置 */

@@ -24,7 +24,7 @@ English: [English Document](./README_EN.md)
 | 特性                       | 描述                                           |
 | -------------------------- | ---------------------------------------------- |
 | 🚀 **易配置使用**          | 仅依赖 React Native FS，无需 Metro 配置        |
-| 🔒 **可选加密**            | AES-CTR 加密，密钥由系统自动生成和管理         |
+| 🔒 **可选加密**            | AES-CTR 加密，支持可选生物识别认证，密钥由系统自动生成和管理         |
 | 📦 **智能分块**            | 自动处理 >5MB 文件，规避 RN FS 限制            |
 | 🔄 **事务支持**            | 事务保证，数据一致性有保障                    |
 | 📝 **TypeScript 原生支持** | 完整的类型定义，开箱即用                       |
@@ -102,38 +102,80 @@ const users = await findMany(
 console.log(users);
 ```
 
+## 🔒 加密使用说明
+
+### 非加密模式
+
+默认情况下，数据库使用非加密模式，不会触发任何生物识别认证：
+
+```typescript
+// 非加密模式（默认）
+await createTable('users');
+await insert('users', { id: 1, name: '张三' });
+const user = await findOne('users', { id: 1 });
+```
+
+### 加密模式
+
+启用加密模式，但不要求每次访问都进行生物识别认证：
+
+```typescript
+// 加密模式，无需生物识别
+await createTable('users', {}, true, false);
+await insert('users', { id: 1, name: '张三' }, true, false);
+const user = await findOne('users', { id: 1 }, true, false);
+```
+
+### 加密模式 + 生物识别认证
+
+启用加密模式，并要求每次访问都进行生物识别认证：
+
+```typescript
+// 加密模式，需要生物识别认证
+await createTable('users', {}, true, true);
+await insert('users', { id: 1, name: '张三' }, true, true);
+const user = await findOne('users', { id: 1 }, true, true);
+```
+
+### 加密参数说明
+
+| 参数名               | 类型    | 默认值 | 说明                                                                 |
+| -------------------- | ------- | ------ | -------------------------------------------------------------------- |
+| `encrypted`          | boolean | false  | 是否启用数据加密                                                     |
+| `requireAuthOnAccess`| boolean | false  | 是否在每次访问数据时都要求生物识别认证（仅在 `encrypted` 为 true 时生效） |
+
 ## 📚 基础 API 参考
 
 ### 🗂️ 表管理
 
-| 方法          | 签名                                     | 说明           |
-| ------------- | ---------------------------------------- | -------------- |
-| `createTable` | `(tableName, options?) => Promise<void>` | 创建新表       |
-| `deleteTable` | `(tableName) => Promise<void>`           | 删除表         |
-| `hasTable`    | `(tableName) => Promise<boolean>`        | 检查表是否存在 |
-| `listTables`  | `() => Promise<string[]>`                | 获取所有表名   |
-| `countTable`  | `(tableName) => Promise<number>`         | 获取表记录数   |
-| `clearTable`  | `(tableName) => Promise<void>`           | 清空表数据     |
+| 方法          | 签名                                                                             | 说明           |
+| ------------- | -------------------------------------------------------------------------------- | -------------- |
+| `createTable` | `(tableName, options?, encrypted = false, requireAuthOnAccess = false) => Promise<void>` | 创建新表       |
+| `deleteTable` | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<void>`           | 删除表         |
+| `hasTable`    | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<boolean>`        | 检查表是否存在 |
+| `listTables`  | `(encrypted = false, requireAuthOnAccess = false) => Promise<string[]>`                | 获取所有表名   |
+| `countTable`  | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<number>`         | 获取表记录数   |
+| `clearTable`  | `(tableName, encrypted = false, requireAuthOnAccess = false) => Promise<void>`           | 清空表数据     |
 
 ### 💾 数据操作
 
-| 方法        | 签名                                               | 说明                             |
-| ----------- | -------------------------------------------------- | -------------------------------- |
-| `insert`    | `(tableName, data) => Promise<WriteResult>`        | 插入单条或多条数据               |
-| `read`      | `(tableName, options?) => Promise<any[]>`          | 读取数据（支持过滤、分页、排序） |
-| `findOne`   | `(tableName, filter) => Promise<any\|null>`        | 查询单条记录                     |
-| `findMany`  | `(tableName, filter?, options?) => Promise<any[]>` | 查询多条记录（支持高级选项）     |
-| `update`    | `(tableName, data, where) => Promise<number>`      | 更新匹配的记录                   |
-| `remove`    | `(tableName, where) => Promise<number>`            | 删除匹配的记录                   |
-| `bulkWrite` | `(tableName, operations) => Promise<WriteResult>`  | 批量操作                         |
+| 方法        | 签名                                                                                       | 说明                             |
+| ----------- | ------------------------------------------------------------------------------------------ | -------------------------------- |
+| `insert`    | `(tableName, data, encrypted = false, requireAuthOnAccess = false) => Promise<WriteResult>`        | 插入单条或多条数据               |
+| `read`      | `(tableName, options?, encrypted = false, requireAuthOnAccess = false) => Promise<any[]>`          | 读取数据（支持过滤、分页、排序） |
+| `findOne`   | `(tableName, filter, encrypted = false, requireAuthOnAccess = false) => Promise<any\|null>`        | 查询单条记录                     |
+| `findMany`  | `(tableName, filter?, options?, encrypted = false, requireAuthOnAccess = false) => Promise<any[]>` | 查询多条记录（支持高级选项）     |
+| `update`    | `(tableName, data, where, encrypted = false, requireAuthOnAccess = false) => Promise<number>`      | 更新匹配的记录                   |
+| `remove`    | `(tableName, where, encrypted = false, requireAuthOnAccess = false) => Promise<number>`            | 删除匹配的记录                   |
+| `bulkWrite` | `(tableName, operations, encrypted = false, requireAuthOnAccess = false) => Promise<WriteResult>`  | 批量操作                         |
 
 ### 🔄 事务管理
 
-| 方法               | 签名                  | 说明         |
-| ------------------ | --------------------- | ------------ |
-| `beginTransaction` | `() => Promise<void>` | 开始新事务   |
-| `commit`           | `() => Promise<void>` | 提交当前事务 |
-| `rollback`         | `() => Promise<void>` | 回滚当前事务 |
+| 方法               | 签名                                                                       | 说明         |
+| ------------------ | -------------------------------------------------------------------------- | ------------ |
+| `beginTransaction` | `(encrypted = false, requireAuthOnAccess = false) => Promise<void>` | 开始新事务   |
+| `commit`           | `(encrypted = false, requireAuthOnAccess = false) => Promise<void>` | 提交当前事务 |
+| `rollback`         | `(encrypted = false, requireAuthOnAccess = false) => Promise<void>` | 回滚当前事务 |
 
 ## 📖 详细文档
 
