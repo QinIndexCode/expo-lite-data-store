@@ -31,7 +31,7 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 | `keySize`                    | `number`   | `256`            | 加密密钥长度，支持 `128`, `192`, `256`       |
 | `hmacAlgorithm`              | `string`   | `'SHA-512'`      | HMAC 完整性保护算法                          |
 | `keyIterations`              | `number`   | `120000`         | 密钥派生迭代次数，值越高安全性越强但性能越低 |
-| `enableFieldLevelEncryption` | `boolean`  | `false`          | 是否启用字段级加密                           |
+
 | `encryptedFields`            | `string[]` | 常见敏感字段列表 | 默认加密的字段列表                           |
 | `cacheTimeout`               | `number`   | `30000` (30秒)   | 内存中 masterKey 的缓存超时时间              |
 | `maxCacheSize`               | `number`   | `50`             | LRU 缓存最多保留的派生密钥数量               |
@@ -40,7 +40,7 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 **重要说明**：
 - 整表加密和字段级加密**不能同时使用**，系统会自动检测冲突并抛出明确的错误信息
 - 整表加密模式通过 API 调用时的 `encryptFullTable` 参数启用
-- 字段级加密通过配置文件中的 `enableFieldLevelEncryption` 和 `encryptedFields` 启用
+- 字段级加密通过配置文件中的 `encryptedFields` 启用，当 `encryptedFields` 数组不为空时自动启用字段级加密
 - 非加密模式下，数据以明文形式存储，不会使用任何加密算法，也不会触发生物识别或密码认证
 
 ### 性能配置
@@ -105,7 +105,7 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
      encryption: {
        keyIterations: 200000, // 增加密钥派生迭代次数
        cacheTimeout: 15000, // 减少密钥缓存时间
-       enableFieldLevelEncryption: true,
+
      },
    };
    ```
@@ -144,10 +144,6 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 | **事务管理** | `beginTransaction`| 开始新事务                     |
 |              | `commit`          | 提交当前事务                   |
 |              | `rollback`        | 回滚当前事务                   |
-| **同步管理** | `getSyncStats`    | 获取同步统计信息               |
-|              | `syncNow`         | 立即触发同步                   |
-|              | `setAutoSyncConfig`| 自定义自动同步配置             |
-| **缓存管理** | `clearKeyCache`   | 清除密钥缓存                   |
 
 ### 详细 API 说明
 
@@ -428,7 +424,7 @@ const paginatedUsers = await read('users', {
 
 **签名**：
 ```typescript
-findOne(tableName: string, filter: FilterCondition, options?: TableOptions): Promise<Record<string, any> | null>
+findOne(tableName: string, { where, encrypted?, requireAuthOnAccess? }: { where: FilterCondition, encrypted?: boolean, requireAuthOnAccess?: boolean }): Promise<Record<string, any> | null>
 ```
 
 **参数**：
@@ -444,15 +440,16 @@ findOne(tableName: string, filter: FilterCondition, options?: TableOptions): Pro
 **示例**：
 ```typescript
 // 根据ID查询
-const user = await findOne('users', { id: 1 });
+const user = await findOne('users', { where: { id: 1 } });
 
 // 根据条件查询
 const activeUser = await findOne('users', {
-  $and: [{ status: 'active' }, { age: { $gte: 18 } }]
+  where: { $and: [{ status: 'active' }, { age: { $gte: 18 } }] }
 });
 
 // 使用加密选项查询
-const encryptedUser = await findOne('sensitive_data', { id: 1 }, {
+const encryptedUser = await findOne('sensitive_data', {
+  where: { id: 1 },
   encrypted: true,
   requireAuthOnAccess: false
 });
@@ -464,7 +461,16 @@ const encryptedUser = await findOne('sensitive_data', { id: 1 }, {
 
 **签名**：
 ```typescript
-findMany(tableName: string, filter?: FilterCondition, options?: FindOptions): Promise<Record<string, any>[]>
+findMany(tableName: string, { where?, skip?, limit?, sortBy?, order?, sortAlgorithm?, encrypted?, requireAuthOnAccess? }: {
+  where?: FilterCondition,
+  skip?: number,
+  limit?: number,
+  sortBy?: string | string[],
+  order?: 'asc' | 'desc' | ('asc' | 'desc')[],
+  sortAlgorithm?: 'quick' | 'merge' | 'slow' | 'default' | 'radix',
+  encrypted?: boolean,
+  requireAuthOnAccess?: boolean
+}): Promise<Record<string, any>[]>
 ```
 
 **参数**：
@@ -485,22 +491,25 @@ findMany(tableName: string, filter?: FilterCondition, options?: FindOptions): Pr
 **示例**：
 ```typescript
 // 基本查询
-const users = await findMany('users', { age: { $gte: 18 } });
+const users = await findMany('users', { where: { age: { $gte: 18 } } });
 
 // 多字段排序
-const sortedUsers = await findMany('users', {}, {
+const sortedUsers = await findMany('users', {
+  where: {},
   sortBy: ['department', 'name', 'age'],
   order: ['asc', 'asc', 'desc']
 });
 
 // 使用特定排序算法
-const chineseSortedUsers = await findMany('users', {}, {
+const chineseSortedUsers = await findMany('users', {
+  where: {},
   sortBy: 'name',
   sortAlgorithm: 'slow' // 支持中文排序
 });
 
 // 使用加密选项查询
-const encryptedUsers = await findMany('sensitive_data', { status: 'active' }, {
+const encryptedUsers = await findMany('sensitive_data', {
+  where: { status: 'active' },
   encrypted: true,
   requireAuthOnAccess: false,
   sortBy: 'created_at',
@@ -514,14 +523,14 @@ const encryptedUsers = await findMany('sensitive_data', { status: 'active' }, {
 
 **签名**：
 ```typescript
-update(tableName: string, data: Record<string, any>, where: FilterCondition, options?: TableOptions): Promise<number>
+update(tableName: string, data: Record<string, any>, { where, encrypted?, requireAuthOnAccess? }: { where: FilterCondition, encrypted?: boolean, requireAuthOnAccess?: boolean }): Promise<number>
 ```
 
 **参数**：
 - `tableName`: 表名
 - `data`: 要更新的数据
-- `where`: 更新条件
-- `options`: 可选配置项
+- `options`: 选项对象
+  - `where`: 更新条件
   - `encrypted`: 是否启用加密存储，默认为 false（可选）
   - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
@@ -531,21 +540,22 @@ update(tableName: string, data: Record<string, any>, where: FilterCondition, opt
 **示例**：
 ```typescript
 // 更新单条记录
-const updatedCount = await update('users', { age: 26 }, { id: 1 });
+const updatedCount = await update('users', { age: 26 }, { where: { id: 1 } });
+console.log(`更新了 ${updatedCount} 条记录`);
 
 // 更新多条记录
 const updatedCount = await update('users', { status: 'inactive' }, {
-  lastLogin: { $lt: '2024-01-01' }
+  where: { lastLogin: { $lt: '2024-01-01' } }
 });
-
-// 使用操作符更新
-const updatedCount = await update('users', { balance: { $inc: 100 } }, { id: 1 });
+console.log(`更新了 ${updatedCount} 条记录`);
 
 // 使用加密选项更新
-const updatedCount = await update('sensitive_data', { status: 'active' }, { id: 1 }, {
+const updatedCount = await update('sensitive_data', { status: 'active' }, {
+  where: { id: 1 },
   encrypted: true,
   requireAuthOnAccess: false
 });
+console.log(`更新了 ${updatedCount} 条记录`);
 ```
 
 ##### remove
@@ -554,13 +564,13 @@ const updatedCount = await update('sensitive_data', { status: 'active' }, { id: 
 
 **签名**：
 ```typescript
-remove(tableName: string, where: FilterCondition, options?: TableOptions): Promise<number>
+remove(tableName: string, { where, encrypted?, requireAuthOnAccess? }: { where: FilterCondition, encrypted?: boolean, requireAuthOnAccess?: boolean }): Promise<number>
 ```
 
 **参数**：
 - `tableName`: 表名
-- `where`: 删除条件
-- `options`: 可选配置项
+- `options`: 选项对象
+  - `where`: 删除条件
   - `encrypted`: 是否启用加密存储，默认为 false（可选）
   - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
@@ -570,18 +580,22 @@ remove(tableName: string, where: FilterCondition, options?: TableOptions): Promi
 **示例**：
 ```typescript
 // 删除单条记录
-const deletedCount = await remove('users', { id: 1 });
+const deletedCount = await remove('users', { where: { id: 1 } });
+console.log(`删除了 ${deletedCount} 条记录`);
 
 // 删除多条记录
 const deletedCount = await remove('users', {
-  status: 'inactive'
+  where: { status: 'inactive' }
 });
+console.log(`删除了 ${deletedCount} 条记录`);
 
 // 使用加密选项删除
-const deletedCount = await remove('sensitive_data', { id: 1 }, {
+const deletedCount = await remove('sensitive_data', {
+  where: { id: 1 },
   encrypted: true,
   requireAuthOnAccess: false
 });
+console.log(`删除了 ${deletedCount} 条记录`);
 ```
 
 ##### bulkWrite
@@ -719,81 +733,7 @@ try {
 await rollback({ encrypted: true, requireAuthOnAccess: false });
 ```
 
-#### 自动同步 API
 
-##### getSyncStats
-
-**功能**：获取自动同步统计信息
-
-**签名**：
-```typescript
-getSyncStats(): Promise<{
-  syncCount: number;
-  totalItemsSynced: number;
-  lastSyncTime: number;
-  avgSyncTime: number;
-}>
-```
-
-**返回值**：
-- 同步统计信息对象
-  - `syncCount`: 总同步次数
-  - `totalItemsSynced`: 总同步项数
-  - `lastSyncTime`: 上次同步时间
-  - `avgSyncTime`: 平均同步耗时
-
-**示例**：
-```typescript
-const stats = await getSyncStats();
-console.log('同步统计:', stats);
-```
-
-##### syncNow
-
-**功能**：立即触发一次同步
-
-**签名**：
-```typescript
-syncNow(): Promise<void>
-```
-
-**示例**：
-```typescript
-// 手动触发同步
-await syncNow();
-```
-
-##### setAutoSyncConfig
-
-**功能**：设置自动同步配置
-
-**签名**：
-```typescript
-setAutoSyncConfig(config: Partial<{
-  enabled: boolean;
-  interval: number;
-  minItems: number;
-  batchSize: number;
-}>): Promise<void>
-```
-
-**参数**：
-- `config`: 同步配置
-  - `enabled`: 是否启用自动同步
-  - `interval`: 同步间隔（毫秒）
-  - `minItems`: 触发同步的最小脏项数量
-  - `batchSize`: 每次同步的最大项数
-
-**示例**：
-```typescript
-// 设置自动同步配置
-await setAutoSyncConfig({
-  enabled: true,
-  interval: 10000, // 10秒同步一次
-  minItems: 5, // 至少5个脏项才同步
-  batchSize: 200 // 每次最多同步200个项目
-});
-```
 
 ### 接口定义
 
@@ -889,24 +829,18 @@ const complexQuery = await findMany('orders', {
 
 ```typescript
 // 单字段排序
-const usersByAge = await findMany(
-  'users',
-  {},
-  {
-    sortBy: 'age',
-    order: 'asc', // 'asc' | 'desc'
-  }
-);
+const usersByAge = await findMany('users', {
+  where: {},
+  sortBy: 'age',
+  order: 'asc', // 'asc' | 'desc'
+});
 
 // 多字段排序（稳定排序）
-const usersSorted = await findMany(
-  'users',
-  {},
-  {
-    sortBy: ['department', 'name', 'age'],
-    order: ['asc', 'asc', 'desc'],
-  }
-);
+const usersSorted = await findMany('users', {
+  where: {},
+  sortBy: ['department', 'name', 'age'],
+  order: ['asc', 'asc', 'desc'],
+});
 ```
 
 ### 排序算法选择
@@ -950,20 +884,15 @@ const largeDataset = await findMany(
 
 ```typescript
 // 完整查询示例
-const paginatedResults = await findMany(
-  'products',
-  // 过滤条件
-  {
+const paginatedResults = await findMany('products', {
+  where: {
     $and: [{ price: { $gte: 50, $lte: 500 } }, { category: { $in: ['electronics', 'books'] } }, { inStock: true }],
   },
-  // 查询选项
-  {
-    sortBy: ['rating', 'price', 'name'],
-    order: ['desc', 'asc', 'asc'],
-    skip: 20, // 跳过前20条
-    limit: 10, // 返回10条
-  }
-);
+  sortBy: ['rating', 'price', 'name'],
+  order: ['desc', 'asc', 'asc'],
+  skip: 20, // 跳过前20条
+  limit: 10, // 返回10条
+});
 ```
 
 ## 🎯 事务管理
@@ -1019,46 +948,7 @@ async function transferMoney(fromUserId: number, toUserId: number, amount: numbe
 4. **批量操作**：在事务中使用批量操作减少磁盘 I/O
 5. **测试回滚**：确保回滚机制正常工作
 
-## 🎯 自动同步机制
 
-### 配置自动同步
-
-```typescript
-import { setAutoSyncConfig, getSyncStats, syncNow } from 'expo-lite-data-store';
-
-// 获取当前同步统计信息
-const stats = await getSyncStats();
-console.log('同步统计:', stats);
-
-// 立即触发同步
-await syncNow();
-
-// 自定义自动同步配置
-setAutoSyncConfig({
-  enabled: true, // 启用自动同步
-  interval: 10000, // 10秒同步一次
-  minItems: 5, // 至少5个脏项才同步
-  batchSize: 200, // 每次最多同步200个项目
-});
-```
-
-### 同步配置参数
-
-| 参数名      | 类型    | 默认值 | 描述             |
-| ----------- | ------- | ------ | ---------------- |
-| `enabled`   | boolean | `true` | 是否启用自动同步 |
-| `interval`  | number  | `5000` | 同步间隔（毫秒） |
-| `minItems`  | number  | `1`    | 最小同步项数量   |
-| `batchSize` | number  | `100`  | 批量大小限制     |
-
-### 同步统计信息
-
-| 字段名             | 类型   | 描述                 |
-| ------------------ | ------ | -------------------- |
-| `syncCount`        | number | 总同步次数           |
-| `totalItemsSynced` | number | 总同步项数           |
-| `lastSyncTime`     | number | 上次同步时间         |
-| `avgSyncTime`      | number | 平均同步耗时（毫秒） |
 
 ## 🎯 性能优化
 
@@ -1195,7 +1085,7 @@ await insert('users', { id: 1, name: '张三' }, {
 
 **加密优先级说明**：
 - 当明确设置 `encryptFullTable: true` 参数时，使用整表加密
-- 否则，默认使用字段级加密（根据配置文件中的 `enableFieldLevelEncryption` 和 `encryptedFields` 设置）
+- 否则，默认使用字段级加密（根据配置文件中的 `encryptedFields` 设置，当 `encryptedFields` 数组不为空时自动启用字段级加密）
 - 整表加密和字段级加密**不能同时使用**，系统会自动检测冲突并抛出明确的错误信息
 
 ### 加密参数说明
@@ -1205,8 +1095,7 @@ await insert('users', { id: 1, name: '张三' }, {
 | `encrypted`          | boolean | false  | 是否启用数据加密                                                     |
 | `requireAuthOnAccess`| boolean | false  | 是否在每次访问数据时都要求生物识别认证（仅在 `encrypted` 为 true 时生效） |
 | `encryptFullTable`   | boolean | false  | 是否启用整表加密（仅在 `encrypted` 为 true 时生效，与字段级加密互斥） |
-| `enableFieldLevelEncryption` | boolean | false | 是否启用字段级加密（仅在 `encrypted` 为 true 时生效，与整表加密互斥） |
-| `encryptedFields` | string[] | [] | 需要加密的字段列表（仅在 `enableFieldLevelEncryption` 为 true 时生效） |
+| `encryptedFields` | string[] | [] | 需要加密的字段列表（当数组不为空时自动启用字段级加密，仅在 `encrypted` 为 true 时生效，与整表加密互斥） |
 
 ### 密钥管理
 
@@ -1288,11 +1177,6 @@ A: 运行 `npm run build:all` 来构建完整的TypeScript和JavaScript版本。
 A: 配置文件直接从打包文件加载，修改后需要重新启动应用才能生效。
 </details>
 
-<details>
-<summary>Q: 如何禁用自动同步？</summary>
-
-A: 在配置文件中设置 `cache.autoSync.enabled: false`，或使用 `setAutoSyncConfig({ enabled: false })` API。
-</details>
 
 <details>
 <summary>Q: 加密功能如何使用？</summary>

@@ -1,7 +1,7 @@
 // src/core/cache/CacheManager.ts
 // 缓存管理器，支持LRU/LFU策略、缓存压缩和多种缓存防护机制
 // 创建于: 2025-11-28
-// 最后修改: 2025-12-11
+// 最后修改: 2025-12-13
 
 import { CACHE } from '../constants';
 import config from '../../liteStore.config';

@@ -2,6 +2,7 @@
 // CacheManager 单元测试
 
 import { CacheManager, CacheStrategy } from '../CacheManager';
+import logger from '../../../utils/logger';
 
 // 全局数组，用于跟踪需要清理的临时CacheManager实例
 const tempCacheManagers: CacheManager[] = [];
@@ -24,12 +25,12 @@ describe('CacheManager', () => {
   afterEach(done => {
     // 清理主CacheManager实例
     if (cacheManager) {
-      console.log('[CacheManager.test] afterEach: 清理 CacheManager');
+      logger.info('[CacheManager.test] afterEach: 清理 CacheManager');
       cacheManager.cleanup();
     }
 
     // 清理所有临时CacheManager实例
-    console.log(`[CacheManager.test] afterEach: 清理 ${tempCacheManagers.length} 个临时CacheManager实例`);
+    logger.info(`[CacheManager.test] afterEach: 清理 ${tempCacheManagers.length} 个临时CacheManager实例`);
     tempCacheManagers.forEach(tempCache => {
       tempCache.cleanup();
     });
@@ -37,7 +38,7 @@ describe('CacheManager', () => {
 
     // 使用 process.nextTick 而不是 setTimeout，避免阻塞
     process.nextTick(() => {
-      console.log('[CacheManager.test] afterEach: 清理完成');
+      logger.info('[CacheManager.test] afterEach: 清理完成');
       done();
     });
   });

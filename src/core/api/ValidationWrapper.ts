@@ -3,7 +3,7 @@
 // 创建于: 2025-12-03
 // 最后修改: 2025-12-11
 
-import { StorageError } from '../../types/storageErrorInfc.js';
+import { StorageError } from '../../types/storageErrorInfc';
 import { FILE_OPERATION, REGEX } from '../constants';
 
 /**

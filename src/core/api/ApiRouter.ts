@@ -29,8 +29,8 @@ export class ApiRouter {
       supportedVersions?: string[];
     } = {}
   ) {
-    this.supportedVersions = options.supportedVersions || ['1.0.0'];
-    this.defaultVersion = options.defaultVersion || '1.0.0';
+    this.supportedVersions = options.supportedVersions || ['1.0.0', '2.0.0'];
+    this.defaultVersion = options.defaultVersion || '2.0.0';
   }
 
   /**

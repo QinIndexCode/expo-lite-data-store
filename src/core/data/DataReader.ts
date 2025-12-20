@@ -60,6 +60,39 @@ export class DataReader {
   }
 
   /**
+   * 生成稳定的缓存键，确保相同的查询选项生成相同的键，无论属性顺序如何
+   * @param options 查询选项
+   * @returns 稳定的缓存键字符串
+   */
+  private generateCacheKey(options?: ReadOptions & { bypassCache?: boolean }): string {
+    if (!options) {
+      return '{}';
+    }
+
+    // 将选项转换为普通对象，避免TypeScript类型检查问题
+    const plainOptions = options as Record<string, any>;
+    
+    // 将选项转换为稳定的JSON字符串，通过排序键来确保顺序一致
+    const sortedOptions = Object.keys(plainOptions).sort().reduce((result: any, key) => {
+      const value = plainOptions[key];
+      // 递归处理嵌套对象
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        // 处理嵌套对象
+        const nestedPlainObj = value as Record<string, any>;
+        result[key] = Object.keys(nestedPlainObj).sort().reduce((nestedResult: any, nestedKey) => {
+          nestedResult[nestedKey] = nestedPlainObj[nestedKey];
+          return nestedResult;
+        }, {});
+      } else {
+        result[key] = value;
+      }
+      return result;
+    }, {});
+
+    return JSON.stringify(sortedOptions);
+  }
+
+  /**
    * 读取表数据
    * @param tableName 表名
    * @param options 读取选项
@@ -85,8 +118,8 @@ export class DataReader {
 
         // 如果不需要绕过缓存，尝试从缓存中获取数据
         if (!shouldBypassCache) {
-          // 生成缓存键
-          const cacheKey = `${tableName}_${JSON.stringify(options)}`;
+          // 生成缓存键：确保相同的查询选项生成相同的键，无论顺序如何
+          const cacheKey = `${tableName}_${this.generateCacheKey(options)}`;
 
           // 尝试从缓存中获取数据
           const cachedData = this.cacheManager.get(cacheKey);
@@ -156,8 +189,8 @@ export class DataReader {
 
         // 只有非高危数据才存入缓存
         if (!shouldBypassCache) {
-          // 生成缓存键
-          const cacheKey = `${tableName}_${JSON.stringify(options)}`;
+          // 生成缓存键：使用与获取缓存时相同的方法，确保一致性
+          const cacheKey = `${tableName}_${this.generateCacheKey(options)}`;
 
           // 将结果存入缓存
           this.cacheManager.set(cacheKey, data);

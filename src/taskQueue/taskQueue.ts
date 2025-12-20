@@ -3,6 +3,7 @@
 //
 
 //
+import logger from '../utils/logger';
 /**
 //  * 任务优先级枚举
  */
@@ -217,7 +218,7 @@ export class TaskQueue {
     while (this.runningTasks.size > 0) {
       // 检查是否超时
       if (Date.now() - startTime > timeout) {
-        console.warn(`TaskQueue stop timed out after ${timeout}ms, forcing stop`);
+        logger.warn(`TaskQueue stop timed out after ${timeout}ms, forcing stop`);
         this.runningTasks.clear();
         return;
       }
@@ -447,7 +448,7 @@ export class TaskQueue {
         try {
           callback(task);
         } catch (callbackError) {
-          console.error(`Error in task callback:`, callbackError);
+          logger.error(`Error in task callback:`, callbackError);
         }
       });
       this.taskCallbacks.delete(task.id);
@@ -492,7 +493,7 @@ export class TaskQueue {
           try {
             callback(task);
           } catch (callbackError) {
-            console.error(`Error in task callback:`, callbackError);
+            logger.error(`Error in task callback:`, callbackError);
           }
         });
         this.taskCallbacks.delete(taskId);
@@ -525,7 +526,7 @@ export class TaskQueue {
           try {
             callback(task);
           } catch (callbackError) {
-            console.error(`Error in task callback:`, callbackError);
+            logger.error(`Error in task callback:`, callbackError);
           }
         });
         this.taskCallbacks.delete(task.id);

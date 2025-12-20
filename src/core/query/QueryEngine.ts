@@ -1,7 +1,7 @@
 // src/core/query/QueryEngine.ts
 // 查询引擎，支持数据过滤、排序、分页和聚合操作
 // 创建于: 2025-11-28
-// 最后修改: 2025-12-11
+// 最后修改: 2025-12-12
 
 import type { FilterCondition } from '../../types/storageTypes';
 import {
@@ -11,7 +11,9 @@ import {
   sortByColumnMerge,
   sortByColumnSlow,
 } from '../../utils/sortingTools';
+import { processUpdateOperators } from '../../utils/specialOperators';
 import { QUERY } from '../constants';
+import logger from '../../utils/logger';
 
 /**
  * 查询引擎类
@@ -28,6 +30,11 @@ export class QueryEngine {
     // 函数条件
     if (typeof condition === 'function') {
       return data.filter(condition as (value: T, index: number, array: T[]) => unknown);
+    }
+
+    // 检查condition是否为对象，如果不是，返回空数组
+    if (typeof condition !== 'object' || condition === null) {
+      return [];
     }
 
     // 复合 AND 条件
@@ -104,17 +111,19 @@ export class QueryEngine {
                 if (!Array.isArray(opValue)) {
                   matches = false;
                 } else {
+                  // 使用Set优化性能
+                  const opValueSet = new Set(opValue);
                   // 处理null和undefined的特殊情况
                   if (itemValue === null || itemValue === undefined) {
-                    if (!opValue.includes(itemValue)) {
+                    if (!opValueSet.has(itemValue)) {
                       matches = false;
                     }
                   } else if (Array.isArray(itemValue)) {
-                    if (!itemValue.some(item => opValue.includes(item))) {
+                    if (!itemValue.some(item => opValueSet.has(item))) {
                       matches = false;
                     }
                   } else {
-                    if (!opValue.includes(itemValue)) {
+                    if (!opValueSet.has(itemValue)) {
                       matches = false;
                     }
                   }
@@ -124,17 +133,19 @@ export class QueryEngine {
                 if (!Array.isArray(opValue)) {
                   matches = false;
                 } else {
+                  // 使用Set优化性能
+                  const opValueSet = new Set(opValue);
                   // 处理null和undefined的特殊情况
                   if (itemValue === null || itemValue === undefined) {
-                    if (opValue.includes(itemValue)) {
+                    if (opValueSet.has(itemValue)) {
                       matches = false;
                     }
                   } else if (Array.isArray(itemValue)) {
-                    if (itemValue.some(item => opValue.includes(item))) {
+                    if (itemValue.some(item => opValueSet.has(item))) {
                       matches = false;
                     }
                   } else {
-                    if (opValue.includes(itemValue)) {
+                    if (opValueSet.has(itemValue)) {
                       matches = false;
                     }
                   }
@@ -165,7 +176,15 @@ export class QueryEngine {
             if (itemValue !== value) {
               matches = false;
             }
-          } else if (itemValue !== value) {
+          } 
+          // 处理数组比较，使用JSON.stringify比较内容
+          else if (Array.isArray(itemValue) && Array.isArray(value)) {
+            if (JSON.stringify(itemValue) !== JSON.stringify(value)) {
+              matches = false;
+            }
+          }
+          // 普通值比较
+          else if (itemValue !== value) {
             matches = false;
           }
         }
@@ -178,11 +197,52 @@ export class QueryEngine {
   }
 
   /**
+   * 处理更新操作符，如 $inc
+   */
+  static update<T extends Record<string, any>>(originalData: T, updateData: Record<string, any>): T {
+    // 使用集中化的更新操作符处理函数
+    return processUpdateOperators(originalData, updateData);
+  }
+
+  /**
+   * 批量更新数据，支持更新操作符
+   * 调整参数顺序：必需参数在前，可选参数在后
+   */
+  static bulkUpdate<T extends Record<string, any>>(data: T[], updateData: Record<string, any>, condition?: FilterCondition): T[] {
+    if (!updateData || Object.keys(updateData).length === 0) {
+      return data;
+    }
+    
+    const filteredData = condition ? this.filter(data, condition) : data;
+    const updatedDataMap = new Map<string | number, T>();
+    
+    // 收集需要更新的数据的映射
+    for (const item of filteredData) {
+      updatedDataMap.set(item.id || item._id, item);
+    }
+    
+    // 更新数据
+    return data.map(item => {
+      const id = item.id || item._id;
+      if (updatedDataMap.has(id)) {
+        return this.update(item, updateData);
+      }
+      return item;
+    });
+  }
+
+  /**
    * 分页处理，优化切片操作
    */
   static paginate<T>(data: T[], skip = 0, limit?: number): T[] {
     // 优化：如果skip大于等于数据长度，直接返回空数组
     if (skip >= data.length) {
+      return [];
+    }
+
+    // 优化：当limit为0时，返回空数组
+    if (limit === 0) {
+      logger.warn('Warning: limit=0 was passed to paginate, returning empty array as per convention');
       return [];
     }
 

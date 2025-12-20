@@ -112,7 +112,6 @@ describe('ConfigValidator', () => {
     (config as any).sortMethods = 456;
     (config as any).timeout = 'invalid';
     (config as any).encryption.keyIterations = 'invalid';
-    (config as any).encryption.enableFieldLevelEncryption = 'invalid';
     (config as any).encryption.encryptedFields = 'invalid';
     (config as any).cache.maxSize = 'invalid';
     (config as any).performance.maxConcurrentOperations = 'invalid';
@@ -130,7 +129,6 @@ describe('ConfigValidator', () => {
     expect(result.errors).toContain('chunkSize must be a number');
     expect(result.errors).toContain('storageFolder must be a string');
     expect(result.errors).toContain('encryption.keyIterations must be a number');
-    expect(result.errors).toContain('encryption.enableFieldLevelEncryption must be a boolean');
   });
 
   test('should auto fix invalid configuration', () => {
@@ -158,8 +156,6 @@ describe('ConfigValidator', () => {
 
     expect(typeof fixedConfig.encryption.hmacAlgorithm).toBe('string');
     expect(['SHA-256', 'SHA-512']).toContain(fixedConfig.encryption.hmacAlgorithm);
-
-    expect(typeof fixedConfig.encryption.enableFieldLevelEncryption).toBe('boolean');
 
     expect(Array.isArray(fixedConfig.encryption.encryptedFields)).toBe(true);
 

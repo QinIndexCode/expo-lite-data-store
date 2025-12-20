@@ -72,3 +72,6 @@ test-*.*
 !package.json
 
 updatelog.md
+
+# 测试脚本目录
+test-scripts/

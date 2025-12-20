@@ -1,10 +1,11 @@
 // src/core/crypto/KeyManager.ts
-// 密钥管理系统，用于安全存储和管理加密密钥
-// 创建于: 2025-11-28
-// 最后修改: 2025-12-11
+// Key management system for securely storing and managing encryption keys
+// Created: 2025-11-28
+// Last Modified: 2025-12-11
 
 import * as SecureStore from 'expo-secure-store';
 import { generateMasterKey } from '../../utils/crypto.js';
+import logger from '../../utils/logger';
 
 /**
  * 密钥管理器配置选项
@@ -123,7 +124,7 @@ export class KeyManager {
       // 保存密钥内容
       await SecureStore.setItemAsync(this.getKeyStorageKey(keyId), key, {
         requireAuthentication: this.requireAuthOnAccess,
-        authenticationPrompt: '验证身份访问密钥',
+        authenticationPrompt: 'Authenticate to access key',
       });
 
       // 保存密钥元数据
@@ -138,7 +139,7 @@ export class KeyManager {
 
       return true;
     } catch (error) {
-      console.error('Failed to save key:', error);
+      logger.error('Failed to save key:', error);
       return false;
     }
   }
@@ -152,11 +153,11 @@ export class KeyManager {
     try {
       const result = await SecureStore.getItemAsync(this.getKeyStorageKey(keyId), {
         requireAuthentication: this.requireAuthOnAccess,
-        authenticationPrompt: '验证身份访问密钥',
+        authenticationPrompt: 'Authenticate to access key',
       });
       return result || undefined;
     } catch (error) {
-      console.error('Failed to get key:', error);
+      logger.error('Failed to get key:', error);
       return undefined;
     }
   }
@@ -176,7 +177,7 @@ export class KeyManager {
 
       return true;
     } catch (error) {
-      console.error('Failed to delete key:', error);
+      logger.error('Failed to delete key:', error);
       return false;
     }
   }
@@ -191,7 +192,7 @@ export class KeyManager {
       const key = await this.getKey(keyId);
       return key !== undefined;
     } catch (error) {
-      console.error('Failed to check key existence:', error);
+      logger.error('Failed to check key existence:', error);
       return false;
     }
   }
@@ -206,7 +207,7 @@ export class KeyManager {
       allMetadata[metadata.id] = metadata;
       await SecureStore.setItemAsync(this.METADATA_KEY, JSON.stringify(allMetadata));
     } catch (error) {
-      console.error('Failed to save key metadata:', error);
+      logger.error('Failed to save key metadata:', error);
       throw error;
     }
   }
@@ -220,7 +221,7 @@ export class KeyManager {
       const metadataStr = await SecureStore.getItemAsync(this.METADATA_KEY);
       return metadataStr ? JSON.parse(metadataStr) : {};
     } catch (error) {
-      console.error('Failed to get all key metadata:', error);
+      logger.error('Failed to get all key metadata:', error);
       return {};
     }
   }
@@ -235,7 +236,7 @@ export class KeyManager {
       const allMetadata = await this.getAllKeyMetadata();
       return allMetadata[keyId];
     } catch (error) {
-      console.error('Failed to get key metadata:', error);
+      logger.error('Failed to get key metadata:', error);
       return undefined;
     }
   }
@@ -250,7 +251,7 @@ export class KeyManager {
       delete allMetadata[keyId];
       await SecureStore.setItemAsync(this.METADATA_KEY, JSON.stringify(allMetadata));
     } catch (error) {
-      console.error('Failed to delete key metadata:', error);
+      logger.error('Failed to delete key metadata:', error);
       throw error;
     }
   }
@@ -275,7 +276,7 @@ export class KeyManager {
 
       return masterKey;
     } catch (error) {
-      console.error('Failed to generate and save master key:', error);
+      logger.error('Failed to generate and save master key:', error);
       throw error;
     }
   }
@@ -296,7 +297,7 @@ export class KeyManager {
       // 生成新的主密钥
       return await this.generateAndSaveMasterKey(keyId);
     } catch (error) {
-      console.error('Failed to get or generate master key:', error);
+      logger.error('Failed to get or generate master key:', error);
       throw error;
     }
   }
@@ -319,7 +320,7 @@ export class KeyManager {
       // 更新密钥内容
       await SecureStore.setItemAsync(this.getKeyStorageKey(keyId), newKey, {
         requireAuthentication: this.requireAuthOnAccess,
-        authenticationPrompt: '验证身份更新密钥',
+        authenticationPrompt: 'Authenticate to update key',
       });
 
       // 更新密钥元数据
@@ -332,7 +333,7 @@ export class KeyManager {
 
       return true;
     } catch (error) {
-      console.error('Failed to rotate key:', error);
+      logger.error('Failed to rotate key:', error);
       return false;
     }
   }
@@ -346,7 +347,7 @@ export class KeyManager {
       const allMetadata = await this.getAllKeyMetadata();
       return Object.values(allMetadata);
     } catch (error) {
-      console.error('Failed to list keys:', error);
+      logger.error('Failed to list keys:', error);
       return [];
     }
   }
@@ -369,7 +370,7 @@ export class KeyManager {
 
       return true;
     } catch (error) {
-      console.error('Failed to clear all keys:', error);
+      logger.error('Failed to clear all keys:', error);
       return false;
     }
   }
@@ -399,7 +400,7 @@ export class KeyManager {
 
       return undefined;
     } catch (error) {
-      console.error('Failed to export key:', error);
+      logger.error('Failed to export key:', error);
       return undefined;
     }
   }
@@ -414,7 +415,7 @@ export class KeyManager {
       // 保存密钥内容
       await SecureStore.setItemAsync(this.getKeyStorageKey(keyData.metadata.id), keyData.key, {
         requireAuthentication: this.requireAuthOnAccess,
-        authenticationPrompt: '验证身份导入密钥',
+        authenticationPrompt: 'Authenticate to import key',
       });
 
       // 保存密钥元数据
@@ -422,7 +423,7 @@ export class KeyManager {
 
       return true;
     } catch (error) {
-      console.error('Failed to import key:', error);
+      logger.error('Failed to import key:', error);
       return false;
     }
   }

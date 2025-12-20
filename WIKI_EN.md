@@ -31,7 +31,7 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 | `keySize`                    | `number`   | `256`                       | Encryption key length, supports `128`, `192`, `256`                                           |
 | `hmacAlgorithm`              | `string`   | `'SHA-512'`                 | HMAC integrity protection algorithm                                                           |
 | `keyIterations`              | `number`   | `120000`                    | Key derivation iteration count, higher values provide stronger security but lower performance |
-| `enableFieldLevelEncryption` | `boolean`  | `false`                     | Whether to enable field-level encryption                                                      |
+
 | `encryptedFields`            | `string[]` | Common sensitive field list | List of fields to be encrypted by default                                                     |
 | `cacheTimeout`               | `number`   | `30000` (30 seconds)        | Cache timeout for masterKey in memory                                                         |
 | `maxCacheSize`               | `number`   | `50`                        | Maximum number of derived keys to retain in LRU cache                                         |
@@ -40,7 +40,7 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 **Important Notes**: 
 - Full table encryption and field-level encryption **cannot be used simultaneously**. The system will automatically detect conflicts and throw a clear error message.
 - Full table encryption mode is enabled through the `encryptFullTable` parameter when calling the API.
-- Field-level encryption is enabled through the `enableFieldLevelEncryption` and `encryptedFields` configuration in the configuration file.
+- Field-level encryption is enabled through the `encryptedFields` configuration in the configuration file. Field-level encryption is automatically enabled when the `encryptedFields` array is not empty.
 - In non-encrypted mode, data is stored in plain text, no encryption algorithm is used, and no biometric or password authentication is triggered.
 
 ### Performance Configuration
@@ -105,7 +105,7 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
      encryption: {
        keyIterations: 200000, // Increase key derivation iterations
        cacheTimeout: 15000, // Reduce key cache time
-       enableFieldLevelEncryption: true,
+
      },
    };
    ```
@@ -144,10 +144,6 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 | **Transactions**| `beginTransaction` | Start new transaction                              |
 |                | `commit`           | Commit current transaction                         |
 |                | `rollback`         | Rollback current transaction                       |
-| **Sync Mgmt**  | `getSyncStats`     | Get sync statistics                                |
-|                | `syncNow`          | Trigger sync immediately                           |
-|                | `setAutoSyncConfig`| Customize auto-sync configuration                  |
-| **Cache Mgmt** | `clearKeyCache`    | Clear key cache                                    |
 
 ### Detailed API Documentation
 
@@ -163,14 +159,13 @@ createTable(tableName: string, options?: CreateTableOptions): Promise<void>
 ```
 
 **Parameters**:
-- `options`: Optional configuration
-  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
-  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 - `tableName`: Table name, must be unique
 - `options`: Optional configuration
   - `columns`: Column definitions (optional)
   - `initialData`: Initial data (optional)
   - `mode`: Storage mode, `'single'` or `'chunked'` (optional)
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Examples**:
 ```typescript
@@ -201,10 +196,7 @@ deleteTable(tableName: string, options?: TableOptions): Promise<void>
 ```
 
 **Parameters**:
-- `tableName`: Table name
-- `options`: Optional configuration
-  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
-  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional) to delete
+- `tableName`: Table name to delete
 - `options`: Optional configuration
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
   - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
@@ -382,13 +374,13 @@ const paginatedUsers = await read('users', {
 
 **Signature**:
 ```typescript
-findOne(tableName: string, filter: FilterCondition, options?: TableOptions): Promise<Record<string, any> | null>
+findOne(tableName: string, { where, encrypted?, requireAuthOnAccess? }: { where: FilterCondition, encrypted?: boolean, requireAuthOnAccess?: boolean }): Promise<Record<string, any> | null>
 ```
 
 **Parameters**:
 - `tableName`: Table name
-- `filter`: Query condition
-- `options`: Optional configuration
+- `options`: Options object
+  - `where`: Query condition
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
   - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
@@ -398,15 +390,16 @@ findOne(tableName: string, filter: FilterCondition, options?: TableOptions): Pro
 **Examples**:
 ```typescript
 // Query by ID
-const user = await findOne('users', { id: 1 });
+const user = await findOne('users', { where: { id: 1 } });
 
 // Query by condition
 const activeUser = await findOne('users', {
-  $and: [{ status: 'active' }, { age: { $gte: 18 } }]
+  where: { $and: [{ status: 'active' }, { age: { $gte: 18 } }] }
 });
 
 // Query with encryption options
-const encryptedUser = await findOne('sensitive_data', { id: 1 }, {
+const encryptedUser = await findOne('sensitive_data', {
+  where: { id: 1 },
   encrypted: true,
   requireAuthOnAccess: false
 });
@@ -418,13 +411,22 @@ const encryptedUser = await findOne('sensitive_data', { id: 1 }, {
 
 **Signature**:
 ```typescript
-findMany(tableName: string, filter?: FilterCondition, options?: FindOptions): Promise<Record<string, any>[]>
+findMany(tableName: string, { where?, skip?, limit?, sortBy?, order?, sortAlgorithm?, encrypted?, requireAuthOnAccess? }: {
+  where?: FilterCondition,
+  skip?: number,
+  limit?: number,
+  sortBy?: string | string[],
+  order?: 'asc' | 'desc' | ('asc' | 'desc')[],
+  sortAlgorithm?: 'quick' | 'merge' | 'slow' | 'default' | 'radix',
+  encrypted?: boolean,
+  requireAuthOnAccess?: boolean
+}): Promise<Record<string, any>[]>
 ```
 
 **Parameters**:
 - `tableName`: Table name
-- `filter`: Query condition
-- `options`: Query options
+- `options`: Options object
+  - `where`: Query condition
   - `skip`: Number of records to skip
   - `limit`: Maximum number of records to return
   - `sortBy`: Sort field or array of fields
@@ -439,22 +441,25 @@ findMany(tableName: string, filter?: FilterCondition, options?: FindOptions): Pr
 **Examples**:
 ```typescript
 // Basic query
-const users = await findMany('users', { age: { $gte: 18 } });
+const users = await findMany('users', { where: { age: { $gte: 18 } } });
 
 // Multi-field sorting
-const sortedUsers = await findMany('users', {}, {
+const sortedUsers = await findMany('users', {
+  where: {},
   sortBy: ['department', 'name', 'age'],
   order: ['asc', 'asc', 'desc']
 });
 
 // Using specific sorting algorithm
-const chineseSortedUsers = await findMany('users', {}, {
+const chineseSortedUsers = await findMany('users', {
+  where: {},
   sortBy: 'name',
   sortAlgorithm: 'slow' // Supports Chinese sorting
 });
 
 // Query with encryption options
-const encryptedUsers = await findMany('sensitive_data', { status: 'active' }, {
+const encryptedUsers = await findMany('sensitive_data', {
+  where: { status: 'active' },
   encrypted: true,
   requireAuthOnAccess: false,
   sortBy: 'created_at',
@@ -468,14 +473,14 @@ const encryptedUsers = await findMany('sensitive_data', { status: 'active' }, {
 
 **Signature**:
 ```typescript
-update(tableName: string, data: Record<string, any>, where: FilterCondition, options?: TableOptions): Promise<number>
+update(tableName: string, data: Record<string, any>, { where, encrypted?, requireAuthOnAccess? }: { where: FilterCondition, encrypted?: boolean, requireAuthOnAccess?: boolean }): Promise<number>
 ```
 
 **Parameters**:
 - `tableName`: Table name
 - `data`: Data to update
-- `where`: Update condition
-- `options`: Optional configuration
+- `options`: Options object
+  - `where`: Update condition
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
   - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
@@ -485,21 +490,22 @@ update(tableName: string, data: Record<string, any>, where: FilterCondition, opt
 **Examples**:
 ```typescript
 // Update single record
-const updatedCount = await update('users', { age: 26 }, { id: 1 });
+const updatedCount = await update('users', { age: 26 }, { where: { id: 1 } });
+console.log(`Updated ${updatedCount} records`);
 
 // Update multiple records
 const updatedCount = await update('users', { status: 'inactive' }, {
-  lastLogin: { $lt: '2024-01-01' }
+  where: { lastLogin: { $lt: '2024-01-01' } }
 });
-
-// Update with operator
-const updatedCount = await update('users', { balance: { $inc: 100 } }, { id: 1 });
+console.log(`Updated ${updatedCount} records`);
 
 // Update with encryption options
-const updatedCount = await update('sensitive_data', { status: 'active' }, { id: 1 }, {
+const updatedCount = await update('sensitive_data', { status: 'active' }, {
+  where: { id: 1 },
   encrypted: true,
   requireAuthOnAccess: false
 });
+console.log(`Updated ${updatedCount} records`);
 ```
 
 ##### remove
@@ -508,13 +514,13 @@ const updatedCount = await update('sensitive_data', { status: 'active' }, { id: 
 
 **Signature**:
 ```typescript
-remove(tableName: string, where: FilterCondition, options?: TableOptions): Promise<number>
+remove(tableName: string, { where, encrypted?, requireAuthOnAccess? }: { where: FilterCondition, encrypted?: boolean, requireAuthOnAccess?: boolean }): Promise<number>
 ```
 
 **Parameters**:
 - `tableName`: Table name
-- `where`: Delete condition
-- `options`: Optional configuration
+- `options`: Options object
+  - `where`: Delete condition
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
   - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
@@ -524,18 +530,22 @@ remove(tableName: string, where: FilterCondition, options?: TableOptions): Promi
 **Examples**:
 ```typescript
 // Delete single record
-const deletedCount = await remove('users', { id: 1 });
+const deletedCount = await remove('users', { where: { id: 1 } });
+console.log(`Deleted ${deletedCount} records`);
 
 // Delete multiple records
 const deletedCount = await remove('users', {
-  status: 'inactive'
+  where: { status: 'inactive' }
 });
+console.log(`Deleted ${deletedCount} records`);
 
 // Delete with encryption options
-const deletedCount = await remove('sensitive_data', { id: 1 }, {
+const deletedCount = await remove('sensitive_data', {
+  where: { id: 1 },
   encrypted: true,
   requireAuthOnAccess: false
 });
+console.log(`Deleted ${deletedCount} records`);
 ```
 
 ##### bulkWrite
@@ -673,81 +683,7 @@ try {
 await rollback({ encrypted: true, requireAuthOnAccess: false });
 ```
 
-#### Auto-sync APIs
 
-##### getSyncStats
-
-**Functionality**: Get auto-sync statistics
-
-**Signature**:
-```typescript
-getSyncStats(): Promise<{
-  syncCount: number;
-  totalItemsSynced: number;
-  lastSyncTime: number;
-  avgSyncTime: number;
-}>
-```
-
-**Returns**:
-- Sync statistics object
-  - `syncCount`: Total sync count
-  - `totalItemsSynced`: Total items synced
-  - `lastSyncTime`: Last sync time
-  - `avgSyncTime`: Average sync time (milliseconds)
-
-**Example**:
-```typescript
-const stats = await getSyncStats();
-console.log('Sync statistics:', stats);
-```
-
-##### syncNow
-
-**Functionality**: Trigger sync immediately
-
-**Signature**:
-```typescript
-syncNow(): Promise<void>
-```
-
-**Example**:
-```typescript
-// Manually trigger sync
-await syncNow();
-```
-
-##### setAutoSyncConfig
-
-**Functionality**: Set auto-sync configuration
-
-**Signature**:
-```typescript
-setAutoSyncConfig(config: Partial<{
-  enabled: boolean;
-  interval: number;
-  minItems: number;
-  batchSize: number;
-}>): Promise<void>
-```
-
-**Parameters**:
-- `config`: Sync configuration
-  - `enabled`: Whether to enable auto-sync
-  - `interval`: Sync interval (milliseconds)
-  - `minItems`: Minimum number of dirty items to trigger sync
-  - `batchSize`: Maximum number of items per sync
-
-**Example**:
-```typescript
-// Set auto-sync configuration
-await setAutoSyncConfig({
-  enabled: true,
-  interval: 10000, // Sync every 10 seconds
-  minItems: 5, // Sync at least 5 dirty items
-  batchSize: 200 // Max 200 items per sync
-});
-```
 
 ### Interface Definitions
 
@@ -843,24 +779,18 @@ const complexQuery = await findMany('orders', {
 
 ```typescript
 // Single field sorting
-const usersByAge = await findMany(
-  'users',
-  {},
-  {
-    sortBy: 'age',
-    order: 'asc', // 'asc' | 'desc'
-  }
-);
+const usersByAge = await findMany('users', {
+  where: {},
+  sortBy: 'age',
+  order: 'asc', // 'asc' | 'desc'
+});
 
 // Multi-field sorting (stable sort)
-const usersSorted = await findMany(
-  'users',
-  {},
-  {
-    sortBy: ['department', 'name', 'age'],
-    order: ['asc', 'asc', 'desc'],
-  }
-);
+const usersSorted = await findMany('users', {
+  where: {},
+  sortBy: ['department', 'name', 'age'],
+  order: ['asc', 'asc', 'desc'],
+});
 ```
 
 ### Sorting Algorithm Selection
@@ -904,20 +834,15 @@ const largeDataset = await findMany(
 
 ```typescript
 // Complete query example
-const paginatedResults = await findMany(
-  'products',
-  // Filter conditions
-  {
+const paginatedResults = await findMany('products', {
+  where: {
     $and: [{ price: { $gte: 50, $lte: 500 } }, { category: { $in: ['electronics', 'books'] } }, { inStock: true }],
   },
-  // Query options
-  {
-    sortBy: ['rating', 'price', 'name'],
-    order: ['desc', 'asc', 'asc'],
-    skip: 20, // Skip first 20 items
-    limit: 10, // Return 10 items
-  }
-);
+  sortBy: ['rating', 'price', 'name'],
+  order: ['desc', 'asc', 'asc'],
+  skip: 20, // Skip first 20 items
+  limit: 10, // Return 10 items
+});
 ```
 
 ## 🎯 Transaction Management
@@ -973,46 +898,7 @@ async function transferMoney(fromUserId: number, toUserId: number, amount: numbe
 4. **Batch operations**: Use bulk operations in transactions to reduce disk I/O
 5. **Test rollback**: Ensure rollback mechanism works correctly
 
-## 🎯 Auto-sync Mechanism
 
-### Configuring Auto-sync
-
-```typescript
-import { setAutoSyncConfig, getSyncStats, syncNow } from 'expo-lite-data-store';
-
-// Get current sync statistics
-const stats = await getSyncStats();
-console.log('Sync statistics:', stats);
-
-// Trigger sync immediately
-await syncNow();
-
-// Custom auto-sync configuration
-setAutoSyncConfig({
-  enabled: true, // Enable auto-sync
-  interval: 10000, // Sync every 10 seconds
-  minItems: 5, // Sync at least 5 dirty items
-  batchSize: 200, // Max 200 items per sync
-});
-```
-
-### Sync Configuration Parameters
-
-| Parameter   | Type    | Default | Description                     |
-| ----------- | ------- | ------- | ------------------------------- |
-| `enabled`   | boolean | `true`  | Whether to enable auto-sync     |
-| `interval`  | number  | `5000`  | Sync interval (milliseconds)    |
-| `minItems`  | number  | `1`     | Minimum number of items to sync |
-| `batchSize` | number  | `100`   | Batch size limit                |
-
-### Sync Statistics
-
-| Field Name         | Type   | Description                      |
-| ------------------ | ------ | -------------------------------- |
-| `syncCount`        | number | Total sync count                 |
-| `totalItemsSynced` | number | Total items synced               |
-| `lastSyncTime`     | number | Last sync time                   |
-| `avgSyncTime`      | number | Average sync time (milliseconds) |
 
 ## 🎯 Performance Optimization
 
@@ -1149,7 +1035,7 @@ await insert('users', { id: 1, name: 'John Doe' }, {
 
 **Encryption Priority Explanation**:
 - When `encryptFullTable: true` parameter is explicitly set, full table encryption is used
-- Otherwise, field-level encryption is used by default (based on `enableFieldLevelEncryption` and `encryptedFields` settings in the configuration file)
+- Otherwise, field-level encryption is used by default (based on `encryptedFields` settings in the configuration file). Field-level encryption is automatically enabled when the `encryptedFields` array is not empty.
 - Full table encryption and field-level encryption **cannot be used simultaneously**. The system will automatically detect conflicts and throw a clear error message
 
 ### Encryption Parameters
@@ -1159,8 +1045,7 @@ await insert('users', { id: 1, name: 'John Doe' }, {
 | `encrypted`         | boolean | false   | Whether to enable data encryption                                           |
 | `requireAuthOnAccess` | boolean | false   | Whether to require biometric authentication for each data access (only effective when `encrypted` is true) |
 | `encryptFullTable`   | boolean | false  | Whether to enable full table encryption (only effective when `encrypted` is true, mutually exclusive with field-level encryption) |
-| `enableFieldLevelEncryption` | boolean | false | Whether to enable field-level encryption (only effective when `encrypted` is true, mutually exclusive with full table encryption) |
-| `encryptedFields` | string[] | [] | List of fields to encrypt (only effective when `enableFieldLevelEncryption` is true) |
+| `encryptedFields` | string[] | [] | List of fields to encrypt (field-level encryption is automatically enabled when the array is not empty, only effective when `encrypted` is true, mutually exclusive with full table encryption) |
 
 ### Key Management
 
@@ -1242,11 +1127,6 @@ A: Run `npm run build:all` to build complete TypeScript and JavaScript versions.
 A: Configuration is loaded directly from the bundled file, so you need to restart the application after modifying the configuration file.
 </details>
 
-<details>
-<summary>Q: How to disable auto-sync?</summary>
-
-A: Set `cache.autoSync.enabled: false` in the configuration file, or use the `setAutoSyncConfig({ enabled: false })` API.
-</details>
 
 <details>
 <summary>Q: How to use encryption?</summary>

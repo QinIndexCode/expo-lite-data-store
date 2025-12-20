@@ -10,6 +10,7 @@ import { IMetadataManager } from '../../types/metadataManagerInfc';
 import ROOT from '../../utils/ROOTPath';
 import withTimeout from '../../utils/withTimeout';
 import { FileHandlerBase } from './FileHandlerBase';
+import logger from '../../utils/logger';
 
 const CHUNK_EXT = '.ldb';
 
@@ -36,19 +37,30 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
   /**
    * 实现基类的write方法，覆盖现有数据
+   * 优化：先清空现有数据，再写入新数据，确保原子性
    */
   async write(data: Record<string, any>[]): Promise<void> {
     try {
       // 使用基类的验证方法
       this.validateArrayData(data);
 
+      // 如果数据为空，直接清空现有数据
+      if (data.length === 0) {
+        await this.clear();
+        return;
+      }
+
       // 先清空现有数据
       await this.clear();
-
+      
       // 然后写入新数据
-      if (data.length > 0) {
-        await this.append(data);
-      }
+      await this.append(data);
+      
+      // 更新元数据（确保元数据与实际数据一致）
+      this.metadataManager.update(this.tableName, {
+        count: data.length,
+        updatedAt: Date.now(),
+      });
     } catch (error) {
       throw this.formatWriteError(`write data to table ${this.tableName} failed`, error);
     }
@@ -156,7 +168,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       });
     } catch (error) {
       // 捕获并处理所有异常，格式化错误信息
-      console.error(`append data to table ${this.tableName} failed`, error);
+      logger.error(`append data to table ${this.tableName} failed`, error);
       throw this.formatWriteError(`append data to table ${this.tableName} failed`, error);
     }
   }
@@ -193,7 +205,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
         itemSizes.push(itemSize);
         validItems.push(item);
       } catch (err) {
-        console.warn(`skip error data item:`, item, err);
+        logger.warn(`skip error data item:`, item, err);
       }
     }
 
@@ -266,7 +278,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       const hash = await this.computeHash(data);
       const content = JSON.stringify({ data, hash });
 
-      console.log(`DEBUG: Writing chunk ${index} to ${filePath}, data length: ${data.length}`);
+      logger.debug(`Writing chunk ${index} to ${filePath}, data length: ${data.length}`);
 
       // 重试机制，最多重试3次
       let retries = 3;
@@ -277,7 +289,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
           // 原子写入：先写入临时文件，再重命名
           const tempFilePath = `${this.tableDirPath}${String(index).padStart(6, '0')}.tmp`;
 
-          console.log(`DEBUG: Writing temp file ${tempFilePath}`);
+          logger.debug(`Writing temp file ${tempFilePath}`);
 
           // 添加超时控制
           await withTimeout(
@@ -286,7 +298,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
             `write temp chunk ${index} failed`
           );
 
-          console.log(`DEBUG: Renaming temp file ${tempFilePath} to ${filePath}`);
+          logger.debug(`Renaming temp file ${tempFilePath} to ${filePath}`);
 
           // 重命名临时文件为目标文件，实现原子写入
           await withTimeout(
@@ -295,17 +307,17 @@ export class ChunkedFileHandler extends FileHandlerBase {
             `rename temp chunk ${index} to ${filePath}`
           );
 
-          console.log(`DEBUG: Written chunk ${index} to ${filePath}`);
+          logger.debug(`Written chunk ${index} to ${filePath}`);
 
           // 验证文件是否存在
           const fileInfo = await FileSystem.getInfoAsync(filePath);
-          console.log(`DEBUG: File ${filePath} exists: ${fileInfo.exists}`);
+          logger.debug(`File ${filePath} exists: ${fileInfo.exists}`);
 
           // 写入成功后清除缓存
           this.clearFileInfoCache(filePath);
           return; // 成功写入，退出重试循环
         } catch (error: any) {
-          console.log(`DEBUG: Error writing chunk ${index}: ${error.message}`);
+          logger.debug(`Error writing chunk ${index}: ${error.message}`);
           lastError = error;
           retries--;
 
@@ -375,7 +387,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
               this.chunkCache.set(chunkIndex, data);
             }
           } catch (e) {
-            console.warn(`Preload chunk ${filePath} failed`, e);
+            logger.warn(`Preload chunk ${filePath} failed`, e);
           }
         })
       );
@@ -393,30 +405,30 @@ export class ChunkedFileHandler extends FileHandlerBase {
         `READ CHUNK ${filePath} CONTENT`
       );
 
-      console.log(`DEBUG: Read chunk file ${filePath}, content: ${text}`);
+      logger.debug(`Read chunk file ${filePath}, content: ${text}`);
 
       const parsed = JSON.parse(text);
 
       if (!parsed || typeof parsed !== 'object') {
-        console.warn(`CHUNK ${filePath} FORMAT_ERROR：not valid JSON object`);
+        logger.warn(`CHUNK ${filePath} FORMAT_ERROR：not valid JSON object`);
         return [];
       }
 
       if (!Array.isArray(parsed.data) || parsed.hash === undefined) {
-        console.warn(`CHUNK ${filePath} FORMAT_ERROR：missing data array or hash field`);
+        logger.warn(`CHUNK ${filePath} FORMAT_ERROR：missing data array or hash field`);
         return [];
       }
 
       const isValid = await this.verifyHash(parsed.data, parsed.hash);
       if (!isValid) {
-        console.warn(`CHUNK ${filePath} CORRUPTED：hash mismatch`);
-        console.warn(`DEBUG: Expected hash: ${parsed.hash}, Actual hash: ${await this.computeHash(parsed.data)}`);
+        logger.warn(`CHUNK ${filePath} CORRUPTED：hash mismatch`);
+        logger.debug(`Expected hash: ${parsed.hash}, Actual hash: ${await this.computeHash(parsed.data)}`);
         return [];
       }
 
       return parsed.data;
     } catch (error) {
-      console.error(`ERROR reading chunk file ${filePath}:`, error);
+      logger.error(`ERROR reading chunk file ${filePath}:`, error);
       return [];
     }
   }
@@ -480,8 +492,8 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
           return data;
         } catch (e) {
-          console.warn(`READ CHUNK ${filePath} FAILED`, e);
-          return [];
+          logger.warn(`READ CHUNK ${filePath} FAILED`, e);
+            return [];
         }
       });
 
@@ -506,7 +518,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     try {
       let filePaths: string[] = [];
 
-      console.log(`DEBUG: Getting chunk files from ${this.tableDirPath}`);
+      logger.debug(`Getting chunk files from ${this.tableDirPath}`);
 
       // 优先尝试读取目录
       try {
@@ -516,15 +528,15 @@ export class ChunkedFileHandler extends FileHandlerBase {
           `LIST TABLE DIR ${this.tableDirPath}`
         );
 
-        console.log(`DEBUG: Directory entries: ${JSON.stringify(entries)}`);
+        logger.debug(`Directory entries: ${JSON.stringify(entries)}`);
 
         filePaths = entries
           .filter((entry: string) => entry.endsWith(CHUNK_EXT))
           .sort()
           .map((entry: string) => `${this.tableDirPath}${entry}`);
       } catch (listError) {
-        console.log(
-          `DEBUG: List directory failed, falling back to file detection: ${listError instanceof Error ? listError.message : 'Unknown error'}`
+        logger.debug(
+          `List directory failed, falling back to file detection: ${listError instanceof Error ? listError.message : 'Unknown error'}`
         );
         // 如果列出目录失败，可能是在测试环境或目录 API 不支持的环境
         // 回退：按编号探测可能存在的分片文件
@@ -533,7 +545,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
           const filePath = this.getChunkFilePath(i);
           try {
             const fileInfo = await super.getFileInfo(filePath);
-            console.log(`DEBUG: Checking file ${filePath}, exists: ${fileInfo.exists}`);
+            logger.debug(`Checking file ${filePath}, exists: ${fileInfo.exists}`);
             if (fileInfo.exists) {
               filePaths.push(filePath);
             }
@@ -544,10 +556,10 @@ export class ChunkedFileHandler extends FileHandlerBase {
         }
       }
 
-      console.log(`DEBUG: Found chunk files: ${JSON.stringify(filePaths)}`);
+      logger.debug(`Found chunk files: ${JSON.stringify(filePaths)}`);
       return filePaths;
     } catch (e) {
-      console.warn(`GET CHUNK FILES FAILED`, e);
+      logger.warn(`GET CHUNK FILES FAILED`, e);
       return [];
     }
   }
@@ -573,7 +585,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       try {
         return await this.readChunkFile(filePath);
       } catch (e) {
-        console.warn(`READ CHUNK ${filePath} FAILED`, e);
+        logger.warn(`READ CHUNK ${filePath} FAILED`, e);
         return [];
       }
     });
@@ -597,7 +609,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
         );
       } catch (err) {
         // 删除目录失败，可能目录不存在，忽略
-        console.warn(`DELETE TABLE DIRECTORY FAILED`, err);
+      logger.warn(`DELETE TABLE DIRECTORY FAILED`, err);
       }
 
       // 重新创建目录
@@ -618,7 +630,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       });
     } catch (error) {
       // 清空分片表失败
-      console.error('CLEAR CHUNKED TABLE FAILED', error);
+      logger.error('CLEAR CHUNKED TABLE FAILED', error);
       throw this.formatDeleteError('CLEAR CHUNKED TABLE FAILED', error);
     }
   }

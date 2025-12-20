@@ -23,10 +23,11 @@ const {
   getSyncStats,
   syncNow,
   setAutoSyncConfig,
-} = require('./dist/js/expo-lite-data-store');
+} = require('../dist/js/expo-lite-data-store');
+import logger from '../dist/js/logger.js';
 
 async function testPublicAPI() {
-  console.log('=== 开始测试公共API ===\n');
+  logger.info('=== 开始测试公共API ===\n');
 
   let successCount = 0;
   let totalTests = 0;
@@ -34,14 +35,14 @@ async function testPublicAPI() {
   // 测试函数包装器，处理异常和计数
   async function runTest(testName, testFn) {
     totalTests++;
-    console.log(`📋 测试: ${testName}`);
+    logger.info(`📋 测试: ${testName}`);
     try {
       await testFn();
-      console.log(`✅ 成功: ${testName}\n`);
+      logger.info(`✅ 成功: ${testName}\n`);  
       successCount++;
     } catch (error) {
-      console.error(`❌ 失败: ${testName}`);
-      console.error(`   错误: ${error.message}\n`);
+      logger.error(`❌ 失败: ${testName}`);
+      logger.error(`   错误: ${error.message}\n`);
     }
   }
 
@@ -154,7 +155,7 @@ async function testPublicAPI() {
   await runTest('同步统计', async () => {
     const stats = await getSyncStats();
     if (!stats) throw new Error('获取同步统计失败');
-    console.log(`   同步统计: ${JSON.stringify(stats)}`);
+    logger.info(`   同步统计: ${JSON.stringify(stats)}`);
   });
 
   await runTest('立即同步', async () => {
@@ -192,23 +193,23 @@ async function testPublicAPI() {
   });
 
   // 总结
-  console.log('\n=== 测试总结 ===');
-  console.log(`总测试数: ${totalTests}`);
-  console.log(`成功数: ${successCount}`);
-  console.log(`失败数: ${totalTests - successCount}`);
-  console.log(`成功率: ${((successCount / totalTests) * 100).toFixed(1)}%`);
+  logger.info('\n=== 测试总结 ===');
+  logger.info(`总测试数: ${totalTests}`);
+  logger.info(`成功数: ${successCount}`);
+  logger.info(`失败数: ${totalTests - successCount}`);
+  logger.info(`成功率: ${((successCount / totalTests) * 100).toFixed(1)}%`);
 
   if (successCount === totalTests) {
-    console.log('\n🎉 所有API测试通过！README中描述的功能已全部实现。');
+    logger.info('\n🎉 所有API测试通过！README中描述的功能已全部实现。');
     process.exit(0);
   } else {
-    console.log('\n❌ 部分API测试失败！');
+    logger.error('\n❌ 部分API测试失败！');
     process.exit(1);
   }
 }
 
 // 运行测试
 testPublicAPI().catch(error => {
-  console.error('\n❌ 测试脚本执行出错:', error);
+  logger.error('\n❌ 测试脚本执行出错:', error);
   process.exit(1);
 });

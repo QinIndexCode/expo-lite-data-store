@@ -8,6 +8,7 @@ import { FileInfo, EncodingType } from 'expo-file-system';
 import { StorageError } from '../../types/storageErrorInfc';
 import withTimeout from '../../utils/withTimeout';
 import { FileHandlerBase } from './FileHandlerBase';
+import logger from '../../utils/logger';
 
 /**
  * 单文件处理器类
@@ -112,7 +113,7 @@ export class SingleFileHandler extends FileHandlerBase {
 
       return parsed.data;
     } catch (error) {
-      console.warn(`READ_FILE_ERROR: ${this.filePath}:`, error);
+      logger.warn(`READ_FILE_ERROR: ${this.filePath}:`, error);
       return [];
     }
   }
@@ -127,7 +128,7 @@ export class SingleFileHandler extends FileHandlerBase {
         this.clearFileInfoCache(this.filePath);
       }
     } catch (error) {
-      console.warn(`DELETE_FILE_ERROR: ${this.filePath}:`, error);
+      logger.warn(`DELETE_FILE_ERROR: ${this.filePath}:`, error);
     }
   }
 }

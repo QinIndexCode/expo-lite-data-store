@@ -7,6 +7,7 @@ import type { CreateTableOptions, WriteOptions, WriteResult } from '../../types/
 import { ErrorHandler } from '../../utils/errorHandler';
 import ROOT from '../../utils/ROOTPath';
 import withTimeout from '../../utils/withTimeout';
+import logger from '../../utils/logger';
 
 import { ChunkedFileHandler } from '../file/ChunkedFileHandler';
 import { SingleFileHandler } from '../file/SingleFileHandler';
@@ -23,6 +24,9 @@ export class DataWriter {
   private countValidationCache = new Map<string, { lastCheckTime: number; isAccurate: boolean }>();
   // 校验间隔：5分钟内不重复校验同一个表（可根据业务调整）
   private readonly VALIDATION_INTERVAL = 5 * 60 * 1000;
+  // 并发控制：互斥锁，防止并发操作导致的数据不一致
+  private operationLocks = new Map<string, Promise<void>>();
+  private lockPromises = new Map<string, () => void>();
 
   constructor(
     metadataManager: IMetadataManager,
@@ -99,6 +103,37 @@ export class DataWriter {
     return estimatedSize > (this.chunkSize || 1024 * 1024) / 2;
   }
 
+  /**
+   * 获取操作锁，确保同一表的并发操作串行执行
+   */
+  private async acquireLock(tableName: string): Promise<void> {
+    // 如果已经有锁，等待它释放
+    while (this.operationLocks.has(tableName)) {
+      await this.operationLocks.get(tableName);
+    }
+
+    // 创建新的锁
+    let resolveLock: () => void;
+    const lockPromise = new Promise<void>(resolve => {
+      resolveLock = resolve;
+    });
+
+    this.operationLocks.set(tableName, lockPromise);
+    this.lockPromises.set(tableName, resolveLock!);
+  }
+
+  /**
+   * 释放操作锁，允许后续操作执行
+   */
+  private releaseLock(tableName: string): void {
+    const resolveLock = this.lockPromises.get(tableName);
+    if (resolveLock) {
+      resolveLock();
+      this.operationLocks.delete(tableName);
+      this.lockPromises.delete(tableName);
+    }
+  }
+
   // ==================== 创建表（支持单文件和分片模式） ====================
   async createTable(
     tableName: string,
@@ -121,44 +156,54 @@ export class DataWriter {
             'Please provide a valid table name'
           );
         }
-        if (this.metadataManager.get(tableName)) {
-          return; // 幂等
+        
+        // 获取锁，确保同一表的并发创建操作串行执行
+        await this.acquireLock(tableName);
+        
+        try {
+          // 再次检查表是否已存在，防止获取锁期间其他操作创建了表
+          if (this.metadataManager.get(tableName)) {
+            return; // 幂等
+          }
+
+          // 检查文件系统访问权限
+          await this.fileOperationManager.checkPermissions();
+
+          const { columns = {}, initialData = [], mode = 'single' } = options;
+
+          // 根据数据量或手动指定决定使用哪种模式
+          const actualMode = mode === 'chunked' || this.shouldUseChunkedMode(initialData) ? 'chunked' : 'single';
+
+          if (actualMode === 'chunked') {
+            const handler = this.getChunkedHandler(tableName);
+            await withTimeout(handler.append(initialData), 10000, `create chunked table ${tableName}`);
+          } else {
+            const handler = this.getSingleFile(tableName);
+            await withTimeout(handler.write(initialData), 10000, `create single file table ${tableName}`);
+          }
+
+          // 注册元数据（不覆盖 createdAt）
+          this.metadataManager.update(tableName, {
+            mode: actualMode,
+            path: actualMode === 'chunked' ? `${tableName}/` : `${tableName}.ldb`,
+            count: initialData.length,
+            chunks: actualMode === 'chunked' ? 1 : 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            columns: this.normalizeColumnSchema(columns),
+            isHighRisk: options.isHighRisk || false,
+            highRiskFields: options.highRiskFields || [],
+            encryptedFields: options.encryptedFields || [],
+          });
+        } finally {
+          // 释放锁，允许后续操作执行
+          this.releaseLock(tableName);
         }
-
-        // 检查文件系统访问权限
-        await this.fileOperationManager.checkPermissions();
-
-        const { columns = {}, initialData = [], mode = 'single' } = options;
-
-        // 根据数据量或手动指定决定使用哪种模式
-        const actualMode = mode === 'chunked' || this.shouldUseChunkedMode(initialData) ? 'chunked' : 'single';
-
-        if (actualMode === 'chunked') {
-          const handler = this.getChunkedHandler(tableName);
-          await withTimeout(handler.append(initialData), 10000, `create chunked table ${tableName}`);
-        } else {
-          const handler = this.getSingleFile(tableName);
-          await withTimeout(handler.write(initialData), 10000, `create single file table ${tableName}`);
-        }
-
-        // 注册元数据（不覆盖 createdAt）
-        this.metadataManager.update(tableName, {
-          mode: actualMode,
-          path: actualMode === 'chunked' ? `${tableName}/` : `${tableName}.ldb`,
-          count: initialData.length,
-          chunks: actualMode === 'chunked' ? 1 : 0,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          columns: this.normalizeColumnSchema(columns),
-          isHighRisk: options.isHighRisk || false,
-          highRiskFields: options.highRiskFields || [],
-        });
       },
       error => {
         // 在包装成 StorageError 之前打印 DataWriter 级别的详细上下文
         if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
-          // eslint-disable-next-line no-console
-          console.error('[DataWriter.createTable] failed:', {
+          logger.error('[DataWriter.createTable] failed:', {
             tableName,
             options,
             message: error instanceof Error ? error.message : String(error),
@@ -174,23 +219,35 @@ export class DataWriter {
   async deleteTable(tableName: string): Promise<void> {
     return ErrorHandler.handleAsyncError(
       async () => {
-        const tableMeta = this.metadataManager.get(tableName);
+        // 获取锁，确保同一表的并发删除操作串行执行
+        await this.acquireLock(tableName);
+        
+        try {
+          const tableMeta = this.metadataManager.get(tableName);
 
-        if (tableMeta?.mode === 'chunked') {
-          const handler = this.getChunkedHandler(tableName);
-          await withTimeout(handler.clear(), 10000, `delete chunked table ${tableName}`);
-        } else {
-          await withTimeout(
-            Promise.allSettled([
-              this.getSingleFile(tableName).delete(),
-              FileSystem.deleteAsync(FileSystem.documentDirectory + ROOT + tableName, { idempotent: true }),
-            ]),
-            10000,
-            `delete table ${tableName}`
-          );
+          if (tableMeta?.mode === 'chunked') {
+            const handler = this.getChunkedHandler(tableName);
+            await withTimeout(handler.clear(), 10000, `delete chunked table ${tableName}`);
+          } else {
+            await withTimeout(
+              Promise.allSettled([
+                this.getSingleFile(tableName).delete(),
+                FileSystem.deleteAsync(FileSystem.documentDirectory + ROOT + tableName, { idempotent: true }),
+              ]),
+              10000,
+              `delete table ${tableName}`
+            );
+          }
+
+          // 清除索引
+          this.indexManager.clearTableIndexes(tableName);
+          
+          // 删除元数据
+          this.metadataManager.delete(tableName);
+        } finally {
+          // 释放锁，允许后续操作执行
+          this.releaseLock(tableName);
         }
-
-        this.metadataManager.delete(tableName);
       },
       error => ErrorHandler.createTableError('delete', tableName, error)
     );
@@ -220,27 +277,35 @@ export class DataWriter {
         // 自动创建表（如果不存在）
         await this.ensureTableExists(tableName);
 
-        // 检查文件系统访问权限
-        await this.fileOperationManager.checkPermissions();
+        // 获取锁，确保同一表的并发写入操作串行执行
+        await this.acquireLock(tableName);
+        
+        try {
+          // 检查文件系统访问权限
+          await this.fileOperationManager.checkPermissions();
 
-        // 获取表的元数据，确定存储模式
-        const tableMeta = this.metadataManager.get(tableName);
+          // 获取表的元数据，确定存储模式
+          const tableMeta = this.metadataManager.get(tableName);
 
-        // 根据存储模式执行写入操作
-        const writeResult = await this.executeWriteOperation(tableName, items, options, tableMeta);
+          // 根据存储模式执行写入操作
+          const writeResult = await this.executeWriteOperation(tableName, items, options, tableMeta);
 
-        // 更新索引
-        await this.updateIndexes(tableName, items, options?.mode === 'overwrite');
+          // 更新索引
+          await this.updateIndexes(tableName, items, options?.mode === 'overwrite');
 
-        // 更新表的元数据
-        await this.updateTableMetadata(tableName, writeResult.final.length);
+          // 更新表的元数据
+          await this.updateTableMetadata(tableName, writeResult.final.length);
 
-        // 返回写入结果
-        return {
-          written: items.length,
-          totalAfterWrite: writeResult.final.length,
-          chunked: writeResult.isChunked,
-        };
+          // 返回写入结果
+          return {
+            written: items.length,
+            totalAfterWrite: writeResult.final.length,
+            chunked: writeResult.isChunked,
+          };
+        } finally {
+          // 释放锁，允许后续操作执行
+          this.releaseLock(tableName);
+        }
       },
       error => ErrorHandler.createFileError('write', `table ${tableName}`, error)
     );
@@ -350,14 +415,37 @@ export class DataWriter {
    * 更新索引
    */
   private async updateIndexes(tableName: string, items: Record<string, any>[], isOverwrite: boolean): Promise<void> {
-    // 覆盖模式下，清除现有索引
-    if (isOverwrite) {
-      this.indexManager.clearTableIndexes(tableName);
-    }
-
-    // 更新索引，为新写入的数据添加索引
-    for (const item of items) {
-      this.indexManager.addToIndex(tableName, item);
+    try {
+      // 覆盖模式下，先为新数据构建完整索引，再替换现有索引，确保原子性
+      if (isOverwrite) {
+        // 1. 清除现有索引
+        this.indexManager.clearTableIndexes(tableName);
+        
+        // 2. 为所有新数据添加索引
+        for (const item of items) {
+          // 确保数据有id字段，否则跳过索引更新
+          if (item.id !== undefined) {
+            this.indexManager.addToIndex(tableName, item);
+          }
+        }
+      } else {
+        // 追加模式下，逐个添加新数据的索引
+        for (const item of items) {
+          // 确保数据有id字段，否则跳过索引更新
+          if (item.id !== undefined) {
+            this.indexManager.addToIndex(tableName, item);
+          }
+        }
+      }
+    } catch (error) {
+      // 索引更新失败时，记录日志但不影响主流程
+      logger.error(`[DataWriter.updateIndexes] Failed to update indexes for table ${tableName}:`, error);
+      // 覆盖模式下索引更新失败，可能导致索引不一致，需要重新构建索引
+      if (isOverwrite) {
+        logger.warn(`[DataWriter.updateIndexes] Reverting to full index rebuild for table ${tableName}`);
+        // 清理损坏的索引
+        this.indexManager.clearTableIndexes(tableName);
+      }
     }
   }
 
@@ -400,15 +488,27 @@ export class DataWriter {
           }
 
           // 检查是否包含有效字段
-          if (Object.keys(item).length === 0) {
-            throw ErrorHandler.createGeneralError(
-              `Empty object at index ${i}`,
-              'FILE_CONTENT_INVALID',
-              undefined,
-              'Object must contain at least one field',
-              'Please provide objects with valid fields'
-            );
-          }
+      if (Object.keys(item).length === 0) {
+        throw ErrorHandler.createGeneralError(
+          `Empty object at index ${i}`,
+          'FILE_CONTENT_INVALID',
+          undefined,
+          'Object must contain at least one field',
+          'Please provide objects with valid fields'
+        );
+      }
+
+      // 检查是否所有字段都是undefined（无效数据）
+      const hasValidValue = Object.values(item).some(value => value !== undefined);
+      if (!hasValidValue) {
+        throw ErrorHandler.createGeneralError(
+          `Invalid object at index ${i}`,
+          'FILE_CONTENT_INVALID',
+          undefined,
+          'Object must contain at least one valid (non-undefined) value',
+          'Please provide objects with valid values for at least one field'
+        );
+      }
 
           // 检查字段类型
           for (const [key, value] of Object.entries(item)) {
@@ -491,7 +591,7 @@ export class DataWriter {
 
       // 如果计数不一致，自动修复元数据
       if (actualCount !== metadataCount) {
-        console.warn(
+        logger.warn(
           `[DataWriter] Count mismatch detected for table '${tableName}': ` +
             `metadata=${metadataCount}, actual=${actualCount}. Auto-correcting...`
         );
@@ -502,7 +602,7 @@ export class DataWriter {
       }
     } catch (error) {
       // 校验失败时记录日志但不抛错（避免影响业务）
-      console.error(`[DataWriter] Failed to validate count for table '${tableName}':`, error);
+      logger.error(`[DataWriter] Failed to validate count for table '${tableName}':`, error);
     }
   }
 
@@ -568,54 +668,62 @@ export class DataWriter {
           );
         }
 
-        // 读取所有数据
-        let data: Record<string, any>[];
-        if (tableMeta.mode === 'chunked') {
-          const handler = this.getChunkedHandler(tableName);
-          data = await withTimeout(handler.readAll(), 10000, `read chunked table ${tableName}`);
-        } else {
-          const handler = this.getSingleFile(tableName);
-          data = await withTimeout(handler.read(), 10000, `read single file table ${tableName}`);
+        // 获取锁，确保同一表的并发删除操作串行执行
+        await this.acquireLock(tableName);
+        
+        try {
+          // 读取所有数据
+          let data: Record<string, any>[];
+          if (tableMeta.mode === 'chunked') {
+            const handler = this.getChunkedHandler(tableName);
+            data = await withTimeout(handler.readAll(), 10000, `read chunked table ${tableName}`);
+          } else {
+            const handler = this.getSingleFile(tableName);
+            data = await withTimeout(handler.read(), 10000, `read single file table ${tableName}`);
+          }
+
+          // 应用过滤条件，找出要保留的数据（使用QueryEngine处理复杂查询）
+          // 直接找出要保留的数据，而不是先找要删除的数据再过滤，这样更高效
+          const filteredData = data.filter(item => {
+            // 检查item是否不匹配where条件（即要保留的数据）
+            return !QueryEngine.filter([item], where).length;
+          });
+
+          // 计算删除的记录数
+          const deletedCount = data.length - filteredData.length;
+
+          // 如果没有删除任何记录，直接返回
+          if (deletedCount === 0) {
+            return 0;
+          }
+
+          // 写入过滤后的数据（原子操作）
+          if (tableMeta.mode === 'chunked') {
+            const handler = this.getChunkedHandler(tableName);
+            // 使用原子写入方法，避免先clear后append的原子性问题
+            await withTimeout(handler.write(filteredData), 10000, `write to chunked table ${tableName}`);
+          } else {
+            const handler = this.getSingleFile(tableName);
+            await withTimeout(handler.write(filteredData), 10000, `write to single file table ${tableName}`);
+          }
+
+          // 更新索引
+          this.indexManager.clearTableIndexes(tableName);
+          for (const item of filteredData) {
+            this.indexManager.addToIndex(tableName, item);
+          }
+
+          // 更新元数据
+          this.metadataManager.update(tableName, {
+            count: filteredData.length,
+            updatedAt: Date.now(),
+          });
+
+          return deletedCount;
+        } finally {
+          // 释放锁，允许后续操作执行
+          this.releaseLock(tableName);
         }
-
-        // 应用过滤条件，找出要保留的数据（使用QueryEngine处理复杂查询）
-        // 直接找出要保留的数据，而不是先找要删除的数据再过滤，这样更高效
-        const filteredData = data.filter(item => {
-          // 检查item是否不匹配where条件（即要保留的数据）
-          return !QueryEngine.filter([item], where).length;
-        });
-
-        // 计算删除的记录数
-        const deletedCount = data.length - filteredData.length;
-
-        // 如果没有删除任何记录，直接返回
-        if (deletedCount === 0) {
-          return 0;
-        }
-
-        // 写入过滤后的数据
-        if (tableMeta.mode === 'chunked') {
-          const handler = this.getChunkedHandler(tableName);
-          await withTimeout(handler.clear(), 10000, `clear chunked table ${tableName}`);
-          await withTimeout(handler.append(filteredData), 10000, `append to chunked table ${tableName}`);
-        } else {
-          const handler = this.getSingleFile(tableName);
-          await withTimeout(handler.write(filteredData), 10000, `write to single file table ${tableName}`);
-        }
-
-        // 更新索引
-        this.indexManager.clearTableIndexes(tableName);
-        for (const item of filteredData) {
-          this.indexManager.addToIndex(tableName, item);
-        }
-
-        // 更新元数据
-        this.metadataManager.update(tableName, {
-          count: filteredData.length,
-          updatedAt: Date.now(),
-        });
-
-        return deletedCount;
       },
       error => ErrorHandler.createFileError('delete from', `table ${tableName}`, error)
     );

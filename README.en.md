@@ -1,8 +1,11 @@
 # expo-lite-data-store
 
+English: [English Document](./README.en.md)
+中文版: [中文文档](./README.zh-CN.md)
+
 ---
 
-**notice** :current project test coverage is limited, and may contain undiscovered issues. Before using in production environment, please conduct thorough testing.
+**Notice**: The current project test coverage is limited, and may contain undiscovered issues. Before using in a production environment, please conduct thorough testing.
 
 ---
 
@@ -28,7 +31,6 @@ Designed specifically for React Native + Expo projects, with no native dependenc
 | 🔍 **Advanced queries**          | Supports advanced queries like where, skip, limit, sort                         |
 | 📱 **Fully offline**             | No network required, 100% local data storage                                    |
 | 🎯 **Intelligent sorting**       | 5 sorting algorithms, automatically selects appropriate algorithm based on data size |
-| ⏰ **Auto-synchronization**      | Regularly synchronizes dirty data from cache to disk, ensuring data persistence |
 
 ## 📦 Installation
 
@@ -58,19 +60,31 @@ await insert('users', [
   { id: 3, name: 'Wang Wu', age: 35, email: 'wangwu@example.com' },
 ]);
 
-// Query single data
-const user = await findOne('users', { id: 1 });
+// Query single data - Prisma style: where as part of options
+const user = await findOne('users', {
+  where: { id: 1 }
+});
 console.log(user); // { id: 1, name: 'Zhang San', age: 25, email: 'zhangsan@example.com' }
 
-// Query multiple data
-const users = await findMany('users', { age: { $gte: 30 } });
-console.log(users); // Returns users with age >= 30
+// Query multiple data - Prisma style: where as part of options
+const users = await findMany('users', {
+  where: { age: { $gte: 30 } },
+  sortBy: 'age',
+  order: 'desc'
+});
+console.log(users); // Returns users with age >= 30, sorted by age descending
 
-// Update data
-await update('users', { age: 26 }, { id: 1 });
+// Update data - Prisma style: where as part of options
+const updatedCount = await update('users', { age: 26 }, {
+  where: { id: 1 }
+});
+console.log(`Updated ${updatedCount} records`);
 
-// Delete data
-await remove('users', { id: 2 });
+// Delete data - Prisma style: where as part of options
+const deletedCount = await remove('users', {
+  where: { id: 2 }
+});
+console.log(`Deleted ${deletedCount} records`);
 ```
 
 ```javascript
@@ -87,14 +101,11 @@ await insert('users', [
   { id: 2, name: 'Bob', age: 30 },
 ]);
 
-const users = await findMany(
-  'users',
-  {},
-  {
-    sortBy: 'age',
-    order: 'desc',
-  }
-);
+const users = await findMany('users', {
+  where: {},
+  sortBy: 'age',
+  order: 'desc'
+});
 
 console.log(users);
 ```
@@ -109,7 +120,7 @@ By default, the database uses non-encrypted mode and **will not trigger any biom
 // Non-encrypted mode (default)
 await createTable('users');
 await insert('users', { id: 1, name: 'John Doe' });
-const user = await findOne('users', { id: 1 });
+const user = await findOne('users', { where: { id: 1 } });
 ```
 
 **Important Note**: In non-encrypted mode, data is stored in plain text, no encryption algorithm is used, and no biometric or password authentication is triggered.
@@ -128,7 +139,8 @@ await insert('users', { id: 1, name: 'John Doe' }, {
   encrypted: true,
   requireAuthOnAccess: false
 });
-const user = await findOne('users', { id: 1 }, {
+const user = await findOne('users', {
+  where: { id: 1 },
   encrypted: true,
   requireAuthOnAccess: false
 });
@@ -148,7 +160,8 @@ await insert('users', { id: 1, name: 'John Doe' }, {
   encrypted: true,
   requireAuthOnAccess: true
 });
-const user = await findOne('users', { id: 1 }, {
+const user = await findOne('users', {
+  where: { id: 1 },
   encrypted: true,
   requireAuthOnAccess: true
 });
@@ -161,8 +174,7 @@ const user = await findOne('users', { id: 1 }, {
 | `encrypted`         | boolean | false  | Whether to enable data encryption                                           |
 | `requireAuthOnAccess` | boolean | false   | Whether to require biometric authentication for each access (only effective when `encrypted` is true) |
 | `encryptFullTable`   | boolean | false  | Whether to enable full table encryption (only effective when `encrypted` is true, mutually exclusive with field-level encryption) |
-| `enableFieldLevelEncryption` | boolean | false | Whether to enable field-level encryption (only effective when `encrypted` is true, mutually exclusive with full table encryption) |
-| `encryptedFields` | string[] | [] | List of fields to encrypt (only effective when `enableFieldLevelEncryption` is true) |
+| `encryptedFields` | string[] | [] | List of fields to encrypt (field-level encryption is automatically enabled when the array is not empty, only effective when `encrypted` is true, mutually exclusive with full table encryption) |
 
 **Important Notes**:
 - Full table encryption and field-level encryption **cannot be used simultaneously**. The system will automatically detect conflicts and throw a clear error message.
@@ -188,10 +200,10 @@ const user = await findOne('users', { id: 1 }, {
 | ----------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | `insert`    | `(tableName, data, options?) => Promise<WriteResult>`        | Insert single or multiple records                   |
 | `read`      | `(tableName, options?) => Promise<any[]>`          | Read data (supports filtering, pagination, sorting) |
-| `findOne`   | `(tableName, filter, options?) => Promise<any \| null>`      | Query single record                                 |
-| `findMany`  | `(tableName, filter?, options?) => Promise<any[]>` | Query multiple records (supports advanced options)  |
-| `update`    | `(tableName, data, where, options?) => Promise<number>`      | Update matching records                             |
-| `remove`    | `(tableName, where, options?) => Promise<number>`            | Delete matching records                             |
+| `findOne`   | `(tableName, { where, encrypted?, requireAuthOnAccess? }) => Promise<any \| null>` | Query single record                                 |
+| `findMany`  | `(tableName, { where?, skip?, limit?, sortBy?, order?, sortAlgorithm?, encrypted?, requireAuthOnAccess? }) => Promise<any[]>` | Query multiple records (supports advanced options)  |
+| `update`    | `(tableName, data, { where, encrypted?, requireAuthOnAccess? }) => Promise<number>` | Update matching records                             |
+| `remove`    | `(tableName, { where, encrypted?, requireAuthOnAccess? }) => Promise<number>` | Delete matching records                             |
 | `bulkWrite` | `(tableName, operations, options?) => Promise<WriteResult>`  | Batch operations                                    |
 
 ### 🔄 Transaction Management
@@ -233,7 +245,6 @@ For complete detailed documentation, please check the local [WIKI_EN.md](WIKI_EN
 - 🎯 **Advanced Queries**: Complex conditional queries, operators, compound queries
 - 🎯 **Smart Sorting**: Multi-field sorting, algorithm selection, performance optimization
 - 🎯 **Transaction Management**: ACID transactions, best practices
-- 🎯 **Auto-synchronization**: Configuration, statistics, manual triggering
 - 🎯 **Performance Optimization**: Indexes, batch operations, pagination strategies
 - 🎯 **Security**: Data encryption, key management
 - 🎯 **Troubleshooting**: Common issues, debugging tips
@@ -263,7 +274,7 @@ module.exports = {
     keySize: 256, // Key size
     hmacAlgorithm: 'SHA-512', // HMAC algorithm
     keyIterations: 120000, // Key iteration count
-    enableFieldLevelEncryption: true, // Enable field-level encryption
+
     encryptedFields: ['password', 'email', 'phone'], // Fields to encrypt
     cacheTimeout: 30000, // Cache timeout (30 seconds)
     maxCacheSize: 50, // Maximum number of cached keys
@@ -285,12 +296,6 @@ module.exports = {
     enableCompression: false, // Enable compression
     cleanupInterval: 300000, // Cleanup interval (5 minutes)
     memoryWarningThreshold: 0.8, // Memory warning threshold (80%)
-    autoSync: {
-      enabled: true, // Enable auto-sync
-      interval: 5000, // Sync interval (5 seconds)
-      minItems: 1, // Minimum items for sync
-      batchSize: 100, // Batch size limit
-    },
   },
   
   // Monitoring configuration
@@ -316,14 +321,11 @@ A: The library automatically provides TypeScript support through type definition
 A: Use `sortAlgorithm: 'slow'` for complete Chinese support:
 
 ```typescript
-const users = await findMany(
-  'users',
-  {},
-  {
-    sortBy: 'name',
-    sortAlgorithm: 'slow',
-  }
-);
+const users = await findMany('users', {
+  where: {},
+  sortBy: 'name',
+  sortAlgorithm: 'slow',
+});
 ```
 
 ### Q: How to improve query performance?

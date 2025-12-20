@@ -6,6 +6,7 @@
 import * as FileSystem from 'expo-file-system';
 import { StorageError } from '../../types/storageErrorInfc';
 import ROOT from '../../utils/ROOTPath';
+import logger from '../../utils/logger';
 
 const META_FILE_PATH = `${ROOT}/meta.ldb`;
 const CURRENT_VERSION = '1.0.0';
@@ -44,6 +45,8 @@ export interface TableSchema {
   indexes?: Record<string, 'unique' | 'normal'>; // 索引信息
   isHighRisk?: boolean; // 是否为高风险表
   highRiskFields?: string[]; // 高风险字段列表
+
+  encryptedFields?: string[]; // 需要加密的字段列表
 }
 
 /**
@@ -143,7 +146,7 @@ export class MetadataManager {
         await FileSystem.makeDirectoryAsync(dirPath, { intermediates: true });
       } catch (dirError) {
         // 目录创建失败，可能目录已存在，忽略
-        console.warn(`MAKE DIRECTORY FAILED for ${dirPath}`, dirError);
+        logger.warn(`MAKE DIRECTORY FAILED for ${dirPath}`, dirError);
       }
 
       // 写入元数据文件

@@ -21,7 +21,6 @@ export interface LiteStoreConfig {
     keySize: 256;
     hmacAlgorithm: 'SHA-256' | 'SHA-512';
     keyIterations: number;
-    enableFieldLevelEncryption?: boolean;
     encryptedFields?: string[];
     cacheTimeout: number;
     maxCacheSize: number;
@@ -44,17 +43,6 @@ export interface LiteStoreConfig {
     enableCompression: boolean;
     cleanupInterval: number;
     memoryWarningThreshold: number;
-    /** 自动同步配置 */
-    autoSync?: {
-      /** 是否启用自动同步 */
-      enabled: boolean;
-      /** 同步间隔（毫秒） */
-      interval: number;
-      /** 最小同步项数量 */
-      minItems: number;
-      /** 批量大小限制 */
-      batchSize: number;
-    };
   };
 
 
@@ -64,5 +52,13 @@ export interface LiteStoreConfig {
     enablePerformanceTracking: boolean;
     enableHealthChecks: boolean;
     metricsRetention: number;
+  };
+
+  /** 自动同步配置 */
+  autoSync?: {
+    enabled?: boolean;
+    interval?: number;
+    minItems?: number;
+    batchSize?: number;
   };
 }

@@ -5,6 +5,7 @@
 
 import { ApiResponse } from '../../types/apiResponse.js';
 import { StorageError } from '../../types/storageErrorInfc.js';
+import logger from '../../utils/logger';
 
 /**
  * 错误处理器类
@@ -46,7 +47,7 @@ export class ErrorHandler {
     }
 
     // 未知错误 - 返回通用错误信息
-    console.error(`[ApiWrapper] Unhandled error in request ${requestId}:`, error);
+    logger.error(`[ApiWrapper] Unhandled error in request ${requestId}:`, error);
 
     return {
       success: false,

@@ -70,6 +70,15 @@ export class CacheService {
   }
 
   /**
+   * 批量标记缓存项为干净数据
+   */
+  markAsCleanBulk(keys: string[]): void {
+    keys.forEach(key => {
+      this.cacheManager.markAsClean(key);
+    });
+  }
+
+  /**
    * 获取所有脏数据
    */
   getDirtyData(): Map<string, any> {

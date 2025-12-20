@@ -42,33 +42,36 @@ export interface IStorageAdapter {
    * zh-CN:
    * 删除表
    * en:
-   * delete table tableName
+   * delete table
    * ————————
    * @param tableName table name / 表名
+   * @param options Operation options, including common options
    * @returns Promise<void>
    */
-  deleteTable(tableName: string): Promise<void>;
+  deleteTable(tableName: string, options?: any): Promise<void>;
 
   /**
    * zh-CN:
-   * 判断表是否存在
+   * 检查表是否存在
    * en:
-   * check if table tableName exists
+   * check if table exists
    * ————————
    * @param tableName table name / 表名
+   * @param options Operation options, including common options
    * @returns Promise<boolean>
    */
-  hasTable(tableName: string): Promise<boolean>;
+  hasTable(tableName: string, options?: any): Promise<boolean>;
 
   /**
    * zh-CN:
-   * 列出所有表名
+   * 获取表列表
    * en:
-   * list all table names
+   * get table list
    * ————————
+   * @param options Operation options, including common options
    * @returns Promise<string[]>
    */
-  listTables(): Promise<string[]>;
+  listTables(options?: any): Promise<string[]>;
 
   /**
    * zh-CN:
@@ -171,9 +174,10 @@ export interface IStorageAdapter {
    * ————————
    * @param tableName table name / 表名
    * @param filter filter condition / 过滤条件
+   * @param options Operation options, including common options
    * @returns Promise<Record<string, any> | null>
    */
-  findOne(tableName: string, filter: Record<string, any>): Promise<Record<string, any> | null>;
+  findOne(tableName: string, filter: Record<string, any>, options?: any): Promise<Record<string, any> | null>;
 
   /**
    * zh-CN:
@@ -183,7 +187,8 @@ export interface IStorageAdapter {
    * ————————
    * @param tableName table name / 表名
    * @param filter filter condition / 过滤条件
-   * @param options options including skip, limit, sortBy, order and sortAlgorithm
+   * @param options options including skip, limit, sortBy, order, sortAlgorithm, and common options
+   * @param findOptions Additional operation options, including common options
    * @returns Promise<Record<string, any>[]>
    */
   findMany(
@@ -195,7 +200,10 @@ export interface IStorageAdapter {
       sortBy?: string | string[];
       order?: 'asc' | 'desc' | ('asc' | 'desc')[];
       sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
-    }
+      encrypted?: boolean;
+      requireAuthOnAccess?: boolean;
+    },
+    findOptions?: any
   ): Promise<Record<string, any>[]>;
 
   /**
@@ -237,9 +245,10 @@ export interface IStorageAdapter {
    * @param tableName table name / 表名
    * @param data data to update / 要更新的数据
    * @param where update condition / 更新条件
+   * @param options Operation options, including common options
    * @returns Promise<number> number of updated records / 更新的记录数
    */
-  update(tableName: string, data: Record<string, any>, where: Record<string, any>): Promise<number>;
+  update(tableName: string, data: Record<string, any>, where: Record<string, any>, options?: any): Promise<number>;
 
   /**
    * zh-CN:
@@ -249,9 +258,10 @@ export interface IStorageAdapter {
    * ————————
    * @param tableName table name / 表名
    * @param where delete condition / 删除条件
+   * @param options Operation options, including common options
    * @returns Promise<number> number of deleted records / 删除的记录数
    */
-  remove(tableName: string, where: Record<string, any>): Promise<number>;
+  remove(tableName: string, where: Record<string, any>, options?: any): Promise<number>;
 
   /**
    * zh-CN:
@@ -272,9 +282,10 @@ export interface IStorageAdapter {
    * ————————
    * @param tableName table name / 表名
    * @param where delete condition / 删除条件
+   * @param options Operation options, including common options
    * @returns Promise<number> number of deleted records / 删除的记录数
    */
-  delete(tableName: string, where: Record<string, any>): Promise<number>;
+  delete(tableName: string, where: Record<string, any>, options?: any): Promise<number>;
 
   /**
    * zh-CN:
@@ -282,9 +293,10 @@ export interface IStorageAdapter {
    * en:
    * begin transaction
    * ————————
+   * @param options Transaction options
    * @returns Promise<void>
    */
-  beginTransaction(): Promise<void>;
+  beginTransaction(options?: any): Promise<void>;
 
   /**
    * zh-CN:
@@ -292,9 +304,10 @@ export interface IStorageAdapter {
    * en:
    * commit transaction
    * ————————
+   * @param options Transaction options
    * @returns Promise<void>
    */
-  commit(): Promise<void>;
+  commit(options?: any): Promise<void>;
 
   /**
    * zh-CN:
@@ -302,9 +315,10 @@ export interface IStorageAdapter {
    * en:
    * rollback transaction
    * ————————
+   * @param options Transaction options
    * @returns Promise<void>
    */
-  rollback(): Promise<void>;
+  rollback(options?: any): Promise<void>;
 }
 
 // StorageError 存储层错误类

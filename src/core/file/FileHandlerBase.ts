@@ -5,6 +5,7 @@
 
 import * as Crypto from 'expo-crypto';
 import { StorageError } from '../../types/storageErrorInfc';
+import logger from '../../utils/logger';
 
 /**
  * 文件处理器抽象基类，包含公共方法
@@ -53,7 +54,7 @@ export abstract class FileHandlerBase {
    */
   protected validateDataItem(item: any): boolean {
     if (typeof item !== 'object' || item === null) {
-      console.warn(`skip invalid data item:`, item);
+      logger.warn(`skip invalid data item:`, item);
       return false;
     }
     return true;

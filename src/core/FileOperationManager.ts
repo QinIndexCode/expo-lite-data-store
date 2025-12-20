@@ -12,6 +12,7 @@ import { FileInfoCache } from './file/FileInfoCache';
 import { PermissionChecker } from './file/PermissionChecker';
 import { SingleFileHandler } from './file/SingleFileHandler';
 import { IMetadataManager } from '../types/metadataManagerInfc';
+import logger from '../utils/logger';
 
 /**
  * 文件操作管理器类
@@ -52,7 +53,7 @@ export class FileOperationManager {
   updateChunkSize(chunkSize: number): void {
     if (this.fileHandlerFactory && typeof (this.fileHandlerFactory as any).updateChunkSize === 'function') {
       (this.fileHandlerFactory as any).updateChunkSize(chunkSize);
-      console.log('[FileOperationManager] Chunk size updated to:', chunkSize);
+      logger.info('[FileOperationManager] Chunk size updated to:', chunkSize);
     }
   }
 

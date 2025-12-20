@@ -1,6 +1,7 @@
 // src/core/cache/__tests__/CacheMonitor.test.ts
 import { CacheMonitor } from '../../monitor/CacheMonitor';
 import { CacheManager, CacheStrategy } from '../CacheManager';
+import logger from '../../../utils/logger';
 
 //
 describe('CacheMonitor', () => {
@@ -8,7 +9,7 @@ describe('CacheMonitor', () => {
   let cacheMonitor: CacheMonitor;
 
   beforeEach(() => {
-    console.log('[CacheMonitor.test] beforeEach: 创建 CacheManager 和 CacheMonitor');
+    logger.info('[CacheMonitor.test] beforeEach: 创建 CacheManager 和 CacheMonitor');
     cacheManager = new CacheManager({
       strategy: CacheStrategy.LRU,
       maxSize: 100,
@@ -20,20 +21,20 @@ describe('CacheMonitor', () => {
   });
 
   afterEach(done => {
-    console.log('[CacheMonitor.test] afterEach: 开始清理资源');
+    logger.info('[CacheMonitor.test] afterEach: 开始清理资源');
     // 确保停止监控并清理所有资源
     if (cacheMonitor) {
-      console.log('[CacheMonitor.test] afterEach: 停止 CacheMonitor');
+      logger.info('[CacheMonitor.test] afterEach: 停止 CacheMonitor');
       cacheMonitor.stopMonitoring();
       cacheMonitor.clearHistory();
       cacheMonitor.setEnabled(false);
     }
     // 清理 CacheManager 的定时器
     if (cacheManager) {
-      console.log('[CacheMonitor.test] afterEach: 清理 CacheManager');
+      logger.info('[CacheMonitor.test] afterEach: 清理 CacheManager');
       cacheManager.cleanup();
     }
-    console.log('[CacheMonitor.test] afterEach: 资源清理完成，调用 done');
+    logger.info('[CacheMonitor.test] afterEach: 资源清理完成，调用 done');
     // 使用 process.nextTick 而不是 setTimeout，避免阻塞
     process.nextTick(done);
   });
@@ -123,17 +124,17 @@ describe('CacheMonitor', () => {
 
   describe('监控控制', () => {
     it('应该能够启动和停止监控', done => {
-      console.log('[CacheMonitor.test] 启动和停止监控: 开始测试');
+      logger.info('[CacheMonitor.test] 启动和停止监控: 开始测试');
       cacheMonitor.startMonitoring(100);
       expect(cacheMonitor.isEnabled()).toBe(true);
-      console.log('[CacheMonitor.test] 启动和停止监控: 监控已启动');
+      logger.info('[CacheMonitor.test] 启动和停止监控: 监控已启动');
 
       // 等待一小段时间确保定时器已启动
       setTimeout(() => {
-        console.log('[CacheMonitor.test] 启动和停止监控: 停止监控');
+        logger.info('[CacheMonitor.test] 启动和停止监控: 停止监控');
         cacheMonitor.stopMonitoring();
         expect(cacheMonitor.isEnabled()).toBe(true); // 停止后监控器仍然启用，只是定时器停止了
-        console.log('[CacheMonitor.test] 启动和停止监控: 测试完成');
+        logger.info('[CacheMonitor.test] 启动和停止监控: 测试完成');
         done();
       }, 50);
     });

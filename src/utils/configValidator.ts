@@ -164,13 +164,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证enableFieldLevelEncryption
-      if (encryption.enableFieldLevelEncryption !== undefined) {
-        if (typeof encryption.enableFieldLevelEncryption !== 'boolean') {
-          result.errors.push('encryption.enableFieldLevelEncryption must be a boolean');
-          result.isValid = false;
-        }
-      }
+
 
       // 验证encryptedFields
       if (encryption.encryptedFields !== undefined) {
@@ -442,9 +436,7 @@ export class ConfigValidator {
       config.encryption.keyIterations = 120000;
     }
 
-    if (typeof config.encryption.enableFieldLevelEncryption !== 'boolean') {
-      config.encryption.enableFieldLevelEncryption = true;
-    }
+
 
     if (!Array.isArray(config.encryption.encryptedFields)) {
       config.encryption.encryptedFields = ['password', 'email', 'phone'];

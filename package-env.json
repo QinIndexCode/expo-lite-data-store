@@ -1,12 +1,12 @@
 {
-  "name": "expo-lite-data-store",
-  "version": "1.1.0",
+  "name": "expo-lite-data-store", 
+  "version": "2.0.0-beta.2",
   "main": "dist/js/index.js",
   "types": "dist/types/index.d.ts",
   "author": "QinIndexCode",
   "license": "MIT",
-  "description": "A lite data store for Expo; \n Detail in https://github.com/QinIndexCode/expo-lite-data-store fix update ,remove,delete issue",
-  "versionDescription": "Optimize configuration system, fix config file usage in Expo project, remove config API, improve biometric authentication behavior, and enhance documentation.",
+  "description": "A lite data store for Expo; \n Detail in https://github.com/QinIndexCode/expo-lite-data-store",
+  "versionDescription": "Major release with enhanced encryption, improved field-level encryption logic, and various performance optimizations.",
   "keywords": [
     "expo",
     "data store",

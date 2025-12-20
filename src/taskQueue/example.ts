@@ -4,15 +4,16 @@
 import storage from '../core/adapter/FileSystemStorageAdapter';
 import { StorageTaskType } from './StorageTaskProcessor';
 import { TaskPriority, taskQueue } from './taskQueue';
+import logger from '../utils/logger';
 
 /**
  * 任务队列使用示例
  */
 async function taskQueueExample() {
-  console.log('=== 任务队列使用示例 ===');
+  logger.info('=== 任务队列使用示例 ===');
 
   // 创建测试表
-  console.log('1. 创建测试表...');
+  logger.info('1. 创建测试表...');
   await storage.createTable('test_table', {
     columns: {
       id: 'number',
@@ -26,7 +27,7 @@ async function taskQueueExample() {
   });
 
   // 示例1：使用任务队列执行批量写入
-  console.log('\n2. 使用任务队列执行批量写入...');
+  logger.info('\n2. 使用任务队列执行批量写入...');
   const bulkWriteResult = await new Promise((resolve, reject) => {
     taskQueue.addTask(
       StorageTaskType.BULK_WRITE,
@@ -64,10 +65,10 @@ async function taskQueueExample() {
       }
     );
   });
-  console.log('批量写入结果:', bulkWriteResult);
+  logger.info('批量写入结果:', bulkWriteResult);
 
   // 示例2：使用任务队列执行模式迁移
-  console.log('\n3. 使用任务队列执行模式迁移...');
+  logger.info('\n3. 使用任务队列执行模式迁移...');
   await new Promise((resolve, reject) => {
     taskQueue.addTask(
       StorageTaskType.MIGRATE_TO_CHUNKED,
@@ -77,7 +78,7 @@ async function taskQueueExample() {
         timeout: 60000,
         callback: task => {
           if (task.status === 'completed') {
-            console.log('Mode migration completed');
+            logger.info('Mode migration completed');
             resolve(null);
           } else {
             reject(task.error);
@@ -88,7 +89,7 @@ async function taskQueueExample() {
   });
 
   // 示例3：使用任务队列执行读取操作
-  console.log('\n4. 使用任务队列执行读取操作...');
+  logger.info('\n4. 使用任务队列执行读取操作...');
   const readResult = await new Promise((resolve, reject) => {
     taskQueue.addTask(
       StorageTaskType.READ,
@@ -110,23 +111,23 @@ async function taskQueueExample() {
       }
     );
   });
-  console.log('读取结果:', readResult);
+  logger.info('读取结果:', readResult);
 
   // 示例4：获取队列状态
-  console.log('\n5. 获取队列状态...');
+  logger.info('\n5. 获取队列状态...');
   const status = taskQueue.getStatus();
-  console.log('队列状态:', status);
+  logger.info('队列状态:', status);
 
   // 清理测试表
-  console.log('\n6. 清理测试表...');
+  logger.info('\n6. 清理测试表...');
   await storage.deleteTable('test_table');
 
-  console.log('\n=== 任务队列使用示例完成 ===');
+  logger.info('\n=== 任务队列使用示例完成 ===');
 }
 
 // 运行示例
 if (require.main === module) {
-  taskQueueExample().catch(console.error);
+  taskQueueExample().catch(logger.error);
 }
 
 export { taskQueueExample };

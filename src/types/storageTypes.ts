@@ -56,6 +56,8 @@ export type CreateTableOptions = CommonOptions & {
   chunkSize?: number; // 分片大小阈值，超过此值将使用分片写入
   initialData?: Record<string, any>[]; // 初始数据
   mode?: 'single' | 'chunked'; // 存储模式
+
+  encryptedFields?: string[]; // 需要加密的字段列表
 };
 
 /**

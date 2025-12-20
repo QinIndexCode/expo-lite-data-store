@@ -18,18 +18,18 @@ import {
   rollback,
   migrateToChunked,
   clearTable,
-} from './dist/js/expo-lite-data-store.js';
-
-console.log('=== Testing expo-lite-data-store Comprehensive APIs ===\n');
+} from '../dist/js/expo-lite-data-store.js';
+import logger from '../dist/js/logger.js';
+logger.info('=== Testing expo-lite-data-store Comprehensive APIs ===\n');
 
 // Helper function to print test results
 const test = async (name, fn) => {
   try {
     await fn();
-    console.log(`✅ ${name}`);
+    logger.info(`✅ ${name}`);
     return true;
   } catch (error) {
-    console.error(`❌ ${name}:`, error.message);
+    logger.error(`❌ ${name}:`, error.message);
     return false;
   }
 };
@@ -50,7 +50,7 @@ const runTests = async () => {
   // Cleanup any existing test tables
   await cleanupTables(testTables);
 
-  console.log('1. Testing Table Management APIs...');
+  logger.info('1. Testing Table Management APIs...');
 
   // Create Table
   await test('createTable', async () => {
@@ -86,7 +86,7 @@ const runTests = async () => {
     },
   });
 
-  console.log('\n2. Testing Data Operations APIs...');
+  logger.info('\n2. Testing Data Operations APIs...');
 
   // Insert Data
   await test('insert (single record)', async () => {
@@ -196,7 +196,7 @@ const runTests = async () => {
     if (john.age !== 32) throw new Error("John's age should be updated to 32");
   });
 
-  console.log('\n3. Testing Transaction APIs...');
+  logger.info('\n3. Testing Transaction APIs...');
 
   // Successful Transaction
   await test('Transaction - commit', async () => {
@@ -232,7 +232,7 @@ const runTests = async () => {
     }
   });
 
-  console.log('\n4. Testing Advanced Features...');
+  logger.info('\n4. Testing Advanced Features...');
 
   // Mode Migration - migrateToChunked
   await test('migrateToChunked', async () => {
@@ -293,9 +293,9 @@ const runTests = async () => {
   // Cleanup all test tables
   await cleanupTables([...testTables, 'test_products_complex']);
 
-  console.log('\n=== All Tests Completed ===');
-  console.log('Note: Sync-related APIs (getSyncStats, syncNow, setAutoSyncConfig) are not exposed in the public API.');
-  console.log(
+  logger.info('\n=== All Tests Completed ===');
+  logger.info('Note: Sync-related APIs (getSyncStats, syncNow, setAutoSyncConfig) are not exposed in the public API.');
+  logger.info(
     'Encryption is implemented but disabled by default. To test encryption, set USE_ENCRYPTION = true in src/core/db.ts.'
   );
 };

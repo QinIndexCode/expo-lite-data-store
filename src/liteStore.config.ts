@@ -5,6 +5,7 @@
  * node_modules/expo-lite-data-store/dist/js/liteStore.config.js
  */
 import { LiteStoreConfig } from './types/config';
+import logger from './utils/logger';
 
 // Default Configuration
 const defaultConfig: LiteStoreConfig = {
@@ -26,8 +27,7 @@ const defaultConfig: LiteStoreConfig = {
     keyIterations: 120_000, // 2025 recommended: ≥120,000
 
     // Field Level Encryption
-    enableFieldLevelEncryption: true, // Enable field-level encryption
-    encryptedFields: ['password', 'email', 'phone'], // Fields to encrypt
+    encryptedFields: ['password', 'email', 'phone'], // Default fields to encrypt
     requireAuthOnAccess: false, // Require authentication when accessing encrypted data
 
     // Key Cache Optimization
@@ -53,13 +53,6 @@ const defaultConfig: LiteStoreConfig = {
     enableCompression: false, // Enable cache compression (adjust based on device performance)
     cleanupInterval: 300_000, // 5 minutes
     memoryWarningThreshold: 0.8, // Memory warning threshold (80%)
-    // Auto-sync Configuration
-    autoSync: {
-      enabled: true, // Enable auto-sync
-      interval: 5000, // Sync every 5 seconds
-      minItems: 1, // Sync when at least 1 dirty item exists
-      batchSize: 100, // Maximum items per sync batch
-    },
   },
 
   // Monitoring Configuration
@@ -68,13 +61,21 @@ const defaultConfig: LiteStoreConfig = {
     enableHealthChecks: true, // Enable health checks
     metricsRetention: 86_400_000, // 24 hours
   },
+
+  // Auto Sync Configuration
+  autoSync: {
+    enabled: true, // Enable auto sync by default
+    interval: 5000, // 5 seconds sync interval
+    minItems: 1, // Minimum items to trigger sync
+    batchSize: 100, // Batch size for sync operations
+  },
 };
 
 // Current Configuration Object
 const config: LiteStoreConfig = { ...defaultConfig };
 
 // Configuration Initialization Log
-console.log('✅ Configuration initialized with default settings'); // Log default settings
+logger.success('✅ Configuration initialized with default settings'); // Log default settings
 
 // Export Configuration
 // Note: Configuration is immutable in runtime. To modify, edit the bundled file directly.

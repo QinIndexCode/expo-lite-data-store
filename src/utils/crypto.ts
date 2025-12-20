@@ -9,8 +9,22 @@
  */
 import bcrypt from 'bcryptjs';
 import * as CryptoES from 'crypto-es';
-import * as Crypto from 'expo-crypto';
-import * as SecureStore from 'expo-secure-store';
+import logger from './logger';
+// 动态导入 Expo 模块，避免在非 Expo 环境中崩溃
+let Crypto: any;
+let SecureStore: any;
+
+// 尝试导入 Expo 模块
+try {
+  // 仅在 Expo 环境中导入这些模块
+  Crypto = require('expo-crypto');
+  SecureStore = require('expo-secure-store');
+} catch (error) {
+  logger.warn('Expo modules not available, running in non-Expo environment');
+  // 在非 Expo 环境中，我们将使用 CryptoES 或 Node.js crypto 模块进行随机数生成
+  // 对于 SecureStore，我们将使用内存存储作为回退
+}
+
 import config from '../liteStore.config';
 
 /**
@@ -77,6 +91,11 @@ interface EncryptedPayload {
  * 主密钥别名
  */
 const MASTER_KEY_ALIAS = 'expo_litedb_master_key_v2025';
+
+/**
+ * 非 Expo 环境下的内存存储回退
+ */
+let inMemoryStore: Map<string, string> = new Map();
 
 /**
  * 密钥派生迭代次数
@@ -239,7 +258,9 @@ export const stopKeyCacheCleanup = (): void => {
 
 // 初始化时启动自动清理
 // 但不在测试环境中自动启动，避免 Jest 检测到开放句柄
-if (process.env.NODE_ENV !== 'test') {
+// 确保在所有环境中都能正确判断，包括浏览器环境
+const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
+if (!isTestEnvironment) {
   initializeKeyCacheCleanup();
 }
 
@@ -310,8 +331,23 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
 export const encrypt = async (plainText: string, masterKey: string): Promise<string> => {
   try {
     // 随机salt和iv
-    const saltBytes = Crypto.getRandomBytes(16);
-    const ivBytes = Crypto.getRandomBytes(16); // CTR用16字节IV
+    let saltBytes: Uint8Array;
+    let ivBytes: Uint8Array;
+    
+    // 检查 Crypto 是否可用
+    if (typeof Crypto !== 'undefined' && Crypto.getRandomBytes) {
+      saltBytes = Crypto.getRandomBytes(16);
+      ivBytes = Crypto.getRandomBytes(16); // CTR用16字节IV
+    } else {
+      // 非 Expo 环境下的回退方案
+      logger.warn('Expo Crypto not available, using fallback random generation');
+      saltBytes = new Uint8Array(16);
+      ivBytes = new Uint8Array(16);
+      for (let i = 0; i < 16; i++) {
+        saltBytes[i] = Math.floor(Math.random() * 256);
+        ivBytes[i] = Math.floor(Math.random() * 256);
+      }
+    }
 
     // 派生密钥
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltBytes);
@@ -395,17 +431,58 @@ export const decrypt = async (encryptedBase64: string, masterKey: string): Promi
  * @param requireAuthOnAccess 是否每次访问都需要生物识别验证，默认为 false
  */
 export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promise<string> => {
-  let key = await SecureStore.getItemAsync(MASTER_KEY_ALIAS, {
-    requireAuthentication: requireAuthOnAccess,
-    authenticationPrompt: '验证身份访问数据库', // Authenticate to access database
-  });
-
-  if (!key) {
-    key = await generateMasterKey();
-    await SecureStore.setItemAsync(MASTER_KEY_ALIAS, key, {
-      requireAuthentication: requireAuthOnAccess,
-      authenticationPrompt: '设置加密密钥', // Set encryption key
-    });
+  let key;
+  
+  try {
+    // 检查 SecureStore 是否可用
+    if (typeof SecureStore !== 'undefined') {
+      try {
+        // 尝试使用生物识别获取密钥
+        key = await SecureStore.getItemAsync(MASTER_KEY_ALIAS, {
+          requireAuthentication: requireAuthOnAccess,
+          authenticationPrompt: '验证身份访问数据库', // Authenticate to access database
+        });
+        
+        if (!key) {
+          key = await generateMasterKey();
+          // 尝试使用生物识别存储密钥
+          await SecureStore.setItemAsync(MASTER_KEY_ALIAS, key, {
+            requireAuthentication: requireAuthOnAccess,
+            authenticationPrompt: '设置加密密钥', // Set encryption key
+          });
+        }
+      } catch (error) {
+        logger.warn('生物识别验证失败，尝试不使用生物识别:', error);
+        // 生物识别失败，回退到不使用生物识别的方式
+        // 不使用生物识别获取密钥
+        key = await SecureStore.getItemAsync(MASTER_KEY_ALIAS);
+        
+        if (!key) {
+          key = await generateMasterKey();
+          // 不使用生物识别存储密钥
+          await SecureStore.setItemAsync(MASTER_KEY_ALIAS, key);
+        }
+      }
+    } else {
+      // SecureStore 不可用，使用内存存储作为回退
+      logger.warn('SecureStore not available, using in-memory store');
+      
+      // 从内存存储获取密钥
+      key = inMemoryStore.get(MASTER_KEY_ALIAS);
+      
+      if (!key) {
+        key = await generateMasterKey();
+        // 存储到内存存储
+        inMemoryStore.set(MASTER_KEY_ALIAS, key);
+      }
+    }
+  } catch (error) {
+    logger.error('获取加密密钥失败:', error);
+    throw new CryptoError(
+      '无法获取或生成加密密钥',
+      'KEY_DERIVE_FAILED',
+      error
+    );
   }
 
   return key;
@@ -413,7 +490,18 @@ export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promis
 
 // resetMasterKey 重置主密钥（登出/重置用）
 export const resetMasterKey = async (): Promise<void> => {
-  await SecureStore.deleteItemAsync(MASTER_KEY_ALIAS);
+  try {
+    if (typeof SecureStore !== 'undefined') {
+      await SecureStore.deleteItemAsync(MASTER_KEY_ALIAS);
+    } else {
+      // SecureStore 不可用，清除内存存储
+      inMemoryStore.delete(MASTER_KEY_ALIAS);
+    }
+  } catch (error) {
+    logger.warn('Failed to reset master key:', error);
+    // 确保无论如何都清除内存中的密钥缓存
+    inMemoryStore.delete(MASTER_KEY_ALIAS);
+  }
   // 清除密钥缓存
   clearKeyCache();
 };
@@ -423,9 +511,31 @@ export const resetMasterKey = async (): Promise<void> => {
  * @returns 主密钥
  */
 export const generateMasterKey = async (): Promise<string> => {
-  const bytes = Crypto.getRandomBytes(32);
-  // 修正：使用 uint8ArrayToBase64
-  return uint8ArrayToBase64(bytes);
+  try {
+    // 尝试使用 Expo Crypto API 生成随机字节
+    if (typeof Crypto !== 'undefined' && Crypto.getRandomBytes) {
+      const bytes = Crypto.getRandomBytes(32);
+      return uint8ArrayToBase64(bytes);
+    } else {
+      // 非 Expo 环境下的回退方案：使用 Math.random 生成随机数据
+      // 直接使用 Math.random 生成 32 字节的随机数据
+      // 这不是安全的，但在非 Expo 环境中是最后的选择
+      logger.warn('Using insecure random number generation for master key');
+      
+      // 生成 32 个随机字节
+      const bytes = new Uint8Array(32);
+      for (let i = 0; i < 32; i++) {
+        bytes[i] = Math.floor(Math.random() * 256);
+      }
+      
+      return uint8ArrayToBase64(bytes);
+    }
+  } catch (error) {
+    logger.error('Failed to generate secure random bytes, falling back to insecure generation:', error);
+    // 最后回退：使用 Math.random 生成随机字符串
+    // 这不是安全的，但在非 Expo 环境中是最后的选择
+    return Array.from({ length: 32 }, () => Math.random().toString(36).charAt(2)).join('');
+  }
 };
 
 // ==================== bcrypt 密码哈希功能 ====================
@@ -491,17 +601,42 @@ export const encryptBulk = async (plainTexts: string[], masterKey: string): Prom
   if (plainTexts.length === 0) return [];
 
   try {
-    // 为批量操作生成一次salt和iv
-    const saltBytes = Crypto.getRandomBytes(16);
-    const ivBytes = Crypto.getRandomBytes(16);
+    // 为批量操作生成一次salt（重用密钥派生，提高性能）
+    let saltBytes: Uint8Array;
+    
+    // 检查 Crypto 是否可用
+    if (typeof Crypto !== 'undefined' && Crypto.getRandomBytes) {
+      saltBytes = Crypto.getRandomBytes(16);
+    } else {
+      // 非 Expo 环境下的回退方案
+      logger.warn('Expo Crypto not available, using fallback random generation');
+      saltBytes = new Uint8Array(16);
+      for (let i = 0; i < 16; i++) {
+        saltBytes[i] = Math.floor(Math.random() * 256);
+      }
+    }
 
     // 一次派生密钥（重用）
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltBytes);
+    const saltStr = uint8ArrayToBase64(saltBytes);
 
     // 批量加密所有文本
     const encryptedResults: BulkEncryptionResult[] = [];
 
     for (const plainText of plainTexts) {
+      // 为每个加密操作生成唯一的 iv
+      let ivBytes: Uint8Array;
+      if (typeof Crypto !== 'undefined' && Crypto.getRandomBytes) {
+        ivBytes = Crypto.getRandomBytes(16);
+      } else {
+        // 非 Expo 环境下的回退方案
+        ivBytes = new Uint8Array(16);
+        for (let i = 0; i < 16; i++) {
+          ivBytes[i] = Math.floor(Math.random() * 256);
+        }
+      }
+      const ivStr = uint8ArrayToBase64(ivBytes);
+
       // AES-CTR 加密
       const encrypted = CryptoES.AES.encrypt(plainText, aesKey, {
         iv: CryptoES.WordArray.create(ivBytes),
@@ -517,9 +652,8 @@ export const encryptBulk = async (plainTexts: string[], masterKey: string): Prom
 
       encryptedResults.push({
         encryptedData: ciphertextBase64,
-        // 修正：使用 uint8ArrayToBase64
-        salt: uint8ArrayToBase64(saltBytes),
-        iv: uint8ArrayToBase64(ivBytes),
+        salt: saltStr,
+        iv: ivStr,
         hmac: CryptoES.Base64.stringify(hmac),
       });
     }
@@ -603,13 +737,27 @@ export const decryptBulk = async (encryptedTexts: string[], masterKey: string): 
  */
 export const generateHash = async (data: string, algorithm: 'SHA-256' | 'SHA-512' = 'SHA-512'): Promise<string> => {
   try {
-    switch (algorithm) {
-      case 'SHA-256':
-        return await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, data);
-      case 'SHA-512':
-        return await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA512, data);
-      default:
-        throw new CryptoError(`Unsupported hash algorithm: ${algorithm}`, 'HASH_FAILED');
+    // 检查 Crypto 是否可用
+    if (typeof Crypto !== 'undefined' && Crypto.digestStringAsync) {
+      switch (algorithm) {
+        case 'SHA-256':
+          return await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, data);
+        case 'SHA-512':
+          return await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA512, data);
+        default:
+          throw new CryptoError(`Unsupported hash algorithm: ${algorithm}`, 'HASH_FAILED');
+      }
+    } else {
+      // 非 Expo 环境下的回退方案，使用 CryptoES
+      logger.warn('Expo Crypto not available, using CryptoES for hashing');
+      switch (algorithm) {
+        case 'SHA-256':
+          return CryptoES.SHA256(data).toString(CryptoES.Hex);
+        case 'SHA-512':
+          return CryptoES.SHA512(data).toString(CryptoES.Hex);
+        default:
+          throw new CryptoError(`Unsupported hash algorithm: ${algorithm}`, 'HASH_FAILED');
+      }
     }
   } catch (error) {
     throw new CryptoError('Hash generation failed', 'HASH_FAILED', error);
@@ -701,7 +849,7 @@ export const decryptFields = async (
         }
       }
     } catch (error) {
-      console.warn(`字段 ${field} 解密失败:`, error);
+      logger.warn(`字段 ${field} 解密失败:`, error);
       // 保留原始加密值，不抛出错误
     }
   });

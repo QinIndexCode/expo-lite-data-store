@@ -25,10 +25,10 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   constructor(options: { requireAuthOnAccess?: boolean } = {}) {
     // 配置验证
     this.validateConfig();
-    // 优先使用选项中的配置，否则使用全局配置中的默认值，默认值为false
+    // 优先使用选项中的配置，否则使用默认值false
     this.requireAuthOnAccess = options.requireAuthOnAccess !== undefined 
       ? options.requireAuthOnAccess 
-      : config.encryption.requireAuthOnAccess || false;
+      : false;
   }
 
   /**
@@ -77,12 +77,6 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     }
 
     // 验证字段级加密配置
-    if (config.encryption.enableFieldLevelEncryption !== undefined && typeof config.encryption.enableFieldLevelEncryption !== 'boolean') {
-      throw new Error(
-        `Invalid enableFieldLevelEncryption value: ${config.encryption.enableFieldLevelEncryption}. Must be a boolean.`
-      );
-    }
-
     if (config.encryption.encryptedFields !== undefined && !Array.isArray(config.encryption.encryptedFields)) {
       throw new Error(`Invalid encryptedFields value: ${config.encryption.encryptedFields}. Must be an array.`);
     }
@@ -156,6 +150,8 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       columns?: Record<string, string>;
       initialData?: Record<string, any>[];
       mode?: 'single' | 'chunked';
+      enableFieldLevelEncryption?: boolean;
+      encryptedFields?: string[];
     }
   ) {
     return storage.createTable(tableName, options);
@@ -188,43 +184,46 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         
         let encryptedData: Record<string, any>[] = [];
         
-        // 明确检查：如果同时启用了字段级加密和整表加密，抛出错误
-        if (options?.encryptFullTable && config.encryption.enableFieldLevelEncryption && (config.encryption.encryptedFields?.length || 0) > 0) {
-          throw new Error('Cannot use both full table encryption and field-level encryption simultaneously. Please choose one encryption mode.');
-        }
-        
         // 加密写入逻辑 - 整表加密和字段级加密互斥
-        if (options?.encryptFullTable) {
-          // 整表加密模式
+        // 对于EncryptedStorageAdapter，默认使用整表加密
+        const shouldEncryptFullTable = options?.encryptFullTable !== false;
+        if (shouldEncryptFullTable) {
+          // 整表加密模式 - 优先级最高，直接忽略字段级加密配置
           const serializedData = JSON.stringify(finalData);
           const encrypted = await encrypt(serializedData, key);
           encryptedData = [{ __enc: encrypted }];
-        } else if (config.encryption.enableFieldLevelEncryption && (config.encryption.encryptedFields?.length || 0) > 0) {
-          // 字段级加密模式
-          const encryptedFields = config.encryption.encryptedFields || [];
+        } else {
+          // 字段级加密模式 - 根据encryptedFields是否存在来决定
+          const tableMeta = (storage as any).getTableMeta(tableName);
+          // 优先使用表元数据中的加密字段配置，然后才是全局配置
+          const encryptedFields = tableMeta?.encryptedFields?.length > 0 
+            ? tableMeta.encryptedFields 
+            : (config.encryption.encryptedFields || []);
           
-          if (config.encryption.useBulkOperations && finalData.length > 1) {
-            // 批量字段级加密
-            encryptedData = await encryptFieldsBulk(finalData, {
-              fields: encryptedFields,
-              masterKey: key,
-            });
-          } else {
-            // 单次字段级加密
-            const encryptionPromises = finalData.map(item =>
-              encryptFields(item, {
+          if (encryptedFields.length > 0) {
+            if (config.encryption.useBulkOperations && finalData.length > 1) {
+              // 批量字段级加密
+              encryptedData = await encryptFieldsBulk(finalData, {
                 fields: encryptedFields,
                 masterKey: key,
-              })
-            );
-            encryptedData = await Promise.all(encryptionPromises);
+              });
+            } else {
+              // 单次字段级加密
+              const encryptionPromises = finalData.map(item =>
+                encryptFields(item, {
+                  fields: encryptedFields,
+                  masterKey: key,
+                })
+              );
+              encryptedData = await Promise.all(encryptionPromises);
+            }
+          } else {
+            // 不加密，直接写入
+            encryptedData = finalData;
           }
-        } else {
-          // 不加密，直接写入
-          encryptedData = finalData;
         }
 
-        return storage.write(tableName, encryptedData, { mode: 'overwrite', ...options });
+        return storage.write(tableName, encryptedData, { ...options, mode: options?.mode || 'overwrite' });
       },
       cause =>
         ErrorHandler.createGeneralError(
@@ -240,58 +239,59 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   async read(tableName: string, options?: ReadOptions & { bypassCache?: boolean }): Promise<Record<string, any>[]> {
     return ErrorHandler.handleAsyncError(
       async () => {
-        // 检查缓存是否有效
-        const shouldBypassCache = options?.bypassCache || false; // Default to false to use cache for better performance
-
         // 如果缓存超时时间为0，清除所有缓存并禁用缓存
         if (this.cacheTimeout === 0) {
           this.cachedData.clear();
           this.queryIndexes.clear();
         }
 
-        const cached = this.cachedData.get(tableName);
-        if (!shouldBypassCache && cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-          return cached.data;
-        }
+        // 总是从底层存储适配器读取最新数据，忽略缓存
+    // 这样可以确保我们获取到最新的磁盘数据，包括刚提交的事务数据
+    // 只传递与读取相关的选项，不传递查询相关的选项
+    const readOptions = options ? { bypassCache: options.bypassCache } : undefined;
+    const raw = await storage.read(tableName, readOptions);
+      if (raw.length === 0) return [];
 
-        // 读取数据时不要传递 options 参数，因为 options 可能包含 filter 选项，而我们需要先解密数据，然后再应用过滤条件
-        const raw = await storage.read(tableName);
-        if (raw.length === 0) return [];
+      const first = raw[0];
+      let result: Record<string, any>[] = [];
+      const key = await this.key();
 
-        const first = raw[0];
-        let result: Record<string, any>[] = [];
-        const key = await this.key();
+      // 获取表的元数据，以确定是否启用了字段级加密
+      const tableMeta = (storage as any).getTableMeta(tableName);
+      // 优先使用表元数据中的加密字段配置，然后才是全局配置
+      const encryptedFields = tableMeta?.encryptedFields?.length > 0 
+        ? tableMeta.encryptedFields 
+        : (config.encryption.encryptedFields || []);
 
-        if (first?.['__enc']) {
-          // 完整数据解密
-          const decryptedData = JSON.parse(await decrypt(first['__enc'], key));
-          result = Array.isArray(decryptedData) ? decryptedData : [decryptedData];
-        } else if (first?.['__enc_bulk']) {
-          // 批量数据解密
-          const decryptedStrings = await decryptBulk(first['__enc_bulk'], key);
-          result = decryptedStrings.map(str => JSON.parse(str));
-        } else if (config.encryption.enableFieldLevelEncryption && (config.encryption.encryptedFields?.length || 0) > 0) {
-          // 字段级解密
-          const encryptedFields = config.encryption.encryptedFields || [];
-          if (config.encryption.useBulkOperations && raw.length > 1) {
-            // 批量字段级解密
-            result = await decryptFieldsBulk(raw, {
+      if (first?.['__enc']) {
+        // 完整数据解密
+        const decryptedData = JSON.parse(await decrypt(first['__enc'], key));
+        result = Array.isArray(decryptedData) ? decryptedData : [decryptedData];
+      } else if (first?.['__enc_bulk']) {
+        // 批量数据解密
+        const decryptedStrings = await decryptBulk(first['__enc_bulk'], key);
+        result = decryptedStrings.map(str => JSON.parse(str));
+      } else if (encryptedFields.length > 0) {
+        // 字段级解密 - 根据encryptedFields是否存在来决定
+        if (config.encryption.useBulkOperations && raw.length > 1) {
+          // 批量字段级解密
+          result = await decryptFieldsBulk(raw, {
+            fields: encryptedFields,
+            masterKey: key,
+          });
+        } else {
+          // 单次字段级解密
+          const decryptionPromises = raw.map(item =>
+            decryptFields(item, {
               fields: encryptedFields,
               masterKey: key,
-            });
-          } else {
-            // 单次字段级解密
-            const decryptionPromises = raw.map(item =>
-              decryptFields(item, {
-                fields: encryptedFields,
-                masterKey: key,
-              })
-            );
-            result = await Promise.all(decryptionPromises);
-          }
-        } else {
-          result = raw;
+            })
+          );
+          result = await Promise.all(decryptionPromises);
         }
+      } else {
+        result = raw;
+      }
 
         // 只有当缓存超时时间大于0时，才更新缓存
         if (this.cacheTimeout > 0) {
@@ -353,7 +353,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     return storage.verifyCount(tableName);
   }
 
-  async findOne(tableName: string, filter: Record<string, any>): Promise<Record<string, any> | null> {
+  async findOne(tableName: string, filter: Record<string, any>, options?: any): Promise<Record<string, any> | null> {
     return ErrorHandler.handleAsyncError(
       async () => {
         // 优化：使用索引快速查找
@@ -385,7 +385,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         }
 
         // 没有可用索引或索引查询未找到结果，回退到读取所有数据并过滤
-        const data = await this.read(tableName);
+        const data = await this.read(tableName, options);
         const filtered = QueryEngine.filter(data, filter);
         return filtered.length > 0 ? filtered[0] : null;
       },
@@ -409,33 +409,45 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       sortBy?: string | string[];
       order?: 'asc' | 'desc' | ('asc' | 'desc')[];
       sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
-    }
+      requireAuthOnAccess?: boolean;
+    },
+    findOptions?: any
   ): Promise<Record<string, any>[]> {
     // 优先使用缓存
-    let data = await this.read(tableName);
-
-    // 调试日志：查看读取到的数据
-    console.log('Debug - findMany read data:', data.length, 'items');
-    if (data.length > 0) {
-      console.log('Debug - first item:', data[0]);
-    }
+    // 只传递与读取相关的选项，不传递skip和limit等查询选项
+    const readOptions = { ...findOptions };
+    // 移除可能影响底层存储读取的查询选项
+    delete readOptions.skip;
+    delete readOptions.limit;
+    delete readOptions.sortBy;
+    delete readOptions.order;
+    delete readOptions.sortAlgorithm;
+    
+    let data = await this.read(tableName, readOptions);
 
     // 应用过滤 - 使用QueryEngine处理所有复杂查询操作符
     if (filter) {
       const filtered = QueryEngine.filter(data, filter);
-      console.log('Debug - findMany filter:', filter, 'filtered:', filtered.length, 'items');
       data = filtered;
     }
 
     // 应用排序
     if (options?.sortBy) {
       data = QueryEngine.sort(data, options.sortBy, options.order, options.sortAlgorithm);
+    } else {
+      // 默认按id排序，确保分页结果一致
+      data = QueryEngine.sort(data, 'id', 'asc', options?.sortAlgorithm);
     }
 
-    // 应用分页 - 优化：使用QueryEngine的分页方法
-    data = QueryEngine.paginate(data, options?.skip, options?.limit);
-
-    return data;
+    // 应用分页 - 手动实现分页逻辑，确保正确处理skip和limit
+    const skip = options?.skip || 0;
+    const limit = options?.limit;
+    
+    if (limit !== undefined) {
+      return data.slice(skip, skip + limit);
+    } else {
+      return data.slice(skip);
+    }
   }
 
   async bulkWrite(
@@ -443,13 +455,15 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     operations: Array<{
       type: 'insert' | 'update' | 'delete';
       data: Record<string, any> | Record<string, any>[];
-    }>
+      where?: Record<string, any>;
+    }>,
+    options?: any
   ): Promise<WriteResult> {
     // 清除缓存
     this.clearTableCache(tableName);
 
-    // 1. 读取所有数据
-    const allData = await this.read(tableName);
+    // 1. 读取所有数据，传递options参数确保正确处理加密数据
+    const allData = await this.read(tableName, options);
     
     let finalData = [...allData];
     let writtenCount = 0;
@@ -463,35 +477,56 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         writtenCount += insertData.length;
       } else if (operation.type === 'update') {
         // 更新操作
-        const updateData = Array.isArray(operation.data) ? operation.data : [operation.data];
-        for (const updateItem of updateData) {
-          finalData = finalData.map(item => {
-            // 简单的匹配逻辑，假设updateItem包含id或完整的匹配条件
-            const idField = Object.keys(updateItem).find(key => key === 'id' || key === '_id');
-            if (idField && item[idField] === updateItem[idField]) {
-              writtenCount++;
-              return { ...item, ...updateItem };
+        const updateItems = Array.isArray(operation.data) ? operation.data : [operation.data];
+        
+        for (const updateItem of updateItems) {
+          if (operation.where) {
+            // 有where条件的更新
+            const matchedItems = QueryEngine.filter(finalData, operation.where);
+            for (const matchedItem of matchedItems) {
+              const index = finalData.findIndex(item => item.id === matchedItem.id);
+              if (index !== -1) {
+                finalData[index] = QueryEngine.update(finalData[index], updateItem);
+                writtenCount++;
+              }
             }
-            return item;
-          });
+          } else {
+            // 通过id更新
+            const index = finalData.findIndex(item => item.id === updateItem.id);
+            if (index !== -1) {
+              finalData[index] = QueryEngine.update(finalData[index], updateItem);
+              writtenCount++;
+            }
+          }
         }
       } else if (operation.type === 'delete') {
         // 删除操作
-        const deleteData = Array.isArray(operation.data) ? operation.data : [operation.data];
-        for (const deleteItem of deleteData) {
-          const originalLength = finalData.length;
-          finalData = finalData.filter(item => {
-            // 简单的匹配逻辑，假设deleteItem包含id或完整的匹配条件
-            const idField = Object.keys(deleteItem).find(key => key === 'id' || key === '_id');
-            return !(idField && item[idField] === deleteItem[idField]);
-          });
-          writtenCount += originalLength - finalData.length;
+        if (operation.where) {
+          // 有where条件的删除
+          const matchedItems = QueryEngine.filter(finalData, operation.where);
+          for (const matchedItem of matchedItems) {
+            const index = finalData.findIndex(item => item.id === matchedItem.id);
+            if (index !== -1) {
+              finalData.splice(index, 1);
+              writtenCount++;
+            }
+          }
+        } else {
+          // 通过id删除
+          const deleteItems = Array.isArray(operation.data) ? operation.data : [operation.data];
+          for (const deleteItem of deleteItems) {
+            const index = finalData.findIndex(item => item.id === deleteItem.id);
+            if (index !== -1) {
+              finalData.splice(index, 1);
+              writtenCount++;
+            }
+          }
         }
       }
     }
     
     // 3. 使用write方法重新写入数据，确保加密逻辑正确应用
-    const result = await this.write(tableName, finalData);
+    const result = await this.write(tableName, finalData, options);
     
     return { ...result, written: writtenCount };
   }
@@ -507,88 +542,95 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     await this.createTable(tableName, { initialData: data, mode: 'chunked' });
   }
 
-  async delete(tableName: string, where: Record<string, any>): Promise<number> {
+  async delete(tableName: string, where: Record<string, any>, options?: any): Promise<number> {
     // 清除缓存
     this.clearTableCache(tableName);
 
-    // 直接调用底层存储适配器的delete方法
-    const result = await storage.delete(tableName, where);
-
-    return result;
+    // 1. 读取所有数据
+    const allData = await this.read(tableName, options);
+    
+    // 2. 使用QueryEngine处理复杂条件过滤
+    const matchedItems = QueryEngine.filter(allData, where);
+    
+    // 3. 过滤掉匹配的记录
+    const remainingData = allData.filter(item => {
+      const itemId = item.id || item._id;
+      return !matchedItems.some(matched => matched.id === itemId || matched._id === itemId);
+    });
+    
+    // 4. 重新写入数据
+    await this.write(tableName, remainingData, { ...options, mode: 'overwrite' });
+    
+    return matchedItems.length;
   }
 
-  async beginTransaction(): Promise<void> {
-    return storage.beginTransaction();
+  async beginTransaction(options?: any): Promise<void> {
+    return storage.beginTransaction(options);
   }
 
-  async commit(): Promise<void> {
-    return storage.commit();
+  async commit(options?: any): Promise<void> {
+    // 直接调用底层storage的commit方法
+    // 因为事务状态由底层storage管理，EncryptedStorageAdapter只负责加密/解密
+    // 所有事务操作在底层已经正确处理，EncryptedStorageAdapter的write/delete/update等方法会自动应用加密逻辑
+    return storage.commit(options);
   }
 
-  async rollback(): Promise<void> {
-    return storage.rollback();
+  async rollback(options?: any): Promise<void> {
+    return storage.rollback(options);
   }
 
-  async update(tableName: string, data: Record<string, any>, where: Record<string, any>): Promise<number> {
+  async update(tableName: string, data: Record<string, any>, where: Record<string, any>, options?: any): Promise<number> {
     // 清除缓存
     this.clearTableCache(tableName);
     
-    // 1. 读取所有数据
-    const allData = await this.read(tableName);
+    // 不在事务中，直接执行更新操作
+    // 事务处理由底层storage负责，EncryptedStorageAdapter只负责加密/解密
+    // 所有事务操作在底层已经正确处理，EncryptedStorageAdapter的write/delete/update等方法会自动应用加密逻辑
+    // 1. 读取所有数据，不传递where条件给read方法，但传递options
+    const allData = await this.read(tableName, options);
     
     // 2. 找到匹配where条件的记录
     let updatedCount = 0;
-    const updatedData = allData.map((item: Record<string, any>) => {
-      // 检查是否匹配where条件
-      let matches = true;
-      for (const [key, value] of Object.entries(where)) {
-        if (item[key] !== value) {
-          matches = false;
-          break;
-        }
-      }
-      
-      if (matches) {
+    
+    // 使用QueryEngine处理复杂条件过滤
+    const matchedItems = QueryEngine.filter(allData, where);
+    
+    // 创建匹配项的ID映射，用于快速查找
+    const matchedIds = new Set(matchedItems.map(item => item.id || item._id));
+    
+    // 更新数据
+    const updatedData = allData.map(item => {
+      const itemId = item.id || item._id;
+      if (matchedIds.has(itemId)) {
         updatedCount++;
-        return { ...item, ...data };
+        return QueryEngine.update(item, data);
       }
       return item;
     });
     
     // 3. 使用write方法重新写入数据，确保加密逻辑正确应用
-    await this.write(tableName, updatedData);
+    // 确保使用正确的加密模式
+    await this.write(tableName, updatedData, { ...options, mode: 'overwrite' });
     
     return updatedCount;
   }
 
-  async remove(tableName: string, where: Record<string, any>): Promise<number> {
+  async remove(tableName: string, where: Record<string, any>, options?: any): Promise<number> {
     // 清除缓存
     this.clearTableCache(tableName);
     
     // 1. 读取所有数据
-    const allData = await this.read(tableName);
+    const allData = await this.read(tableName, options);
     
-    // 2. 过滤掉匹配where条件的记录
-    let removedCount = 0;
-    const remainingData = allData.filter((item: Record<string, any>) => {
-      // 检查是否匹配where条件
-      let matches = true;
-      for (const [key, value] of Object.entries(where)) {
-        if (item[key] !== value) {
-          matches = false;
-          break;
-        }
-      }
-      
-      if (matches) {
-        removedCount++;
-        return false; // 移除匹配的记录
-      }
-      return true; // 保留不匹配的记录
-    });
+    // 2. 使用QueryEngine处理复杂条件过滤
+    const matchedItems = QueryEngine.filter(allData, where);
+    const removedCount = matchedItems.length;
     
-    // 3. 使用write方法重新写入数据，确保加密逻辑正确应用
-    await this.write(tableName, remainingData);
+    // 3. 过滤掉匹配的记录
+    const remainingData = allData.filter(item => !matchedItems.some(matched => matched.id === item.id));
+    
+    // 4. 使用write方法重新写入数据，确保加密逻辑正确应用
+    await this.write(tableName, remainingData, options);
     
     return removedCount;
   }
@@ -606,44 +648,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     data: Record<string, any> | Record<string, any>[],
     options?: WriteOptions
   ): Promise<WriteResult> {
-    // 清除该表的缓存
-    this.clearTableCache(tableName);
-
-    const finalData = Array.isArray(data) ? data : [data];
-    const key = await this.key();
-    
-    let encryptedData: Record<string, any>[] = [];
-    
-    // 加密写入逻辑 - 整表加密和字段级加密互斥
-    if (options?.encryptFullTable) {
-      // 整表加密模式 - 插入操作不支持整表加密，直接返回错误
-      throw new Error('Full table encryption is not supported for insert operations. Use write method with overwrite mode instead.');
-    } else if (config.encryption.enableFieldLevelEncryption && (config.encryption.encryptedFields?.length || 0) > 0) {
-      // 字段级加密模式
-      const encryptedFields = config.encryption.encryptedFields || [];
-      
-      if (config.encryption.useBulkOperations && finalData.length > 1) {
-        // 批量字段级加密
-        encryptedData = await encryptFieldsBulk(finalData, {
-          fields: encryptedFields,
-          masterKey: key,
-        });
-      } else {
-        // 单次字段级加密
-        const encryptionPromises = finalData.map(item =>
-          encryptFields(item, {
-            fields: encryptedFields,
-            masterKey: key,
-          })
-        );
-        encryptedData = await Promise.all(encryptionPromises);
-      }
-    } else {
-      // 不加密，直接写入
-      encryptedData = finalData;
-    }
-
     // 插入操作总是使用append模式，忽略传入的mode选项
-    return storage.insert(tableName, encryptedData, { ...options, mode: 'append' });
+    return this.write(tableName, data, { ...options, mode: 'append' });
   }
 }
