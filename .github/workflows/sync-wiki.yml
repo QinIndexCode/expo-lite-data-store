@@ -21,7 +21,7 @@ jobs:
       - name: Checkout wiki repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository }}.wiki
+          repository: ${{ github.repository }}/wiki
           path: wiki
 
       - name: Copy and rename Chinese description
