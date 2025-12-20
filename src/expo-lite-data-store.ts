@@ -6,7 +6,6 @@
 // Directly import database instance
 import { plainStorage, dbManager } from './core/db';
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult, TableOptions } from './types/storageTypes';
-// AutoSyncService type for type checking
 
 /**
  * Plain storage instance, no encryption support

@@ -23,6 +23,7 @@ import { CacheMonitor } from '../monitor/CacheMonitor';
 import { performanceMonitor } from '../monitor/PerformanceMonitor';
 import { CacheService } from '../service/CacheService';
 import { TransactionService } from '../service/TransactionService';
+import { AutoSyncService } from '../service/AutoSyncService';
 
 import { ErrorHandler } from '../../utils/errorHandler';
 import { QueryEngine } from '../query/QueryEngine';
@@ -44,6 +45,8 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   private cacheService: CacheService;
   /** 事务服务 */
   private transactionService: TransactionService;
+  /** 自动同步服务 */
+  private autoSyncService: AutoSyncService;
   /** 数据读取器 */
   private dataReader: DataReader;
   /** 数据写入器 */
@@ -104,6 +107,13 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     // 初始化数据访问组件
     this.dataReader = new DataReader(this.metadataManager, this.indexManager, this.cacheManager);
     this.dataWriter = new DataWriter(this.metadataManager, this.indexManager, this.fileOperationManager);
+
+    // 初始化自动同步服务（使用单例模式）
+    this.autoSyncService = AutoSyncService.getInstance(this.cacheService, this);
+    // 在非测试环境中自动启动自动同步服务
+    if (!(typeof process !== 'undefined' && process.env.NODE_ENV === 'test')) {
+      this.autoSyncService.start();
+    }
 
     // 初始化任务队列
     this._initializeTaskQueue();
@@ -282,15 +292,13 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
           result = await this.dataWriter.write(tableName, finalData, options);
         }
 
-        // 2. 如果在事务中且directWrite为true，更新事务数据
-    if (this.transactionService.isInTransaction() && options?.directWrite) {
-      // 使用刚刚写入的最终数据直接更新事务数据，避免读取缓存的旧数据
-      this.transactionService.setTransactionData(tableName, finalData);
-    }
+        // 如果在事务中且directWrite为true，更新事务数据
+        if (this.transactionService.isInTransaction() && options?.directWrite) {
+          // 使用刚刚写入的最终数据直接更新事务数据，避免读取缓存的旧数据
+          this.transactionService.setTransactionData(tableName, finalData);
+        }
 
-
-
-        // 4. 删除与该表相关的所有缓存，确保后续读取能获取到最新数据
+        // 删除与该表相关的所有缓存，确保后续读取能获取到最新数据
         this.cacheService.clearTableCache(tableName);
 
         // 5. 记录性能指标

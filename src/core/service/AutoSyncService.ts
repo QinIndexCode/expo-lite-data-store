@@ -82,8 +82,11 @@ interface AutoSyncConfig {
 /**
  * 自动同步服务类
  * 定期将缓存中的脏数据同步到磁盘
+ * 实现单例模式，确保在任何时候只有一个实例在运行
  */
 export class AutoSyncService {
+  /** 静态实例，用于单例模式 */
+  private static instance: AutoSyncService | null = null;
   /** 缓存服务实例 */
   private cacheService: CacheService;
   /** 存储适配器实例 */
@@ -119,11 +122,11 @@ export class AutoSyncService {
   };
 
   /**
-   * 构造函数
+   * 私有构造函数，防止外部直接实例化
    * @param cacheService 缓存服务实例
    * @param storageAdapter 存储适配器实例
    */
-  constructor(cacheService: CacheService, storageAdapter: FileSystemStorageAdapter) {
+  private constructor(cacheService: CacheService, storageAdapter: FileSystemStorageAdapter) {
     this.cacheService = cacheService;
     this.storageAdapter = storageAdapter;
 
@@ -131,6 +134,36 @@ export class AutoSyncService {
     this._updateConfigFromGlobalConfig();
     // 验证初始配置
     this._validateConfig(this.config);
+  }
+
+  /**
+   * 获取单例实例
+   * @param cacheService 缓存服务实例
+   * @param storageAdapter 存储适配器实例
+   * @returns AutoSyncService 单例实例
+   */
+  public static getInstance(cacheService: CacheService, storageAdapter: FileSystemStorageAdapter): AutoSyncService {
+    if (!AutoSyncService.instance) {
+      // 创建新实例
+      AutoSyncService.instance = new AutoSyncService(cacheService, storageAdapter);
+    } else {
+      // 更新现有实例的依赖
+      AutoSyncService.instance.cacheService = cacheService;
+      AutoSyncService.instance.storageAdapter = storageAdapter;
+    }
+    return AutoSyncService.instance;
+  }
+
+  /**
+   * 清理并重置单例实例
+   * 用于热更新时清理旧实例
+   */
+  public static async cleanupInstance(): Promise<void> {
+    if (AutoSyncService.instance) {
+      await AutoSyncService.instance.cleanup();
+      AutoSyncService.instance = null;
+      logger.info('[AutoSyncService] Singleton instance cleaned up for hot reload');
+    }
   }
 
   /**
