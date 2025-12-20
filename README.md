@@ -44,7 +44,7 @@ Designed specifically for React Native + Expo projects, with no native dependenc
 
 ## 许可证 / License
 
-MIT © QinIndex Qin
+MIT © QinIndexCode
 
 ---
 
