@@ -23,8 +23,8 @@ Designed specifically for React Native + Expo projects, with no native dependenc
 
 ### 主要文档 / Main Documentation
 
-- 📖 [中文详细文档](./README.zh-CN.md)
-- 📖 [English Detailed Document](./README.en.md)
+- 📖 [中文详细文档](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/README.zh-CN.md)
+- 📖 [English Detailed Document](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/README.en.md)
 
 ### WIKI 文档 / WIKI Documentation
 
