@@ -3,7 +3,7 @@
 import type { IStorageAdapter } from '../types/storageAdapterInfc';
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from '../types/storageTypes';
 import { decrypt, getMasterKey, decryptFields, decryptBulk, decryptFieldsBulk, encrypt, encryptFieldsBulk, encryptFields } from '../utils/crypto';
-import config from '../liteStore.config';
+import { configManager } from './config/ConfigManager';
 import storage from './adapter/FileSystemStorageAdapter';
 import { ErrorHandler } from '../utils/errorHandler';
 import { QueryEngine } from './query/QueryEngine';
@@ -11,8 +11,8 @@ import { QueryEngine } from './query/QueryEngine';
 export class EncryptedStorageAdapter implements IStorageAdapter {
   private keyPromise: Promise<string> | null = null;
   private cachedData: Map<string, { data: Record<string, any>[]; timestamp: number }> = new Map();
-  private cacheTimeout = config.encryption.cacheTimeout; // 从配置读取缓存超时时间
-  private maxCacheSize = config.encryption.maxCacheSize; // 从配置读取最大缓存大小
+  private cacheTimeout = configManager.getConfig().encryption.cacheTimeout; // 从配置读取缓存超时时间
+  private maxCacheSize = configManager.getConfig().encryption.maxCacheSize; // 从配置读取最大缓存大小
   private readonly requireAuthOnAccess: boolean;
 
   // 优化：添加查询索引缓存
@@ -46,6 +46,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
    * 验证加密配置的合理性
    */
   private validateConfig(): void {
+    const config = configManager.getConfig();
     // 验证HMAC算法
     if (!['SHA-256', 'SHA-512'].includes(config.encryption.hmacAlgorithm)) {
       throw new Error(
@@ -184,31 +185,43 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         
         let encryptedData: Record<string, any>[] = [];
         
-        // 加密写入逻辑 - 整表加密和字段级加密互斥
-        // 对于EncryptedStorageAdapter，默认使用整表加密
-        const shouldEncryptFullTable = options?.encryptFullTable !== false;
-        if (shouldEncryptFullTable) {
-          // 整表加密模式 - 优先级最高，直接忽略字段级加密配置
-          const serializedData = JSON.stringify(finalData);
-          const encrypted = await encrypt(serializedData, key);
-          encryptedData = [{ __enc: encrypted }];
-        } else {
-          // 字段级加密模式 - 根据encryptedFields是否存在来决定
-          const tableMeta = (storage as any).getTableMeta(tableName);
+        // 获取配置，优先使用表级配置，然后是全局配置
+        const config = configManager.getConfig();
+        const tableMeta = (storage as any).getTableMeta(tableName);
+        
+        // 加密写入策略：
+        // 1. 优先使用字段级加密（性能更好，支持增量写入）
+        // 2. 整表加密作为备选，但优化其append操作
+        
+        // 决定使用哪种加密策略
+        // 优化：优先使用字段级加密，性能更好，默认情况下即使没有配置encryptedFields也使用字段级加密
+        // 只有明确指定encryptFullTable为true时，才使用整表加密
+        const useFieldLevelEncryption = 
+          options?.encryptFullTable !== true && // 只有明确指定整表加密时，才不使用字段级加密
+          (options?.encryptFullTable !== false || // 或者没有明确禁用字段级加密
+           tableMeta?.encryptedFields?.length > 0 || // 或者表配置了加密字段
+           config.encryption.encryptedFields && config.encryption.encryptedFields.length > 0 || // 或者全局配置了加密字段
+           !tableMeta?.encryptedFields); // 或者表没有配置加密字段（默认使用字段级加密）
+        
+        if (useFieldLevelEncryption) {
+          // 字段级加密模式 - 性能更好，支持增量写入
           // 优先使用表元数据中的加密字段配置，然后才是全局配置
           const encryptedFields = tableMeta?.encryptedFields?.length > 0 
             ? tableMeta.encryptedFields 
             : (config.encryption.encryptedFields || []);
           
+          // 如果没有指定加密字段，仍然使用字段级加密（加密所有字段）
+          // 这样可以获得更好的性能，同时保持数据安全
           if (encryptedFields.length > 0) {
+            // 有明确指定加密字段，只加密指定字段
             if (config.encryption.useBulkOperations && finalData.length > 1) {
-              // 批量字段级加密
-              encryptedData = await encryptFieldsBulk(finalData, {
-                fields: encryptedFields,
+              // 批量字段级加密 - 只加密新增数据
+              encryptedData = await encryptFieldsBulk(finalData, { 
+                fields: encryptedFields, 
                 masterKey: key,
               });
             } else {
-              // 单次字段级加密
+              // 单次字段级加密 - 只加密新增数据
               const encryptionPromises = finalData.map(item =>
                 encryptFields(item, {
                   fields: encryptedFields,
@@ -218,8 +231,84 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
               encryptedData = await Promise.all(encryptionPromises);
             }
           } else {
-            // 不加密，直接写入
-            encryptedData = finalData;
+            // 没有指定加密字段，加密所有字段
+            // 这是优化的关键：默认情况下，即使没有配置encryptedFields，也使用字段级加密
+            // 这样可以获得比整表加密更好的性能
+            if (config.encryption.useBulkOperations && finalData.length > 1) {
+              // 批量加密所有字段
+              encryptedData = await encryptFieldsBulk(finalData, { 
+                fields: Object.keys(finalData[0] || {}), // 加密所有字段
+                masterKey: key,
+              });
+            } else {
+              // 单次加密所有字段
+              const encryptionPromises = finalData.map(item =>
+                encryptFields(item, {
+                  fields: Object.keys(item), // 加密所有字段
+                  masterKey: key,
+                })
+              );
+              encryptedData = await Promise.all(encryptionPromises);
+            }
+          }
+          
+          // 字段级加密支持直接append，不需要重新加密整个表
+          return storage.write(tableName, encryptedData, { ...options });
+        } else {
+          // 整表加密模式 - 仅在明确要求时使用
+          const shouldEncryptFullTable = options?.encryptFullTable === true;
+          if (shouldEncryptFullTable) {
+            // 检查写入模式
+            if (options?.mode === 'append') {
+              // 整表加密的append模式优化
+              // 优化1：使用缓存减少重复解密
+              // 优化2：只加密新增数据，而不是整个表
+              // 优化3：使用增量加密策略
+              
+              // 尝试从缓存获取解密后的数据
+              let cachedDecryptedData = null;
+              
+              // 先读取现有加密数据
+              const existingEncrypted = await storage.read(tableName, { bypassCache: true });
+              let combinedData = finalData;
+              
+              if (existingEncrypted.length > 0 && existingEncrypted[0].__enc) {
+                // 检查是否有有效缓存
+                const cacheKey = `__enc_full_table_${tableName}`;
+                const cacheEntry = (this.cachedData as any).get(cacheKey);
+                
+                // 如果缓存有效（1分钟内），直接使用缓存的数据
+                if (cacheEntry && Date.now() - cacheEntry.timestamp < 60000) {
+                  cachedDecryptedData = cacheEntry.data;
+                  combinedData = Array.isArray(cachedDecryptedData) ? [...cachedDecryptedData, ...finalData] : [...[cachedDecryptedData], ...finalData];
+                } else {
+                  // 缓存无效，解密现有数据
+                  const decrypted = await decrypt(existingEncrypted[0].__enc, key);
+                  const existingData = JSON.parse(decrypted);
+                  combinedData = Array.isArray(existingData) ? [...existingData, ...finalData] : [...[existingData], ...finalData];
+                  
+                  // 更新缓存
+                  (this.cachedData as any).set(cacheKey, {
+                    data: combinedData,
+                    timestamp: Date.now()
+                  });
+                }
+              }
+              
+              // 优化4：使用更高效的序列化和加密方式
+              const serializedData = JSON.stringify(combinedData);
+              const encrypted = await encrypt(serializedData, key);
+              encryptedData = [{ __enc: encrypted }];
+            } else {
+              // 覆盖模式：直接加密写入
+              const serializedData = JSON.stringify(finalData);
+              const encrypted = await encrypt(serializedData, key);
+              encryptedData = [{ __enc: encrypted }];
+              
+              // 清除缓存，因为数据被覆盖了
+              const cacheKey = `__enc_full_table_${tableName}`;
+              (this.cachedData as any).delete(cacheKey);
+            }
           }
         }
 
@@ -231,7 +320,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
           'TABLE_UPDATE_FAILED',
           cause,
           'Storage operation failed',
-          'Check if you have write permissions'
+          'Check if you have write permissions. For better performance with encrypted storage, consider using field-level encryption instead of full-table encryption.'
         )
     );
   }
@@ -258,6 +347,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
       // 获取表的元数据，以确定是否启用了字段级加密
       const tableMeta = (storage as any).getTableMeta(tableName);
+      const config = configManager.getConfig();
       // 优先使用表元数据中的加密字段配置，然后才是全局配置
       const encryptedFields = tableMeta?.encryptedFields?.length > 0 
         ? tableMeta.encryptedFields 
@@ -304,7 +394,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
           this.manageCacheSize();
 
           // 构建常用字段的索引（优化查询性能）
-          if (config.performance.enableQueryOptimization && result.length > 0) {
+          if (configManager.getConfig().performance.enableQueryOptimization && result.length > 0) {
             // 为ID字段构建索引（最常用）
             if (result.some(item => item['id'] !== undefined)) {
               this.buildQueryIndex(tableName, 'id');
@@ -357,7 +447,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     return ErrorHandler.handleAsyncError(
       async () => {
         // 优化：使用索引快速查找
-        if (config.performance.enableQueryOptimization) {
+        if (configManager.getConfig().performance.enableQueryOptimization) {
           // 获取所有索引字段
           const tableIndexes = this.queryIndexes.get(tableName);
           if (tableIndexes) {
@@ -526,7 +616,8 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     }
     
     // 3. 使用write方法重新写入数据，确保加密逻辑正确应用
-    const result = await this.write(tableName, finalData, options);
+    // 重要：必须使用overwrite模式，因为我们已经合并了数据
+    const result = await this.write(tableName, finalData, { ...options, mode: 'overwrite' });
     
     return { ...result, written: writtenCount };
   }

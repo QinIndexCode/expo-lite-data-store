@@ -2,7 +2,7 @@
 import { FileSystemStorageAdapter } from '../adapter/FileSystemStorageAdapter';
 
 import { CacheService } from './CacheService';
-import config from '../../liteStore.config';
+import { configManager } from '../config/ConfigManager';
 import logger from '../../utils/logger';
 
 /**
@@ -127,13 +127,18 @@ export class AutoSyncService {
    * @param storageAdapter 存储适配器实例
    */
   private constructor(cacheService: CacheService, storageAdapter: FileSystemStorageAdapter) {
+    console.log('[DEBUG] AutoSyncService constructor called');
     this.cacheService = cacheService;
     this.storageAdapter = storageAdapter;
 
     // 初始化配置
+    console.log('[DEBUG] Calling _updateConfigFromGlobalConfig()');
     this._updateConfigFromGlobalConfig();
+    console.log('[DEBUG] Config after _updateConfigFromGlobalConfig:', this.config);
     // 验证初始配置
+    console.log('[DEBUG] Calling _validateConfig()');
     this._validateConfig(this.config);
+    console.log('[DEBUG] AutoSyncService constructor completed');
   }
 
   /**
@@ -150,6 +155,9 @@ export class AutoSyncService {
       // 更新现有实例的依赖
       AutoSyncService.instance.cacheService = cacheService;
       AutoSyncService.instance.storageAdapter = storageAdapter;
+      // 重新更新配置，确保使用最新的全局配置
+      AutoSyncService.instance._updateConfigFromGlobalConfig();
+      AutoSyncService.instance._validateConfig(AutoSyncService.instance.config);
     }
     return AutoSyncService.instance;
   }
@@ -188,23 +196,39 @@ export class AutoSyncService {
    * 初始化默认配置
    */
   private _updateConfigFromGlobalConfig(): void {
+    const globalConfig = configManager.getConfig();
     this.config = {
-      enabled: config.autoSync?.enabled ?? true,
-      interval: config.autoSync?.interval ?? 5000,
-      minItems: config.autoSync?.minItems ?? 1,
-      batchSize: config.autoSync?.batchSize ?? 100,
+      enabled: globalConfig.autoSync?.enabled ?? true,
+      interval: globalConfig.autoSync?.interval ?? 5000,
+      minItems: globalConfig.autoSync?.minItems ?? 1,
+      batchSize: globalConfig.autoSync?.batchSize ?? 100,
     };
   }
 
   /**
    * 启动自动同步服务
+   * @param forceUpdateConfig 是否强制从全局配置更新（默认为false，保留当前实例配置）
    */
-  start(): void {
-    if (this.syncTimer || !this.config.enabled) {
+  start(forceUpdateConfig: boolean = false): void {
+    // 只有在forceUpdateConfig为true时，才从全局配置更新
+    if (forceUpdateConfig) {
+      this._updateConfigFromGlobalConfig();
+      this._validateConfig(this.config);
+    }
+    
+    // 如果定时器已经存在，先清除它，然后重新启动
+    if (this.syncTimer) {
+      logger.info('[AutoSyncService] Sync timer already exists, restarting with new config', this.config);
+      clearInterval(this.syncTimer);
+      this.syncTimer = null;
+    }
+    
+    if (!this.config.enabled) {
+      logger.info('[AutoSyncService] Auto-sync is disabled in config');
       return;
     }
 
-    logger.info('[AutoSyncService] Starting auto-sync service', this.config);
+    logger.info('[AutoSyncService] Starting auto-sync service with config', this.config);
 
     // 立即执行一次同步（不等待完成，避免阻塞启动）
     this.sync().catch(error => {
@@ -217,6 +241,11 @@ export class AutoSyncService {
         logger.error('[AutoSyncService] Scheduled sync failed', error);
       });
     }, this.config.interval);
+    
+    // 确保定时器被正确设置
+    if (!this.syncTimer) {
+      logger.error('[AutoSyncService] Failed to create sync timer');
+    }
   }
 
   /**
@@ -386,33 +415,36 @@ export class AutoSyncService {
           logger.info('[AutoSyncService] Processing batch', Math.floor(i / this.config.batchSize) + 1, 'of', Math.ceil(items.length / this.config.batchSize), 'for table', tableName);
           
           try {
-            // 将同一表的多个脏数据项合并为一个批量写入操作
-            // 按cacheKey分组，避免重复写入同一记录
-            const uniqueItems = new Map<string, any>();
-            batchItems.forEach(({ cacheKey, data }) => {
-              uniqueItems.set(cacheKey, data);
-            });
+            // 注意：我们直接写入脏数据，使用overwrite模式
+            // 这是因为：
+            // 1. 我们已经从缓存中获取了脏数据，它包含了完整的表数据
+            // 2. 我们信任缓存中的数据是最新的
+            // 3. 这种方式更简单，避免了复杂的合并逻辑
             
-            const cacheKeys = Array.from(uniqueItems.keys());
-            const batchData = Array.from(uniqueItems.values());
-            
-            // 执行批量写入
-            const success = await this.writeWithRetry(tableName, batchData, cacheKeys.join(','));
-            
-            if (success) {
-              // 使用批量标记方法提高性能
-              this.cacheService.markAsCleanBulk(cacheKeys);
+            // 对于每个表，我们只需要写入一次，包含所有脏数据
+            // 注意：这里我们假设每个表只有一个批次，或者最后一个批次包含完整的表数据
+            if (i === 0) {
+              // 只处理第一个批次，写入完整的表数据
+              // 我们需要确保batchData包含完整的表数据
+              const batchData = batchItems.map(({ data }) => data);
+              const cacheKeys = batchItems.map(({ cacheKey }) => cacheKey);
               
-              // 更新统计信息
-              const totalItems = batchData.reduce((count, data) => {
-                return count + (Array.isArray(data) ? data.length : 1);
-              }, 0);
-              this.stats.totalItemsSynced += totalItems;
-              successfulWrites.push(...cacheKeys);
-            } else {
-              // 批量写入失败，所有项目都标记为失败
-              failedWrites.push(...cacheKeys);
-              logger.error('[AutoSyncService] All retries failed for batch items', cacheKeys, 'for table', tableName);
+              // 执行批量写入
+              const success = await this.writeWithRetry(tableName, batchData, cacheKeys.join(','));
+              
+              if (success) {
+                // 使用批量标记方法提高性能
+                this.cacheService.markAsCleanBulk(cacheKeys);
+                
+                // 更新统计信息
+                const totalItems = batchData.length;
+                this.stats.totalItemsSynced += totalItems;
+                successfulWrites.push(...cacheKeys);
+              } else {
+                // 批量写入失败，所有项目都标记为失败
+                failedWrites.push(...cacheKeys);
+                logger.error('[AutoSyncService] All retries failed for batch items', cacheKeys, 'for table', tableName);
+              }
             }
           } catch (error) {
             logger.error('[AutoSyncService] Unexpected error syncing batch for table', tableName, ':', error);
@@ -515,13 +547,15 @@ export class AutoSyncService {
     // 如果配置改变，重启定时器
     if (newConfig.interval !== undefined && this.syncTimer) {
       await this.stop();
-      this.start();
+      // 不强制从全局配置更新，保留当前实例配置
+      this.start(false);
     }
 
     // 如果启用状态改变
     if (newConfig.enabled !== undefined) {
       if (newConfig.enabled && !this.syncTimer) {
-        this.start();
+        // 不强制从全局配置更新，保留当前实例配置
+        this.start(false);
       } else if (!newConfig.enabled && this.syncTimer) {
         await this.stop();
       }

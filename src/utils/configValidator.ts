@@ -1,8 +1,8 @@
 /**
  * 配置验证工具
- * 用于验证liteStore.config.js中的配置参数类型和格式
+ * 用于验证ConfigManager中的配置参数类型和格式
  */
-import config from '../liteStore.config';
+import { configManager } from '../core/config/ConfigManager';
 
 /**
  * 配置验证结果接口
@@ -37,31 +37,32 @@ export class ConfigValidator {
       warnings: [],
     };
 
+    const config = configManager.getConfig();
+    
     // 验证基础配置
-    this.validateBasicConfig(result);
+    this.validateBasicConfig(config, result);
 
     // 验证加密配置
-    this.validateEncryptionConfig(result);
+    this.validateEncryptionConfig(config, result);
 
     // 验证性能配置
-    this.validatePerformanceConfig(result);
+    this.validatePerformanceConfig(config, result);
 
     // 验证缓存配置
-    this.validateCacheConfig(result);
-
-
+    this.validateCacheConfig(config, result);
 
     // 验证监控配置
-    this.validateMonitoringConfig(result);
+    this.validateMonitoringConfig(config, result);
 
     return result;
   }
 
   /**
    * 验证基础配置
+   * @param config 配置对象
    * @param result 验证结果对象
    */
-  private static validateBasicConfig(result: ConfigValidationResult): void {
+  private static validateBasicConfig(config: any, result: ConfigValidationResult): void {
     // 验证chunkSize
     if (config.chunkSize !== undefined) {
       if (typeof config.chunkSize !== 'number') {
@@ -108,9 +109,10 @@ export class ConfigValidator {
 
   /**
    * 验证加密配置
+   * @param config 配置对象
    * @param result 验证结果对象
    */
-  private static validateEncryptionConfig(result: ConfigValidationResult): void {
+  private static validateEncryptionConfig(config: any, result: ConfigValidationResult): void {
     const encryption = config.encryption;
     if (encryption) {
       // 验证algorithm
@@ -164,8 +166,6 @@ export class ConfigValidator {
         }
       }
 
-
-
       // 验证encryptedFields
       if (encryption.encryptedFields !== undefined) {
         if (!Array.isArray(encryption.encryptedFields)) {
@@ -217,9 +217,10 @@ export class ConfigValidator {
 
   /**
    * 验证性能配置
+   * @param config 配置对象
    * @param result 验证结果对象
    */
-  private static validatePerformanceConfig(result: ConfigValidationResult): void {
+  private static validatePerformanceConfig(config: any, result: ConfigValidationResult): void {
     const performance = config.performance;
     if (performance) {
       // 验证enableQueryOptimization
@@ -266,9 +267,10 @@ export class ConfigValidator {
 
   /**
    * 验证缓存配置
+   * @param config 配置对象
    * @param result 验证结果对象
    */
-  private static validateCacheConfig(result: ConfigValidationResult): void {
+  private static validateCacheConfig(config: any, result: ConfigValidationResult): void {
     const cache = config.cache;
     if (cache) {
       // 验证maxSize
@@ -295,13 +297,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证enableCompression
-      if (cache.enableCompression !== undefined) {
-        if (typeof cache.enableCompression !== 'boolean') {
-          result.errors.push('cache.enableCompression must be a boolean');
-          result.isValid = false;
-        }
-      }
+
 
       // 验证cleanupInterval
       if (cache.cleanupInterval !== undefined) {
@@ -320,9 +316,10 @@ export class ConfigValidator {
 
   /**
    * 验证监控配置
+   * @param config 配置对象
    * @param result 验证结果对象
    */
-  private static validateMonitoringConfig(result: ConfigValidationResult): void {
+  private static validateMonitoringConfig(config: any, result: ConfigValidationResult): void {
     const monitoring = config.monitoring;
     if (monitoring) {
       // 验证enablePerformanceTracking
@@ -359,7 +356,9 @@ export class ConfigValidator {
    * @returns 修复后的配置对象
    */
   static autoFix(): any {
-    // 直接修改全局配置对象
+    // 获取当前配置
+    let config = { ...configManager.getConfig() };
+    
     // 自动修复基础配置
     this.autoFixBasicConfig(config);
 
@@ -377,6 +376,9 @@ export class ConfigValidator {
 
     // 自动修复监控配置
     this.autoFixMonitoringConfig(config);
+    
+    // 更新配置
+    configManager.setConfig(config);
 
     return config;
   }
@@ -505,9 +507,7 @@ export class ConfigValidator {
       config.cache.defaultExpiry = 3600000; // 默认1小时
     }
 
-    if (typeof config.cache.enableCompression !== 'boolean') {
-      config.cache.enableCompression = false;
-    }
+
 
     if (typeof config.cache.cleanupInterval !== 'number' || config.cache.cleanupInterval < 0) {
       config.cache.cleanupInterval = 300000; // 默认5分钟

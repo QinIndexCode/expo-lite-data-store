@@ -2,7 +2,7 @@
 // 压力测试
 // 本测试文件用于验证API在高并发场景下的性能和稳定性
 // 支持逐步提升压力直到系统崩溃，并输出极限压力数据
-
+// 本测试对设备压力较大，运行时可能存在卡顿等现象
 import { createTable, insert, remove, countTable, bulkWrite, findMany, update } from '../../index';
 
 // 测试表名

@@ -39,10 +39,20 @@ metro.config.js
 babel.config.js
 expo-env.d.ts
 
-# 文档文件（保留必要的README和更新日志）
+# 文档文件（保留必要的README）
 *.md
+README.zh-CN.md
+README.en.md
+WIKI.md
+WIKI_EN.md
+docs/ARCHITECTURE.zh-CN.md
+docs/ARCHITECTURE.en.md
+docs/COMMENT_SPECIFICATION.zh-CN.md
+docs/COMMENT_SPECIFICATION.en.md
+docs/updatelog.zh-CN.md
+docs/updatelog.en.md
+
 !README.md
-!README_EN.md
 !LICENSE.txt
 
 # 工具和临时文件
@@ -66,12 +76,11 @@ test-*.*
 
 # 确保必要的文件被包含
 !/dist/
-!README.md
-!README_EN.md
-!LICENSE.txt
 !package.json
-
-updatelog.md
+!tsconfig.types.json
+!tsconfig.js.json
+!tsconfig.json
 
 # 测试脚本目录
 test-scripts/
+jest.*

@@ -5,12 +5,18 @@
 // Last Modified: 2025-12-17
 // Directly import database instance
 import { plainStorage, dbManager } from './core/db';
+import { configManager, ConfigManager } from './core/config/ConfigManager';
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult, TableOptions } from './types/storageTypes';
 
 /**
  * Plain storage instance, no encryption support
  */
 export { plainStorage };
+
+/**
+ * Configuration management
+ */
+export { configManager, ConfigManager };
 
 /**
  * Create table

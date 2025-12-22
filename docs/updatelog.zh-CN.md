@@ -1,6 +1,20 @@
 
 <!-- 更新日志 -->
 
+### 📅 2025-12-22 `v2.0.0-beta.2`  配置系统简化与文档完善
+
+> 文档更新：更新README.md、README.en.md、WIKI.md、WIKI_EN.md，简化配置描述和加密推荐模式
+> 配置系统：移除了根目录下创建配置文件的代码，仅支持app.json配置和源代码默认配置，适配Expo Go环境
+> 配置清理：移除了api.version、encryption.requireAuthOnAccess、cache.enableCompression等非必要配置
+> 性能配置：启用performance.maxConcurrentOperations、performance.enableBatchOptimization、performance.memoryWarningThreshold、cache.cleanupInterval配置
+> 文件清理：删除了不再需要的ConfigGenerator.ts文件
+> 修复：CacheManager.ts中处理已移除的cache.enableCompression属性，返回默认值false
+> 修复：ConfigManager.test.ts中移除对已删除requireAuthOnAccess属性的引用
+> 修复：ConfigValidator.ts中移除对已删除配置选项的验证
+> 修复：首次启动时"delete from table app_settings failed"的错误
+> 包配置：调整package-env.json的exports配置，适配简化的npm上传版本
+> 文档优化：简化README内容，详细内容移至WIKI，并添加加密写入/读取性能优化的Q&A
+
 ### 📅 2025-12-20 `v2.0.0-beta.2`  性能优化与文档完善
 
 > 修复了 crypto-security-assessment.test.ts 文件中的 TypeScript 错误

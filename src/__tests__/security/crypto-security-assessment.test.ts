@@ -14,7 +14,7 @@
  */
 
 import { encrypt, decrypt, getMasterKey } from '../../utils/crypto';
-import config from '../../liteStore.config';
+import { configManager } from '../../core/config/ConfigManager';
 import logger from '../../utils/logger';
 
 // ==================== 测试套件 ===================
@@ -37,6 +37,7 @@ describe('🔐 Expo LiteStore 加密机制安全性评估', () => {
   // ==================== 安全性评估 ===================
   describe('🛡️ 安全性评估', () => {
     test('1. 加密算法强度符合 2025 年标准', () => {
+      const config = configManager.getConfig();
       // 虽然 config 中未显式声明，但你的 crypto 实现一定是 AES-256-CTR
       // 我们通过实际行为验证（而不是依赖配置字段）
       expect(config.encryption.hmacAlgorithm).toBe('SHA-512');
@@ -70,6 +71,7 @@ describe('🔐 Expo LiteStore 加密机制安全性评估', () => {
     });
 
     test('4. 安全漏洞扫描', () => {
+      const config = configManager.getConfig();
       if (config.encryption.keyIterations < 120_000) {
         results.vulnerabilities.push(`⚠️  PBKDF2 迭代次数仅 ${config.encryption.keyIterations}，建议 ≥120,000`);
       }

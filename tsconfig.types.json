@@ -4,7 +4,7 @@
   "compilerOptions": {
     "outDir": "dist/types",
     "declaration": true,
-    "emitDeclarationOnly": true,    // 关键！只生成 .d.ts 不生成 js
+    "emitDeclarationOnly": true,    // 只生成 .d.ts 不生成 js
     "declarationMap": true,
     "sourceMap": false
   },

@@ -3,7 +3,7 @@
 // 创建于: 2025-11-28
 // 最后修改: 2025-12-11
 
-import config from '../../liteStore.config';
+import { configManager } from '../config/ConfigManager';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
 import type { ReadOptions } from '../../types/storageTypes';
 import { ErrorHandler } from '../../utils/errorHandler';
@@ -180,7 +180,7 @@ export class DataReader {
         // 应用排序
         if (options?.sortBy) {
           // 使用配置中的sortMethods作为默认排序算法
-          const sortAlgorithm = options.sortAlgorithm || config.sortMethods;
+          const sortAlgorithm = options.sortAlgorithm || configManager.getConfig().sortMethods;
           data = QueryEngine.sort(data, options.sortBy, options.order, sortAlgorithm);
         }
 

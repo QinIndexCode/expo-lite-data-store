@@ -26,6 +26,14 @@
       "types": "./dist/types/index.d.ts",
       "import": "./dist/js/index.js",
       "require": "./dist/js/index.js"
+    },
+    "./dist/js/*": {
+      "import": "./dist/js/*",
+      "require": "./dist/js/*"
+    },
+    "./utils/*": {
+      "import": "./dist/js/utils/*",
+      "require": "./dist/js/utils/*"
     }
   },
   "scripts": {

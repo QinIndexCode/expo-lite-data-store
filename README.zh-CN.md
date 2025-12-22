@@ -1,7 +1,7 @@
 # expo-lite-data-store
 
-English: [English Document](./README.en.md)
-中文版: [中文文档](./README.zh-CN.md)
+English: [English Document](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/README.en.md)
+中文版: [中文文档](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/README.zh-CN.md)
 
 ---
 
@@ -121,128 +121,33 @@ console.log(users);
 
 ## 🔒 加密使用说明
 
-### 非加密模式
+该库支持多种加密模式，包括非加密模式和加密模式。
 
-默认情况下，数据库使用非加密模式，**不会触发任何生物识别认证**：
+### 基本使用示例
 
 ```typescript
 // 非加密模式（默认）
 await createTable('users');
-await insert('users', { id: 1, name: '张三' });
-const user = await findOne('users', { where: { id: 1 } });
-```
 
-**重要说明**：非加密模式下，数据以明文形式存储，不会使用任何加密算法，也不会触发生物识别或密码认证。
-
-### 加密模式
-
-启用加密模式，但不要求每次访问都进行生物识别认证：
-
-```typescript
-// 加密模式，无需生物识别
+// 加密模式
 await createTable('users', {
-  encrypted: true,
-  requireAuthOnAccess: false
-});
-await insert('users', { id: 1, name: '张三' }, {
-  encrypted: true,
-  requireAuthOnAccess: false
-});
-const user = await findOne('users', { 
-  where: { id: 1 },
-  encrypted: true,
-  requireAuthOnAccess: false
+  encrypted: true
 });
 ```
 
-### 加密模式 + 生物识别认证
-
-启用加密模式，并要求每次访问都进行生物识别认证：
-
-```typescript
-// 加密模式，需要生物识别
-await createTable('users', {
-  encrypted: true,
-  requireAuthOnAccess: true
-});
-await insert('users', { id: 1, name: '张三' }, {
-  encrypted: true,
-  requireAuthOnAccess: true
-});
-const user = await findOne('users', { 
-  where: { id: 1 },
-  encrypted: true,
-  requireAuthOnAccess: true
-});
-```
-
-### 加密参数说明
-
-| 参数名               | 类型    | 默认值 | 说明                                                                 |
-| -------------------- | ------- | ------ | -------------------------------------------------------------------- |
-| `encrypted`          | boolean | false  | 是否启用数据加密                                                     |
-| `requireAuthOnAccess`| boolean | false  | 是否在每次访问数据时都要求生物识别认证（仅在 `encrypted` 为 true 时生效） |
-| `encryptFullTable`   | boolean | false  | 是否启用整表加密（仅在 `encrypted` 为 true 时生效，与字段级加密互斥） |
-| `encryptedFields` | string[] | [] | 需要加密的字段列表（当数组不为空时自动启用字段级加密，仅在 `encrypted` 为 true 时生效，与整表加密互斥） |
-
-**重要说明**：
-- 整表加密和字段级加密**不能同时使用**，系统会自动检测冲突并抛出明确的错误信息
-- 加密模式下，密钥由系统自动生成和管理，无需手动处理
-- 生物识别认证仅在 `requireAuthOnAccess` 为 true 时触发
+**详细加密说明**：请查看 [WIKI.md](./WIKI.md) 中的加密部分，了解完整的加密配置和最佳实践。
 
 ## 📚 基础 API 参考
 
-### 🗂️ 表管理
+### API 分类
 
-| 方法          | 签名                                                                             | 说明           |
-| ------------- | -------------------------------------------------------------------------------- | -------------- |
-| `createTable` | `(tableName, options) => Promise<void>` | 创建新表       |
-| `deleteTable` | `(tableName, options) => Promise<void>` | 删除表         |
-| `hasTable`    | `(tableName, options) => Promise<boolean>` | 检查表是否存在 |
-| `listTables`  | `(options) => Promise<string[]>` | 获取所有表名   |
-| `countTable`  | `(tableName, options) => Promise<number>` | 获取表记录数   |
-| `clearTable`  | `(tableName, options) => Promise<void>` | 清空表数据     |
+该库提供完整的 CRUD 操作、事务支持和高级查询功能，API 分为以下几类：
 
-### 💾 数据操作
+- **表管理**：`createTable`、`deleteTable`、`hasTable`、`listTables`、`countTable`、`clearTable`
+- **数据操作**：`insert`、`read`、`findOne`、`findMany`、`update`、`remove`、`bulkWrite`
+- **事务管理**：`beginTransaction`、`commit`、`rollback`
 
-| 方法        | 签名                                                                                       | 说明                             |
-| ----------- | ------------------------------------------------------------------------------------------ | -------------------------------- |
-| `insert`    | `(tableName, data, options) => Promise<WriteResult>`        | 插入单条或多条数据             |
-| `read`      | `(tableName, options) => Promise<any[]>`          | 读取数据（支持过滤、分页、排序） |
-| `findOne`   | `(tableName, { where, encrypted?, requireAuthOnAccess? }) => Promise<any\|null>`        | 查询单条记录                     |
-| `findMany`  | `(tableName, { where?, skip?, limit?, sortBy?, order?, sortAlgorithm?, encrypted?, requireAuthOnAccess? }) => Promise<any[]>` | 查询多条记录（支持高级选项）     |
-| `update`    | `(tableName, data, { where, encrypted?, requireAuthOnAccess? }) => Promise<number>`      | 更新匹配的记录                   |
-| `remove`    | `(tableName, { where, encrypted?, requireAuthOnAccess? }) => Promise<number>`            | 删除匹配的记录                   |
-| `bulkWrite` | `(tableName, operations, options) => Promise<WriteResult>`  | 批量操作                         |
-
-### 🔄 事务管理
-
-| 方法               | 签名                                                                       | 说明         |
-| ------------------ | -------------------------------------------------------------------------- | ------------ |
-| `beginTransaction` | `(options) => Promise<void>` | 开始新事务   |
-| `commit`           | `(options) => Promise<void>` | 提交当前事务 |
-| `rollback`         | `(options) => Promise<void>` | 回滚当前事务 |
-
-### 🛠️ API 参数说明
-
-所有 API 采用 Prisma 风格的选项对象格式，支持的通用选项：
-
-| 参数名               | 类型    | 默认值 | 说明                                                                 |
-| -------------------- | ------- | ------ | -------------------------------------------------------------------- |
-| `encrypted`          | boolean | false  | 是否启用数据加密                                                     |
-| `requireAuthOnAccess`| boolean | false  | 是否在每次访问数据时都要求生物识别认证（仅在 `encrypted` 为 true 时生效） |
-
-### 📝 新 API 设计
-
-所有 API 现在采用统一的 Prisma 风格设计，将条件查询参数 `where` 作为选项对象的一部分，提高了 API 的一致性和易用性：
-
-```typescript
-// 新的 Prisma 风格 API
-await createTable('users', {
-  encrypted: true,
-  requireAuthOnAccess: false
-});
-```
+**详细 API 文档**：请查看 [WIKI.md](./WIKI.md) 中的 API 参考部分，了解完整的 API 签名和参数说明。
 
 ## 📖 详细文档
 
@@ -258,71 +163,33 @@ await createTable('users', {
 
 ## 🔧 配置
 
-### 如何修改配置
+### 配置方式
 
-配置直接从打包文件加载。要修改配置，您需要编辑以下文件：
+该库通过 app.json 文件的 `expo.extra.liteStore` 部分进行配置（推荐）：
 
-```
-node_modules/expo-lite-data-store/dist/js/liteStore.config.js
-```
-
-### 配置选项
-
-配置文件包含以下主要选项：
-
-```typescript
-// liteStore.config.js
-module.exports = {
-  // 基础配置
-  chunkSize: 5 * 1024 * 1024, // 文件分块大小（5MB）
-  storageFolder: 'expo-litedatastore', // 存储文件夹名称
-  sortMethods: 'default', // 默认排序算法
-  timeout: 10000, // 操作超时时间（10秒）
-  
-  // 加密配置
-  encryption: {
-    algorithm: 'AES-CTR', // 加密算法
-    keySize: 256, // 密钥长度
-    hmacAlgorithm: 'SHA-512', // HMAC算法
-    keyIterations: 120000, // 密钥迭代次数
-
-    encryptedFields: ['password', 'email', 'phone'], // 需要加密的字段
-    cacheTimeout: 30000, // 密钥缓存超时时间（30秒）
-    maxCacheSize: 50, // 最大缓存密钥数量
-    useBulkOperations: true, // 是否启用批量操作
-  },
-  
-  // 性能配置
-  performance: {
-    enableQueryOptimization: true, // 是否启用查询优化
-    maxConcurrentOperations: 5, // 最大并发操作数
-    enableBatchOptimization: true, // 是否启用批量操作优化
-    memoryWarningThreshold: 0.8, // 内存警告阈值（80%）
-  },
-  
-  // 缓存配置
-  cache: {
-    maxSize: 1000, // 最大缓存大小
-    defaultExpiry: 3600000, // 默认过期时间（1小时）
-    enableCompression: false, // 是否启用压缩
-    cleanupInterval: 300000, // 清理间隔（5分钟）
-    memoryWarningThreshold: 0.8, // 内存警告阈值（80%）
-    autoSync: {
-      enabled: true, // 是否启用自动同步
-      interval: 5000, // 同步间隔（5秒）
-      minItems: 1, // 触发同步的最小项目数
-      batchSize: 100, // 每次同步的最大项目数
-    },
-  },
-  
-  // 监控配置
-  monitoring: {
-    enablePerformanceTracking: true, // 是否启用性能跟踪
-    enableHealthChecks: true, // 是否启用健康检查
-    metricsRetention: 86400000, // 指标保留时间（24小时）
-  },
+```json
+{
+  "expo": {
+    "extra": {
+      "liteStore": {
+        "autoSync": {
+          "enabled": true,
+          "interval": 60000
+        },
+        "chunkSize": 10485760
+      }
+    }
+  }
 }
 ```
+
+### 配置推荐
+
+- **加密模式**：除非有特殊要求，否则推荐使用字段级加密
+- **性能配置**：根据设备性能调整 `maxConcurrentOperations`（推荐范围：3-10）
+- **监控配置**：推荐启用 `enableHealthChecks` 以提高性能和稳定性
+
+**详细配置说明**：请查看 [WIKI.md](./WIKI.md) 中的配置部分，了解完整的配置选项和最佳实践。
 
 ## 🐛 常见问题
 
@@ -353,6 +220,16 @@ A: 对于大数据集，建议使用：
 - 合适的排序算法
 - 批量操作
 
+### Q: 加密写入和读取速度较慢，如何优化？
+
+A: 加密操作确实会增加一定的性能开销，以下是一些优化建议：
+
+1. **使用字段级加密而非整表加密**：只加密敏感字段，而不是整个表，这样可以提高查询性能
+2. **增加密钥缓存时间**：在配置中增加 `encryption.cacheTimeout` 的值，减少密钥派生的次数
+3. **启用批量操作**：确保 `encryption.useBulkOperations` 为 `true`，可以减少加密/解密的次数
+4. **减少密钥迭代次数**：适当降低 `encryption.keyIterations` 的值（不低于100000），可以加快密钥派生速度
+5. **合理设置 `maxConcurrentOperations`**：根据设备性能调整并发操作数，推荐范围：3-10
+
 ## 📞 支持与反馈
 
 - 📧 **邮箱**: [qinIndexCode@gmail.com](gmail:qinIndexCode@gmail.com)
@@ -361,7 +238,7 @@ A: 对于大数据集，建议使用：
 
 ## 许可证
 
-MIT © QinIndex Qin
+MIT © QinIndexCode
 
 ---
 

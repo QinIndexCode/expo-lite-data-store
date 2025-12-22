@@ -1,6 +1,20 @@
 
 <!-- Update Log -->
 
+### 📅 2025-12-22 `v2.0.0-beta.2`  Configuration System Simplification and Documentation Improvement
+
+> Documentation Update: Updated README.md, README.en.md, WIKI.md, WIKI_EN.md, simplifying configuration descriptions and encryption recommendations
+> Configuration System: Removed code for creating configuration files in the root directory, only supporting app.json configuration and source code default configuration, adapting to Expo Go environment
+> Configuration Cleanup: Removed unnecessary configurations like api.version, encryption.requireAuthOnAccess, cache.enableCompression
+> Performance Configuration: Enabled performance.maxConcurrentOperations, performance.enableBatchOptimization, performance.memoryWarningThreshold, cache.cleanupInterval configurations
+> File Cleanup: Deleted unnecessary ConfigGenerator.ts file
+> Fix: Handled removed cache.enableCompression property in CacheManager.ts, returning default value false
+> Fix: Removed reference to deleted requireAuthOnAccess property in ConfigManager.test.ts
+> Fix: Removed validation for deleted configuration options in ConfigValidator.ts
+> Fix: "delete from table app_settings failed" error on first startup
+> Package Configuration: Adjusted exports configuration in package-env.json to match simplified npm upload version
+> Documentation Optimization: Simplified README content, moved detailed content to WIKI, and added Q&A about encrypted write/read performance optimization
+
 ### 📅 2025-12-20 `v2.0.0-beta.2`  Performance Optimization and Documentation Improvement
 
 > Fixed TypeScript errors in crypto-security-assessment.test.ts file

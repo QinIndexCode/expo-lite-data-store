@@ -5,7 +5,7 @@
 // 创建于: 2025-11-23
 // 最后修改: 2025-12-17
 
-import config from '../../liteStore.config';
+import { configManager } from '../config/ConfigManager';
 import { StorageTaskProcessor } from '../../taskQueue/StorageTaskProcessor';
 import { taskQueue } from '../../taskQueue/taskQueue';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
@@ -71,18 +71,19 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
     // 初始化核心组件
     this.indexManager = new IndexManager(this.metadataManager);
-    this.fileOperationManager = new FileOperationManager(config.chunkSize, this.metadataManager);
+    const currentConfig = configManager.getConfig();
+    this.fileOperationManager = new FileOperationManager(currentConfig.chunkSize, this.metadataManager);
 
     // 初始化服务，支持自定义缓存配置
     const defaultCacheConfig: CacheConfig = {
       strategy: CacheStrategy.LRU,
-      maxSize: config.cache.maxSize || CACHE.DEFAULT_MAX_SIZE,
-      defaultExpiry: config.cache.defaultExpiry || CACHE.DEFAULT_EXPIRY, // 1小时
+      maxSize: currentConfig.cache.maxSize || CACHE.DEFAULT_MAX_SIZE,
+      defaultExpiry: currentConfig.cache.defaultExpiry || CACHE.DEFAULT_EXPIRY, // 1小时
       enablePenetrationProtection: true,
       enableBreakdownProtection: true,
       enableAvalancheProtection: true,
       maxMemoryUsage: 50 * 1024 * 1024, // 默认50MB内存限制
-      memoryThreshold: config.cache.memoryWarningThreshold || CACHE.MEMORY_THRESHOLD, // 80%阈值触发清理
+      memoryThreshold: currentConfig.cache.memoryWarningThreshold || CACHE.MEMORY_THRESHOLD, // 80%阈值触发清理
       avalancheRandomExpiry: CACHE.AVALANCHE_PROTECTION_RANGE, // 0-5分钟随机过期
     };
 
@@ -110,10 +111,10 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
     // 初始化自动同步服务（使用单例模式）
     this.autoSyncService = AutoSyncService.getInstance(this.cacheService, this);
-    // 在非测试环境中自动启动自动同步服务
-    if (!(typeof process !== 'undefined' && process.env.NODE_ENV === 'test')) {
-      this.autoSyncService.start();
-    }
+    // 无论环境如何，都启动自动同步服务
+    // 移除测试环境检测，确保自动同步服务总是被启动
+    // 初始化时从全局配置获取最新配置
+    this.autoSyncService.start(true);
 
     // 初始化任务队列
     this._initializeTaskQueue();

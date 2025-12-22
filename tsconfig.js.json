@@ -4,15 +4,8 @@
   "compilerOptions": {
     "outDir": "dist/js",
     "noEmit": false,
-    "declaration": true,
-    // 使用ESNext模块格式，与expo/tsconfig.base兼容
-    "module": "ESNext",
-    "target": "ES2020",
-    "moduleResolution": "bundler",
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true
+    "declaration": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["src/__tests__/**", "src/**/*.test.ts", "src/**/*.test.tsx", "dist/**", "coverage/**", "__mocks__/**"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/__tests__/**", "src/**/*.test.ts", "src/**/*.test.tsx"]
 }

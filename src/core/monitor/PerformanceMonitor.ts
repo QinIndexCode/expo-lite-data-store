@@ -1,6 +1,6 @@
 // src/core/monitor/PerformanceMonitor.ts
 
-import config from '../../liteStore.config';
+import { configManager } from '../config/ConfigManager';
 /**
  * 性能指标接口
  */
@@ -336,7 +336,7 @@ export class PerformanceMonitor {
    * @returns 是否启用性能跟踪
    */
   static isPerformanceTrackingEnabled(): boolean {
-    return config.monitoring?.enablePerformanceTracking !== false;
+    return configManager.getConfig().monitoring?.enablePerformanceTracking !== false;
   }
 
   /**
@@ -344,7 +344,7 @@ export class PerformanceMonitor {
    * @returns 是否启用健康检查
    */
   static isHealthChecksEnabled(): boolean {
-    return config.monitoring?.enableHealthChecks !== false;
+    return configManager.getConfig().monitoring?.enableHealthChecks !== false;
   }
 
   /**
@@ -352,7 +352,7 @@ export class PerformanceMonitor {
    * @returns 指标保留时间（毫秒）
    */
   static getMetricsRetention(): number {
-    return config.monitoring?.metricsRetention || 86400000; // 默认24小时
+    return configManager.getConfig().monitoring?.metricsRetention || 86400000; // 默认24小时
   }
 
   /**

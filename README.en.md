@@ -112,131 +112,33 @@ console.log(users);
 
 ## 🔒 Encryption Usage
 
-### Non-encrypted Mode
+The library supports multiple encryption modes, including non-encrypted mode and encrypted mode.
 
-By default, the database uses non-encrypted mode and **will not trigger any biometric authentication**:
+### Basic Usage Example
 
 ```typescript
 // Non-encrypted mode (default)
 await createTable('users');
-await insert('users', { id: 1, name: 'John Doe' });
-const user = await findOne('users', { where: { id: 1 } });
-```
 
-**Important Note**: In non-encrypted mode, data is stored in plain text, no encryption algorithm is used, and no biometric or password authentication is triggered.
-
-### Encrypted Mode
-
-Enable encrypted mode without requiring biometric authentication for each access:
-
-```typescript
-// Encrypted mode without biometric authentication
+// Encrypted mode
 await createTable('users', {
-  encrypted: true,
-  requireAuthOnAccess: false
-});
-await insert('users', { id: 1, name: 'John Doe' }, {
-  encrypted: true,
-  requireAuthOnAccess: false
-});
-const user = await findOne('users', {
-  where: { id: 1 },
-  encrypted: true,
-  requireAuthOnAccess: false
+  encrypted: true
 });
 ```
 
-### Encrypted Mode + Biometric Authentication
-
-Enable encrypted mode and require biometric authentication for each access:
-
-```typescript
-// Encrypted mode with biometric authentication
-await createTable('users', {
-  encrypted: true,
-  requireAuthOnAccess: true
-});
-await insert('users', { id: 1, name: 'John Doe' }, {
-  encrypted: true,
-  requireAuthOnAccess: true
-});
-const user = await findOne('users', {
-  where: { id: 1 },
-  encrypted: true,
-  requireAuthOnAccess: true
-});
-```
-
-### Encryption Parameters
-
-| Parameter           | Type    | Default | Description                                                                 |
-| ------------------- | ------- | ------ | --------------------------------------------------------------------------- |
-| `encrypted`         | boolean | false  | Whether to enable data encryption                                           |
-| `requireAuthOnAccess` | boolean | false   | Whether to require biometric authentication for each access (only effective when `encrypted` is true) |
-| `encryptFullTable`   | boolean | false  | Whether to enable full table encryption (only effective when `encrypted` is true, mutually exclusive with field-level encryption) |
-| `encryptedFields` | string[] | [] | List of fields to encrypt (field-level encryption is automatically enabled when the array is not empty, only effective when `encrypted` is true, mutually exclusive with full table encryption) |
-
-**Important Notes**:
-- Full table encryption and field-level encryption **cannot be used simultaneously**. The system will automatically detect conflicts and throw a clear error message.
-- In encrypted mode, keys are automatically generated and managed by the system, no manual handling required.
-- Biometric authentication is only triggered when `requireAuthOnAccess` is true.
+**Detailed Encryption Documentation**: Please refer to the encryption section in [WIKI_EN.md](./WIKI_EN.md) for complete encryption configuration and best practices.
 
 ## 📚 Basic API Reference
 
-### 🗂️ Table Management
+### API Categories
 
-| Method        | Signature                                                                                | Description            |
-| ------------- | ----------------------------------------------------------------------------------------- | ---------------------- |
-| `createTable` | `(tableName, options?) => Promise<void>` | Create new table       |
-| `deleteTable` | `(tableName, options?) => Promise<void>` | Delete table           |
-| `hasTable`    | `(tableName, options?) => Promise<boolean>` | Check if table exists  |
-| `listTables`  | `(options?) => Promise<string[]>` | Get all table names    |
-| `countTable`  | `(tableName, options?) => Promise<number>` | Get table record count |
-| `clearTable`  | `(tableName, options?) => Promise<void>` | Clear table data       |
+The library provides complete CRUD operations, transaction support, and advanced query features, categorized as follows:
 
-### 💾 Data Operations
+- **Table Management**: `createTable`, `deleteTable`, `hasTable`, `listTables`, `countTable`, `clearTable`
+- **Data Operations**: `insert`, `read`, `findOne`, `findMany`, `update`, `remove`, `bulkWrite`
+- **Transaction Management**: `beginTransaction`, `commit`, `rollback`
 
-| Method      | Signature                                                                                           | Description                                         |
-| ----------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `insert`    | `(tableName, data, options?) => Promise<WriteResult>`        | Insert single or multiple records                   |
-| `read`      | `(tableName, options?) => Promise<any[]>`          | Read data (supports filtering, pagination, sorting) |
-| `findOne`   | `(tableName, { where, encrypted?, requireAuthOnAccess? }) => Promise<any \| null>` | Query single record                                 |
-| `findMany`  | `(tableName, { where?, skip?, limit?, sortBy?, order?, sortAlgorithm?, encrypted?, requireAuthOnAccess? }) => Promise<any[]>` | Query multiple records (supports advanced options)  |
-| `update`    | `(tableName, data, { where, encrypted?, requireAuthOnAccess? }) => Promise<number>` | Update matching records                             |
-| `remove`    | `(tableName, { where, encrypted?, requireAuthOnAccess? }) => Promise<number>` | Delete matching records                             |
-| `bulkWrite` | `(tableName, operations, options?) => Promise<WriteResult>`  | Batch operations                                    |
-
-### 🔄 Transaction Management
-
-| Method             | Signature                                                                       | Description                  |
-| ------------------ | --------------------------------------------------------------------------------| ---------------------------- |
-| `beginTransaction` | `(options?) => Promise<void>` | Start new transaction        |
-| `commit`           | `(options?) => Promise<void>` | Commit current transaction   |
-| `rollback`         | `(options?) => Promise<void>` | Rollback current transaction |
-
-### 🛠️ API Parameter Description
-
-All APIs support key-value parameter format, parameter order is irrelevant, supported common options:
-
-| Parameter name       | Type    | Default | Description                                                                 |
-| -------------------- | ------- | ------ | -------------------------------------------------------------------------- |
-| `encrypted`          | boolean | false  | Whether to enable data encryption                                          |
-| `requireAuthOnAccess`| boolean | false  | Whether to require biometric authentication for each access (only effective when `encrypted` is true) |
-
-### 📝 Backward Compatibility
-
-All APIs maintain backward compatibility, old API calling methods still work:
-
-```typescript
-// Old format (still works)
-await createTable('users', {}, true, false);
-
-// New format (recommended, parameter order is irrelevant)
-await createTable('users', {
-  encrypted: true,
-  requireAuthOnAccess: false
-});
-```
+**Detailed API Documentation**: Please refer to the API reference section in [WIKI_EN.md](./WIKI_EN.md) for complete API signatures and parameter descriptions.
 
 ## 📖 Detailed Documentation
 
@@ -251,60 +153,120 @@ For complete detailed documentation, please check the local [WIKI_EN.md](WIKI_EN
 
 ## 🔧 Configuration
 
-### Configuration Modification Method
+### Configuration Sources
 
-To modify the configuration, please find the `node_modules/expo-lite-data-store/dist/js/liteStore.config.js` file and make changes to it.
+The library supports reading configuration from multiple sources with the following priority (highest to lowest):
+
+1. **app.json extra.liteStore configuration** (Recommended):
+   ```json
+   {
+     "expo": {
+       "extra": {
+         "liteStore": {
+           "autoSync": {
+             "enabled": true,
+             "interval": 60000,
+             "minItems": 10,
+             "batchSize": 100
+           },
+           "chunkSize": 1024
+         }
+       }
+     }
+   }
+   ```
+
+2. **Default configuration**:
+   Built-in default configuration for all unspecified options
+
+### Encryption Recommendation Mode
+
+**Unless you have special requirements, we recommend using field-level encryption** for the following reasons:
+
+1. **Better performance**: Supports incremental writes, no need to re-encrypt the entire table for each operation
+2. **More flexible queries**: Can directly query unencrypted fields without decrypting the entire table
+3. **Supports partial encryption**: Can only encrypt sensitive fields, improving performance
+4. **Default behavior**: The system now uses field-level encryption by default, no manual configuration required
+
+**Full-table encryption is only recommended in the following special cases**:
+- Highest level of data security is required
+- Table data volume is small, performance impact is acceptable
+- Need to ensure all data fields are encrypted
 
 ### Configuration Options
 
-The configuration file contains the following main options:
+All configuration should be done in your app.json file under the `expo.extra.liteStore` section. Here are the main configuration options you can customize:
 
-```typescript
-// liteStore.config.js
-module.exports = {
-  // Basic configuration
-  chunkSize: 5 * 1024 * 1024, // File chunk size (5MB)
-  storageFolder: 'expo-litedatastore', // Storage folder name
-  sortMethods: 'default', // Default sorting algorithm
-  timeout: 30000, // Operation timeout (30 seconds)
-  
-  // Encryption configuration
-  encryption: {
-    algorithm: 'AES-CTR', // Encryption algorithm
-    keySize: 256, // Key size
-    hmacAlgorithm: 'SHA-512', // HMAC algorithm
-    keyIterations: 120000, // Key iteration count
-
-    encryptedFields: ['password', 'email', 'phone'], // Fields to encrypt
-    cacheTimeout: 30000, // Cache timeout (30 seconds)
-    maxCacheSize: 50, // Maximum number of cached keys
-    useBulkOperations: true, // Enable bulk operations
-  },
-  
-  // Performance configuration
-  performance: {
-    enableQueryOptimization: true, // Enable query optimization
-    maxConcurrentOperations: 5, // Maximum concurrent operations
-    enableBatchOptimization: true, // Enable batch operation optimization
-    memoryWarningThreshold: 0.8, // Memory warning threshold (80%)
-  },
-  
-  // Cache configuration
-  cache: {
-    maxSize: 1000, // Maximum cache size
-    defaultExpiry: 3600000, // Default expiry time (1 hour)
-    enableCompression: false, // Enable compression
-    cleanupInterval: 300000, // Cleanup interval (5 minutes)
-    memoryWarningThreshold: 0.8, // Memory warning threshold (80%)
-  },
-  
-  // Monitoring configuration
-  monitoring: {
-    enablePerformanceTracking: true, // Enable performance tracking
-    enableHealthChecks: true, // Enable health checks
-    metricsRetention: 86400000, // Metrics retention (24 hours)
-  },
-};
+```json
+{
+  "expo": {
+    "extra": {
+      "liteStore": {
+        // Basic configuration
+        "chunkSize": 10485760, // File chunk size (10MB)
+        "storageFolder": "lite-data-store", // Storage folder name
+        "sortMethods": "default", // Default sorting algorithm
+        "timeout": 10000, // Operation timeout (10 seconds)
+        
+        // API configuration
+        "api": {
+          "rateLimit": {
+            "enabled": false, // Whether to enable rate limiting
+            "requestsPerSecond": 10, // Maximum requests per second
+            "burstCapacity": 20 // Burst capacity
+          },
+          "retry": {
+            "maxAttempts": 3, // Maximum retry attempts
+            "backoffMultiplier": 2 // Backoff multiplier
+          }
+        },
+        
+        // Encryption configuration
+        "encryption": {
+          "algorithm": "AES-CTR", // Encryption algorithm
+          "keySize": 256, // Key size
+          "hmacAlgorithm": "SHA-512", // HMAC algorithm
+          "keyIterations": 100000, // Key iteration count
+          "encryptedFields": ["password", "email", "phone"], // Fields to encrypt
+          "cacheTimeout": 30000, // Cache timeout (30 seconds)
+          "maxCacheSize": 50, // Maximum number of cached keys
+          "useBulkOperations": true // Enable bulk operations
+        },
+        
+        // Performance configuration
+        "performance": {
+          "enableQueryOptimization": true, // Enable query optimization
+          "maxConcurrentOperations": 5, // Maximum concurrent operations (3-10 recommended)
+          "enableBatchOptimization": true, // Enable batch operation optimization
+          "memoryWarningThreshold": 0.8 // Memory warning threshold (0-1 range)
+        },
+        
+        // Auto-sync configuration
+        "autoSync": {
+          "enabled": true, // Whether to enable auto-sync
+          "interval": 30000, // Auto-sync interval (30 seconds)
+          "minItems": 1, // Minimum number of dirty items to trigger sync
+          "batchSize": 100 // Maximum number of items to sync per batch
+        },
+        
+        // Cache configuration
+        "cache": {
+          "maxSize": 1000, // Maximum number of cache entries
+          "defaultExpiry": 3600000, // Default cache expiration (1 hour)
+          "cleanupInterval": 300000, // Cache cleanup interval (5 minutes)
+          "memoryWarningThreshold": 0.8 // Cache memory warning threshold
+        },
+        
+        // Monitoring configuration
+        "monitoring": {
+          "enablePerformanceTracking": false, // Whether to enable performance tracking
+          "enableHealthChecks": true, // Whether to enable health checks
+          "metricsRetention": 86400000 // Metrics retention period (24 hours)
+        }
+      }
+    }
+  }
+}
 ```
 
 ## 🐛 Common Issues
@@ -336,6 +298,16 @@ A: For large datasets, it is recommended to use:
 - Appropriate sorting algorithm
 - Batch operations
 
+### Q: Encrypted write and read operations are slow, how to optimize?
+
+A: Encryption operations do increase certain performance overhead, here are some optimization suggestions:
+
+1. **Use field-level encryption instead of full-table encryption**: Only encrypt sensitive fields instead of the entire table, which can improve query performance
+2. **Increase key cache timeout**: Increase the value of `encryption.cacheTimeout` in the configuration to reduce the number of key derivations
+3. **Enable batch operations**: Ensure `encryption.useBulkOperations` is `true`, which can reduce the number of encryption/decryption operations
+4. **Reduce key iteration count**: Appropriately reduce the value of `encryption.keyIterations` (not less than 100000) to speed up key derivation
+5. **Reasonably set `maxConcurrentOperations`**: Adjust the number of concurrent operations according to device performance, recommended range: 3-10
+
 ## 📞 Support and Feedback
 
 - 📧 **Email**: [qinIndexCode@gmail.com](gmail:qinIndexCode@gmail.com)
@@ -344,7 +316,7 @@ A: For large datasets, it is recommended to use:
 
 ## License
 
-MIT © QinIndex Qin
+MIT © QinIndexCode
 
 ---
 

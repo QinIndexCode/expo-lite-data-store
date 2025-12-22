@@ -1,6 +1,15 @@
-# Expo Lite Data Store
+# Expo Lite Data Store 🍃
+----
 
-## 项目简介 / Project Introduction
+[![npm version](https://img.shields.io/npm/v/expo-lite-data-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-data-store)
+[![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-lite-data-store)](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)
+[![React Native](https://img.shields.io/badge/React%20Native-0.72+-blue.svg)](https://reactnative.dev/)
+[![Expo](https://img.shields.io/badge/Expo-50.0+-blue.svg)](https://expo.dev/)
+
+----
+
+## ℹ️ 项目简介 / Project Introduction
 
 **轻量、易配置、纯 TypeScript 编写的 Expo 本地数据库**
 
@@ -10,7 +19,7 @@
 
 Designed specifically for React Native + Expo projects, with no native dependencies. Provides complete CRUD operations, transaction support, index optimization, and intelligent sorting features.
 
-## 文档导航 / Documentation Navigation
+## 📃 文档导航 / Documentation Navigation
 
 ### 主要文档 / Main Documentation
 
@@ -19,21 +28,21 @@ Designed specifically for React Native + Expo projects, with no native dependenc
 
 ### WIKI 文档 / WIKI Documentation
 
-- 📖 [中文 WIKI](./WIKI.md)
-- 📖 [English WIKI](./WIKI_EN.md)
+- 📖 [中文 WIKI](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/WIKI.md)
+- 📖 [English WIKI](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/WIKI_EN.md)
 
 ### 技术文档 / Technical Documentation
 
-- 🏗️ [架构设计文档](./docs/ARCHITECTURE.zh-CN.md) | [Architecture Design Document](./docs/ARCHITECTURE.en.md)
-- 📝 [注释规范](./docs/COMMENT_SPECIFICATION.zh-CN.md) | [Comment Specification](./docs/COMMENT_SPECIFICATION.en.md)
-- 📅 [更新日志](./docs/updatelog.zh-CN.md) | [Update Log](./docs/updatelog.en.md)
+- 🏗️ [架构设计文档](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/ARCHITECTURE.zh-CN.md) | [Architecture Design Document](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/ARCHITECTURE.en.md)
+- 📝 [注释规范](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/COMMENT_SPECIFICATION.zh-CN.md) | [Comment Specification](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/COMMENT_SPECIFICATION.en.md)
+- 📅 [更新日志](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/updatelog.zh-CN.md) | [Update Log](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/updatelog.en.md)
 
-## 核心特性 / Core Features
+## 🔑 核心特性 / Core Features
 
 | 特性 / Feature                       | 描述 / Description                                           |
 | -------------------------- | ---------------------------------------------- |
-| 🚀 **易配置使用** / Easy Configuration          | 仅依赖 React Native FS，无需 Metro 配置 / Only depends on React Native FS, no Metro configuration        |
-| 🔒 **可选加密** / Optional Encryption            | AES-CTR 加密，支持可选生物识别认证 / AES-CTR encryption with optional biometric authentication         |
+| 🚀 **易配置使用** / Easy Configuration          | 支持从app.json读取配置，仅依赖 React Native FS，无需 Metro 配置 / Supports reading config from app.json, only depends on React Native FS, no Metro configuration        |
+| 🔒 **可选加密** / Optional Encryption            | AES-CTR 加密，支持可选生物识别认证，推荐使用字段级加密 / AES-CTR encryption with optional biometric authentication, field-level encryption recommended         |
 | 📦 **智能分块** / Intelligent Chunking            | 自动处理 >5MB 文件 / Automatically handles >5MB files        |
 | 🔄 **事务支持** / Transaction Support            | 事务保证，数据一致性有保障 / Transaction support, data consistency ensured                    |
 | 📝 **TypeScript 原生支持** / TypeScript Native Support | 完整的类型定义 / Complete type definitions, ready to use                       |
@@ -42,9 +51,9 @@ Designed specifically for React Native + Expo projects, with no native dependenc
 | 🎯 **智能排序** / Intelligent Sorting            | 5种排序算法，根据数据量自动选择合适算法 / 5 sorting algorithms, automatically selects appropriate algorithm based on data size        |
 | ⏰ **自动同步** / Auto-synchronization            | 定期将缓存中的脏数据同步到磁盘 / Regularly synchronizes dirty data from cache to disk, ensuring data persistence |
 
-## 许可证 / License
+## 📜 许可证 / License
 
-MIT © QinIndexCode
+[MIT](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/LICENSE.txt) © QinIndexCode
 
 ---
 

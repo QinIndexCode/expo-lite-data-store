@@ -6,42 +6,85 @@
 
 LiteStore provides rich configuration options that allow you to adjust performance, security, and behavior according to your project needs.
 
-**Important Note**: Configuration is loaded directly from the bundled file. To modify configuration, you need to edit the file at:
+### Configuration Sources
 
-```
-node_modules/expo-lite-data-store/dist/js/liteStore.config.js
-```
+LiteStore supports reading configuration from the following sources with the following priority (highest to lowest):
 
-**No Runtime Configuration API**: The library does not provide runtime configuration APIs. All configuration changes must be made by editing the bundled configuration file directly. This approach ensures consistent configuration loading across different environments and prevents issues with asynchronous loading.
+1. **app.json extra.liteStore configuration** (Recommended):
+   ```json
+   {
+     "expo": {
+       "extra": {
+         "liteStore": {
+           "autoSync": {
+             "enabled": true,
+             "interval": 60000,
+             "minItems": 10,
+             "batchSize": 100
+           },
+           "chunkSize": 1024
+         }
+       }
+     }
+   }
+   ```
+
+2. **Default configuration**:
+   Built-in default configuration for all unspecified options
+
+**No Runtime Configuration API**: The library does not provide runtime configuration APIs. All configuration changes must be made by configuring in app.json. This approach ensures consistent configuration loading across different environments and prevents issues with asynchronous loading.
 
 ### Basic Configuration
 
-| Configuration Item | Type     | Default Value           | Description                                                                                |
-| ------------------ | -------- | ----------------------- | ------------------------------------------------------------------------------------------ |
-| `chunkSize`        | `number` | `5 * 1024 * 1024` (5MB) | Data file chunk size, files exceeding this size will be automatically chunked              |
-| `storageFolder`    | `string` | `'expo-litedatastore'`  | Data storage directory name                                                                |
-| `sortMethods`      | `string` | `'default'`             | Default sorting algorithm, optional values: `default`, `fast`, `counting`, `merge`, `slow` |
-| `timeout`          | `number` | `10000` (10 seconds)    | Operation timeout duration                                                                 |
+| Configuration Item | Type     | Default Value            | Description                                                                                |
+| ------------------ | -------- | ------------------------ | ------------------------------------------------------------------------------------------ |
+| `chunkSize`        | `number` | `10 * 1024 * 1024` (10MB) | Data file chunk size, files exceeding this size will be automatically chunked              |
+| `storageFolder`    | `string` | `'lite-data-store'`       | Data storage directory name                                                                |
+| `sortMethods`      | `string` | `'default'`              | Default sorting algorithm, optional values: `default`, `fast`, `counting`, `merge`, `slow` |
+| `timeout`          | `number` | `10000` (10 seconds)     | Operation timeout duration                                                                 |
+
+### API Configuration
+
+| Configuration Item                      | Type      | Default Value | Description                              |
+| --------------------------------------- | --------- | ------------- | ---------------------------------------- |
+| `api.rateLimit.enabled`                 | `boolean` | `false`       | Whether to enable rate limiting          |
+| `api.rateLimit.requestsPerSecond`       | `number`  | `10`          | Maximum requests per second              |
+| `api.rateLimit.burstCapacity`           | `number`  | `20`          | Burst capacity                           |
+| `api.retry.maxAttempts`                 | `number`  | `3`           | Maximum retry attempts                   |
+| `api.retry.backoffMultiplier`           | `number`  | `2`           | Backoff multiplier                       |
 
 ### Encryption Configuration
 
-| Configuration Item           | Type       | Default Value               | Description                                                                                   |
-| ---------------------------- | ---------- | --------------------------- | --------------------------------------------------------------------------------------------- |
-| `algorithm`                  | `string`   | `'AES-CTR'`                 | Encryption algorithm, supports `AES-CTR`                                                      |
-| `keySize`                    | `number`   | `256`                       | Encryption key length, supports `128`, `192`, `256`                                           |
-| `hmacAlgorithm`              | `string`   | `'SHA-512'`                 | HMAC integrity protection algorithm                                                           |
-| `keyIterations`              | `number`   | `120000`                    | Key derivation iteration count, higher values provide stronger security but lower performance |
-
-| `encryptedFields`            | `string[]` | Common sensitive field list | List of fields to be encrypted by default                                                     |
-| `cacheTimeout`               | `number`   | `30000` (30 seconds)        | Cache timeout for masterKey in memory                                                         |
-| `maxCacheSize`               | `number`   | `50`                        | Maximum number of derived keys to retain in LRU cache                                         |
-| `useBulkOperations`          | `boolean`  | `true`                      | Whether to enable bulk operation optimization                                                 |
+| Configuration Item                       | Type       | Default Value           | Description                                                                                   |
+| ---------------------------------------- | ---------- | ----------------------- | --------------------------------------------------------------------------------------------- |
+| `encryption.algorithm`                   | `string`   | `'AES-CTR'`             | Encryption algorithm, supports `AES-CTR`                                                      |
+| `encryption.keySize`                     | `number`   | `256`                   | Encryption key length, supports `128`, `192`, `256`                                           |
+| `encryption.hmacAlgorithm`               | `string`   | `'SHA-512'`             | HMAC integrity protection algorithm                                                           |
+| `encryption.keyIterations`               | `number`   | `100000`                | Key derivation iteration count, higher values provide stronger security but lower performance |
+| `encryption.encryptedFields`             | `string[]` | `['password', 'email', 'phone']` | List of fields to be encrypted by default     |
+| `encryption.cacheTimeout`                | `number`   | `30000` (30 seconds)    | Cache timeout for masterKey in memory                                                         |
+| `encryption.maxCacheSize`                | `number`   | `50`                    | Maximum number of derived keys to retain in LRU cache                                         |
+| `encryption.useBulkOperations`           | `boolean`  | `true`                  | Whether to enable bulk operation optimization                                                 |
 
 **Important Notes**: 
 - Full table encryption and field-level encryption **cannot be used simultaneously**. The system will automatically detect conflicts and throw a clear error message.
 - Full table encryption mode is enabled through the `encryptFullTable` parameter when calling the API.
 - Field-level encryption is enabled through the `encryptedFields` configuration in the configuration file. Field-level encryption is automatically enabled when the `encryptedFields` array is not empty.
 - In non-encrypted mode, data is stored in plain text, no encryption algorithm is used, and no biometric or password authentication is triggered.
+
+### Encryption Recommendation Mode
+
+**Unless you have special requirements, we recommend using field-level encryption** for the following reasons:
+
+1. **Better performance**: Supports incremental writes, no need to re-encrypt the entire table for each operation
+2. **More flexible queries**: Can directly query unencrypted fields without decrypting the entire table
+3. **Supports partial encryption**: Can only encrypt sensitive fields, improving performance
+4. **Default behavior**: The system now uses field-level encryption by default, no manual configuration required
+
+**Full-table encryption is only recommended in the following special cases**:
+- Highest level of data security is required
+- Table data volume is small, performance impact is acceptable
+- Need to ensure all data fields are encrypted
 
 ### Performance Configuration
 
@@ -52,75 +95,74 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 | `enableBatchOptimization` | `boolean` | `true`        | Whether to enable batch operation optimization          |
 | `memoryWarningThreshold`  | `number`  | `0.8`         | Memory usage threshold to trigger warning (between 0-1) |
 
+### Auto-Sync Configuration
+
+| Configuration Item          | Type      | Default Value        | Description                            |
+| --------------------------- | --------- | -------------------- | -------------------------------------- |
+| `autoSync.enabled`          | `boolean` | `true`               | Whether to enable auto-sync            |
+| `autoSync.interval`         | `number`  | `30000` (30 seconds) | Auto-sync interval                     |
+| `autoSync.minItems`         | `number`  | `1`                  | Minimum number of dirty items to trigger sync |
+| `autoSync.batchSize`        | `number`  | `100`                | Maximum number of items to sync per batch |
+
 ### Cache Configuration
 
 | Configuration Item       | Type      | Default Value        | Description                                     |
 | ------------------------ | --------- | -------------------- | ----------------------------------------------- |
 | `maxSize`                | `number`  | `1000`               | Maximum number of cache entries                 |
 | `defaultExpiry`          | `number`  | `3600000` (1 hour)   | Default cache expiration time                   |
-| `enableCompression`      | `boolean` | `false`              | Whether to enable cache data compression        |
 | `cleanupInterval`        | `number`  | `300000` (5 minutes) | Cache cleanup interval                          |
 | `memoryWarningThreshold` | `number`  | `0.8`                | Cache memory usage threshold to trigger warning |
-| `autoSync.enabled`       | `boolean` | `true`               | Whether to enable auto-sync                     |
-| `autoSync.interval`      | `number`  | `5000` (5 seconds)   | Auto-sync interval                              |
-| `autoSync.minItems`      | `number`  | `1`                  | Minimum number of dirty items to trigger sync   |
-| `autoSync.batchSize`     | `number`  | `100`                | Maximum number of items to sync per batch       |
-
-
 
 ### Monitoring Configuration
 
 | Configuration Item          | Type      | Default Value         | Description                            |
 | --------------------------- | --------- | --------------------- | -------------------------------------- |
-| `enablePerformanceTracking` | `boolean` | `true`                | Whether to enable performance tracking |
+| `enablePerformanceTracking` | `boolean` | `false`               | Whether to enable performance tracking |
 | `enableHealthChecks`        | `boolean` | `true`                | Whether to enable health checks        |
 | `metricsRetention`          | `number`  | `86400000` (24 hours) | Performance metrics retention duration |
 
 ### Configuration Best Practices
 
-To modify configuration, you need to edit the bundled configuration file directly:
+To modify configuration, it is recommended to configure in app.json, which is the most convenient and reliable way:
 
+```json
+{
+  "expo": {
+    "extra": {
+      "liteStore": {
+        "performance": {
+          "enableQueryOptimization": true,
+          "maxConcurrentOperations": 8, // Adjust based on device performance
+          "enableBatchOptimization": true
+        },
+        "encryption": {
+          "keyIterations": 200000, // Increase key derivation iterations
+          "cacheTimeout": 15000 // Reduce key cache time
+        },
+        "cache": {
+          "maxSize": 500, // Reduce cache size
+          "memoryWarningThreshold": 0.7 // Lower memory warning threshold
+        }
+      }
+    }
+  }
+}
 ```
-node_modules/expo-lite-data-store/dist/js/liteStore.config.js
-```
+
+**Configuration Recommendations**:
 
 1. **Performance Optimization**:
-
-   ```javascript
-   // liteStore.config.js
-   module.exports = {
-     performance: {
-       enableQueryOptimization: true,
-       maxConcurrentOperations: 8, // Adjust based on device performance
-       enableBatchOptimization: true,
-     },
-   };
-   ```
+   - Adjust `maxConcurrentOperations` based on device performance (recommended: 4-10)
+   - Enable `enableQueryOptimization` to improve query performance
+   - Enable `enableBatchOptimization` to improve batch operation performance
 
 2. **Security Enhancement**:
-
-   ```javascript
-   // liteStore.config.js
-   module.exports = {
-     encryption: {
-       keyIterations: 200000, // Increase key derivation iterations
-       cacheTimeout: 15000, // Reduce key cache time
-
-     },
-   };
-   ```
+   - For highly sensitive data, increase `keyIterations` (recommended: 100000-200000)
+   - Reduce `cacheTimeout` to reduce key exposure risk
 
 3. **Memory Optimization**:
-   ```javascript
-   // liteStore.config.js
-   module.exports = {
-     cache: {
-       maxSize: 500, // Reduce cache size
-       enableCompression: true, // Enable cache compression
-       memoryWarningThreshold: 0.7, // Lower memory warning threshold
-     },
-   };
-   ```
+   - For low-memory devices, reduce `cache.maxSize`
+   - Adjust `memoryWarningThreshold` to suit device memory situation
 
 ## 🎯 API Reference
 
@@ -165,7 +207,6 @@ createTable(tableName: string, options?: CreateTableOptions): Promise<void>
   - `initialData`: Initial data (optional)
   - `mode`: Storage mode, `'single'` or `'chunked'` (optional)
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
-  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Examples**:
 ```typescript
@@ -199,7 +240,6 @@ deleteTable(tableName: string, options?: TableOptions): Promise<void>
 - `tableName`: Table name to delete
 - `options`: Optional configuration
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
-  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Example**:
 ```typescript
@@ -219,7 +259,6 @@ hasTable(tableName: string, options?: TableOptions): Promise<boolean>
 - `tableName`: Table name to check
 - `options`: Optional configuration
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
-  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Returns**:
 - `boolean`: Whether the table exists
@@ -279,10 +318,9 @@ clearTable(tableName: string, options?: TableOptions): Promise<void>
 ```
 
 **Parameters**:
-- `tableName`: Table name to clear
+- `tableName`: Table name
 - `options`: Optional configuration
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
-  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Example**:
 ```typescript
@@ -411,15 +449,14 @@ const encryptedUser = await findOne('sensitive_data', {
 
 **Signature**:
 ```typescript
-findMany(tableName: string, { where?, skip?, limit?, sortBy?, order?, sortAlgorithm?, encrypted?, requireAuthOnAccess? }: {
+findMany(tableName: string, { where?, skip?, limit?, sortBy?, order?, sortAlgorithm?, encrypted? }: {
   where?: FilterCondition,
   skip?: number,
   limit?: number,
   sortBy?: string | string[],
   order?: 'asc' | 'desc' | ('asc' | 'desc')[],
   sortAlgorithm?: 'quick' | 'merge' | 'slow' | 'default' | 'radix',
-  encrypted?: boolean,
-  requireAuthOnAccess?: boolean
+  encrypted?: boolean
 }): Promise<Record<string, any>[]>
 ```
 
@@ -433,7 +470,6 @@ findMany(tableName: string, { where?, skip?, limit?, sortBy?, order?, sortAlgori
   - `order`: Sort direction or array of directions
   - `sortAlgorithm`: Sorting algorithm
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
-  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Returns**:
 - `Record<string, any>[]`: Array of matching records
@@ -461,7 +497,6 @@ const chineseSortedUsers = await findMany('users', {
 const encryptedUsers = await findMany('sensitive_data', {
   where: { status: 'active' },
   encrypted: true,
-  requireAuthOnAccess: false,
   sortBy: 'created_at',
   order: 'desc'
 });
@@ -473,7 +508,7 @@ const encryptedUsers = await findMany('sensitive_data', {
 
 **Signature**:
 ```typescript
-update(tableName: string, data: Record<string, any>, { where, encrypted?, requireAuthOnAccess? }: { where: FilterCondition, encrypted?: boolean, requireAuthOnAccess?: boolean }): Promise<number>
+update(tableName: string, data: Record<string, any>, { where, encrypted? }: { where: FilterCondition, encrypted?: boolean }): Promise<number>
 ```
 
 **Parameters**:
@@ -482,7 +517,6 @@ update(tableName: string, data: Record<string, any>, { where, encrypted?, requir
 - `options`: Options object
   - `where`: Update condition
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
-  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Returns**:
 - `number`: Number of updated records
@@ -502,8 +536,7 @@ console.log(`Updated ${updatedCount} records`);
 // Update with encryption options
 const updatedCount = await update('sensitive_data', { status: 'active' }, {
   where: { id: 1 },
-  encrypted: true,
-  requireAuthOnAccess: false
+  encrypted: true
 });
 console.log(`Updated ${updatedCount} records`);
 ```
@@ -514,7 +547,7 @@ console.log(`Updated ${updatedCount} records`);
 
 **Signature**:
 ```typescript
-remove(tableName: string, { where, encrypted?, requireAuthOnAccess? }: { where: FilterCondition, encrypted?: boolean, requireAuthOnAccess?: boolean }): Promise<number>
+remove(tableName: string, { where, encrypted? }: { where: FilterCondition, encrypted?: boolean }): Promise<number>
 ```
 
 **Parameters**:
@@ -522,7 +555,6 @@ remove(tableName: string, { where, encrypted?, requireAuthOnAccess? }: { where: 
 - `options`: Options object
   - `where`: Delete condition
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
-  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Returns**:
 - `number`: Number of deleted records
@@ -542,8 +574,7 @@ console.log(`Deleted ${deletedCount} records`);
 // Delete with encryption options
 const deletedCount = await remove('sensitive_data', {
   where: { id: 1 },
-  encrypted: true,
-  requireAuthOnAccess: false
+  encrypted: true
 });
 console.log(`Deleted ${deletedCount} records`);
 ```
@@ -569,7 +600,6 @@ bulkWrite(tableName: string, operations: Array<{
   - `where`: Operation condition (required for update and delete)
 - `options`: Optional configuration
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
-  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Returns**:
 - `WriteResult`: Write result
@@ -587,8 +617,7 @@ await bulkWrite('sensitive_data', [
   { type: 'insert', data: { id: 1, name: 'Sensitive Data', value: '123456' } },
   { type: 'update', data: { value: '789012' }, where: { id: 1 } }
 ], {
-  encrypted: true,
-  requireAuthOnAccess: false
+  encrypted: true
 });
 ```
 
@@ -606,7 +635,6 @@ beginTransaction(options?: TableOptions): Promise<void>
 **Parameters**:
 - `options`: Optional configuration
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
-  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Example**:
 ```typescript
@@ -624,7 +652,7 @@ try {
 }
 
 // Start transaction with encryption options
-await beginTransaction({ encrypted: true, requireAuthOnAccess: false });
+await beginTransaction({ encrypted: true });
 ```
 
 ##### commit
@@ -639,7 +667,6 @@ commit(options?: TableOptions): Promise<void>
 **Parameters**:
 - `options`: Optional configuration
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
-  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
 
 **Example**:
 ```typescript
@@ -651,8 +678,8 @@ try {
   await rollback();
 }
 
-// Commit transaction with encryption options
-await commit({ encrypted: true, requireAuthOnAccess: false });
+// Commit with encryption options
+await commit({ encrypted: true });
 ```
 
 ##### rollback
@@ -679,8 +706,8 @@ try {
   await rollback();
 }
 
-// Rollback transaction with encryption options
-await rollback({ encrypted: true, requireAuthOnAccess: false });
+// Rollback with encryption options
+await rollback({ encrypted: true });
 ```
 
 
@@ -1313,4 +1340,4 @@ module.exports = getDefaultConfig(__dirname, {
 
 ## License
 
-MIT © QinIndex Qin
+MIT © QinIndexCode

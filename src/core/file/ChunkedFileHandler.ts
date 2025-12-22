@@ -5,7 +5,7 @@
 
 import * as FileSystem from 'expo-file-system';
 import { EncodingType } from 'expo-file-system';
-import config from '../../liteStore.config';
+import { configManager } from '../config/ConfigManager';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
 import ROOT from '../../utils/ROOTPath';
 import withTimeout from '../../utils/withTimeout';
@@ -126,7 +126,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       };
 
       // 获取配置的块大小，确保有合理的默认值（1MB）
-      const chunkSize = config.chunkSize || 1024 * 1024;
+      const chunkSize = configManager.getConfig().chunkSize || 1024 * 1024;
 
       // 预处理：将数据分成多个块，每个块不超过chunkSize
       const chunksToWrite = await this.preprocessData(data, chunkSize);

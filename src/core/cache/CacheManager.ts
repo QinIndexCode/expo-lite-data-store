@@ -4,7 +4,7 @@
 // 最后修改: 2025-12-13
 
 import { CACHE } from '../constants';
-import config from '../../liteStore.config';
+import { configManager } from '../config/ConfigManager';
 
 /**
  * Compression utility functions
@@ -12,20 +12,10 @@ import config from '../../liteStore.config';
 const CompressionUtils = {
   /**
    * Simple compression algorithm for cache data
-   * Uses JSON.stringify and replaces repeated patterns
+   * Uses JSON.stringify without modifying the output (since modifying JSON format would break parsing)
    */
   compress(data: any): string {
-    const json = JSON.stringify(data);
-    // Simple compression: replace repeated patterns
-    let compressed = json;
-    // Replace common patterns
-    compressed = compressed.replace(/"(\w+)":/g, '$1:');
-    compressed = compressed.replace(/\{\s*/g, '{');
-    compressed = compressed.replace(/\}\s*/g, '}');
-    compressed = compressed.replace(/\[\s*/g, '[');
-    compressed = compressed.replace(/\]\s*/g, ']');
-    compressed = compressed.replace(/\,\s*/g, ',');
-    return compressed;
+    return JSON.stringify(data);
   },
 
   /**
@@ -1021,7 +1011,7 @@ export class CacheManager {
    * @returns 默认缓存最大大小
    */
   static getDefaultMaxSize(): number {
-    return config.cache?.maxSize || CACHE.DEFAULT_MAX_SIZE;
+    return configManager.getConfig().cache?.maxSize || CACHE.DEFAULT_MAX_SIZE;
   }
 
   /**
@@ -1029,7 +1019,7 @@ export class CacheManager {
    * @returns 默认缓存过期时间（毫秒）
    */
   static getDefaultExpiry(): number {
-    return config.cache?.defaultExpiry || CACHE.DEFAULT_EXPIRY;
+    return configManager.getConfig().cache?.defaultExpiry || CACHE.DEFAULT_EXPIRY;
   }
 
   /**
@@ -1037,15 +1027,16 @@ export class CacheManager {
    * @returns 默认内存使用阈值（0-1之间的小数）
    */
   static getDefaultMemoryThreshold(): number {
-    return config.cache?.memoryWarningThreshold || CACHE.MEMORY_THRESHOLD;
+    return configManager.getConfig().cache?.memoryWarningThreshold || CACHE.MEMORY_THRESHOLD;
   }
 
   /**
    * 从配置文件获取是否启用缓存压缩
    * @returns 是否启用缓存压缩
+   * @deprecated 缓存压缩功能已弃用，始终返回false
    */
   static getDefaultEnableCompression(): boolean {
-    return config.cache?.enableCompression || false;
+    return false; // 缓存压缩功能已弃用
   }
 
   /**
@@ -1053,6 +1044,6 @@ export class CacheManager {
    * @returns 默认缓存清理间隔（毫秒）
    */
   static getDefaultCleanupInterval(): number {
-    return config.cache?.cleanupInterval || CACHE.CLEANUP_INTERVAL;
+    return configManager.getConfig().cache?.cleanupInterval || CACHE.CLEANUP_INTERVAL;
   }
 }

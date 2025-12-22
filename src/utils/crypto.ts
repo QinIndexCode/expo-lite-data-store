@@ -25,7 +25,7 @@ try {
   // 对于 SecureStore，我们将使用内存存储作为回退
 }
 
-import config from '../liteStore.config';
+import { configManager } from '../core/config/ConfigManager';
 
 /**
  * 加密错误类
@@ -104,7 +104,7 @@ let inMemoryStore: Map<string, string> = new Map();
  */
 const getIterations = (): number => {
   // 使用配置中的迭代次数
-  const iterations = config.encryption.keyIterations;
+  const iterations = configManager.getConfig().encryption.keyIterations;
   // 确保迭代次数在安全范围内
   return Math.max(10000, Math.min(iterations, 1000000)); // 限制在10000-1000000之间
 };
@@ -277,7 +277,7 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
     // 使用SHA-256哈希masterKey，确保相同的masterKey生成相同的缓存键
     // 同时避免直接暴露masterKey的任何部分
     const masterKeyHash = CryptoES.SHA256(masterKey).toString(CryptoES.Hex).substring(0, 16);
-    const cacheKey = `${masterKeyHash}_${saltStr}_${config.encryption.keyIterations}`;
+    const cacheKey = `${masterKeyHash}_${saltStr}_${configManager.getConfig().encryption.keyIterations}`;
 
     // 检查智能缓存
     const cachedEntry = keyCache.get(cacheKey);
@@ -367,7 +367,7 @@ export const encrypt = async (plainText: string, masterKey: string): Promise<str
 
     // HMAC 校验（模拟 GCM tag）- 使用配置中的HMAC算法
     const hmac =
-      config.encryption.hmacAlgorithm === 'SHA-512'
+      configManager.getConfig().encryption.hmacAlgorithm === 'SHA-512'
         ? CryptoES.HmacSHA512(ciphertextBase64, hmacKey)
         : CryptoES.HmacSHA256(ciphertextBase64, hmacKey);
 
@@ -403,7 +403,7 @@ export const decrypt = async (encryptedBase64: string, masterKey: string): Promi
 
     // 先 HMAC 校验（防篡改）- 使用配置中的HMAC算法
     const computedHmac =
-      config.encryption.hmacAlgorithm === 'SHA-512'
+      configManager.getConfig().encryption.hmacAlgorithm === 'SHA-512'
         ? CryptoES.HmacSHA512(payload.ciphertext, hmacKey)
         : CryptoES.HmacSHA256(payload.ciphertext, hmacKey);
 
@@ -645,10 +645,10 @@ export const encryptBulk = async (plainTexts: string[], masterKey: string): Prom
       const ciphertextBase64 = encrypted.ciphertext ? CryptoES.Base64.stringify(encrypted.ciphertext) : '';
 
       // HMAC 校验 - 使用配置中的HMAC算法
-      const hmac =
-        config.encryption.hmacAlgorithm === 'SHA-512'
-          ? CryptoES.HmacSHA512(ciphertextBase64, hmacKey)
-          : CryptoES.HmacSHA256(ciphertextBase64, hmacKey);
+        const hmac =
+          configManager.getConfig().encryption.hmacAlgorithm === 'SHA-512'
+            ? CryptoES.HmacSHA512(ciphertextBase64, hmacKey)
+            : CryptoES.HmacSHA256(ciphertextBase64, hmacKey);
 
       encryptedResults.push({
         encryptedData: ciphertextBase64,
@@ -700,10 +700,10 @@ export const decryptBulk = async (encryptedTexts: string[], masterKey: string): 
       const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
 
       // HMAC 校验 - 使用配置中的HMAC算法
-      const computedHmac =
-        config.encryption.hmacAlgorithm === 'SHA-512'
-          ? CryptoES.HmacSHA512(payload.ciphertext, hmacKey)
-          : CryptoES.HmacSHA256(payload.ciphertext, hmacKey);
+        const computedHmac =
+          configManager.getConfig().encryption.hmacAlgorithm === 'SHA-512'
+            ? CryptoES.HmacSHA512(payload.ciphertext, hmacKey)
+            : CryptoES.HmacSHA256(payload.ciphertext, hmacKey);
 
       // 修正：用 CryptoES.Base64.stringify 比较
       if (CryptoES.Base64.stringify(computedHmac) !== payload.hmac) {

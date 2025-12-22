@@ -1,6 +1,6 @@
 // src/core/data/DataWriter.ts
 import * as FileSystem from 'expo-file-system';
-import config from '../../liteStore.config';
+import { configManager } from '../config/ConfigManager';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
 import { StorageError } from '../../types/storageErrorInfc';
 import type { CreateTableOptions, WriteOptions, WriteResult } from '../../types/storageTypes';
@@ -16,7 +16,7 @@ import { IndexManager } from '../index/IndexManager';
 import type { ColumnSchema } from '../meta/MetadataManager';
 import { QueryEngine } from '../query/QueryEngine';
 export class DataWriter {
-  private chunkSize = config.chunkSize;
+  private chunkSize: number;
   private indexManager: IndexManager;
   private metadataManager: IMetadataManager;
   private fileOperationManager: FileOperationManager;
@@ -36,6 +36,7 @@ export class DataWriter {
     this.metadataManager = metadataManager;
     this.indexManager = indexManager;
     this.fileOperationManager = fileOperationManager;
+    this.chunkSize = configManager.getConfig().chunkSize;
   }
 
   private static readonly supportedColumnTypes: ColumnSchema[string][] = [
@@ -659,13 +660,8 @@ export class DataWriter {
 
         const tableMeta = this.metadataManager.get(tableName);
         if (!tableMeta) {
-          throw ErrorHandler.createGeneralError(
-            `Table ${tableName} not found`,
-            'TABLE_NOT_FOUND',
-            undefined,
-            `Table ${tableName} does not exist`,
-            'Please check if the table name is correct'
-          );
+          // 表不存在，返回0表示没有删除任何记录
+          return 0;
         }
 
         // 获取锁，确保同一表的并发删除操作串行执行
@@ -707,10 +703,20 @@ export class DataWriter {
             await withTimeout(handler.write(filteredData), 10000, `write to single file table ${tableName}`);
           }
 
-          // 更新索引
-          this.indexManager.clearTableIndexes(tableName);
-          for (const item of filteredData) {
-            this.indexManager.addToIndex(tableName, item);
+          // 更新索引 - 添加错误处理，避免索引更新失败导致整个删除操作失败
+          try {
+            this.indexManager.clearTableIndexes(tableName);
+            for (const item of filteredData) {
+              // 确保数据有id字段，否则跳过索引更新
+              if (item.id !== undefined) {
+                this.indexManager.addToIndex(tableName, item);
+              }
+            }
+          } catch (error) {
+            // 索引更新失败时记录日志但不影响主流程
+            logger.error(`[DataWriter.delete] Failed to update indexes for table ${tableName}:`, error);
+            // 清理损坏的索引
+            this.indexManager.clearTableIndexes(tableName);
           }
 
           // 更新元数据

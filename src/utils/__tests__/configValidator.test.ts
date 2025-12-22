@@ -1,15 +1,15 @@
 import { ConfigValidator } from '../configValidator';
 import type { ConfigValidationResult } from '../configValidator';
-import config from '../../liteStore.config';
+import { configManager } from '../../core/config/ConfigManager';
 
 // 保存原始配置，用于测试后恢复
 describe('ConfigValidator', () => {
   // 测试前保存原始配置
-  const originalConfig = { ...config };
+  const originalConfig = { ...configManager.getConfig() };
 
   // 测试后恢复原始配置
   afterAll(() => {
-    Object.assign(config, originalConfig);
+    configManager.setConfig(originalConfig);
   });
 
   test('should validate complete configuration successfully', () => {
@@ -20,7 +20,9 @@ describe('ConfigValidator', () => {
 
   test('should handle missing encryption configuration gracefully', () => {
     // 删除加密配置
-    delete (config as any).encryption;
+    const currentConfig = { ...configManager.getConfig() };
+    delete (currentConfig as any).encryption;
+    configManager.setConfig(currentConfig);
 
     const result: ConfigValidationResult = ConfigValidator.validateAll();
     expect(result.isValid).toBe(true);
@@ -30,7 +32,9 @@ describe('ConfigValidator', () => {
 
   test('should handle missing api configuration gracefully', () => {
     // 删除API配置
-    delete (config as any).api;
+    const currentConfig = { ...configManager.getConfig() };
+    delete (currentConfig as any).api;
+    configManager.setConfig(currentConfig);
 
     const result: ConfigValidationResult = ConfigValidator.validateAll();
     expect(result.isValid).toBe(true);
@@ -40,7 +44,9 @@ describe('ConfigValidator', () => {
 
   test('should handle missing cache configuration gracefully', () => {
     // 删除缓存配置
-    delete (config as any).cache;
+    const currentConfig = { ...configManager.getConfig() };
+    delete (currentConfig as any).cache;
+    configManager.setConfig(currentConfig);
 
     const result: ConfigValidationResult = ConfigValidator.validateAll();
     expect(result.isValid).toBe(true);
@@ -55,7 +61,9 @@ describe('ConfigValidator', () => {
 
   test('should handle missing performance configuration gracefully', () => {
     // 删除性能配置
-    delete (config as any).performance;
+    const currentConfig = { ...configManager.getConfig() };
+    delete (currentConfig as any).performance;
+    configManager.setConfig(currentConfig);
 
     const result: ConfigValidationResult = ConfigValidator.validateAll();
     expect(result.isValid).toBe(true);
@@ -70,7 +78,9 @@ describe('ConfigValidator', () => {
 
   test('should handle missing monitoring configuration gracefully', () => {
     // 删除监控配置
-    delete (config as any).monitoring;
+    const currentConfig = { ...configManager.getConfig() };
+    delete (currentConfig as any).monitoring;
+    configManager.setConfig(currentConfig);
 
     const result: ConfigValidationResult = ConfigValidator.validateAll();
     expect(result.isValid).toBe(true);
@@ -107,18 +117,22 @@ describe('ConfigValidator', () => {
 
   test('should detect invalid types in configuration', () => {
     // 修改配置为无效类型
-    (config as any).chunkSize = 'invalid';
-    (config as any).storageFolder = 123;
-    (config as any).sortMethods = 456;
-    (config as any).timeout = 'invalid';
-    (config as any).encryption.keyIterations = 'invalid';
-    (config as any).encryption.encryptedFields = 'invalid';
-    (config as any).cache.maxSize = 'invalid';
-    (config as any).performance.maxConcurrentOperations = 'invalid';
-    (config as any).performance.memoryWarningThreshold = 'invalid';
-    (config as any).api.rateLimit.requestsPerSecond = 'invalid';
-    (config as any).api.rateLimit.enabled = 'invalid';
-    (config as any).monitoring.enablePerformanceTracking = 'invalid';
+    const currentConfig = { ...configManager.getConfig() };
+    
+    (currentConfig as any).chunkSize = 'invalid';
+    (currentConfig as any).storageFolder = 123;
+    (currentConfig as any).sortMethods = 456;
+    (currentConfig as any).timeout = 'invalid';
+    (currentConfig as any).encryption.keyIterations = 'invalid';
+    (currentConfig as any).encryption.encryptedFields = 'invalid';
+    (currentConfig as any).cache.maxSize = 'invalid';
+    (currentConfig as any).performance.maxConcurrentOperations = 'invalid';
+    (currentConfig as any).performance.memoryWarningThreshold = 'invalid';
+    (currentConfig as any).api.rateLimit.requestsPerSecond = 'invalid';
+    (currentConfig as any).api.rateLimit.enabled = 'invalid';
+    (currentConfig as any).monitoring.enablePerformanceTracking = 'invalid';
+    
+    configManager.setConfig(currentConfig);
 
     // 验证能检测到所有无效类型
     const result: ConfigValidationResult = ConfigValidator.validateAll();
@@ -171,7 +185,7 @@ describe('ConfigValidator', () => {
     const fixedConfig = ConfigValidator.autoFix();
 
     // 使用修复后的配置验证
-    (global as any).config = fixedConfig;
+    configManager.setConfig(fixedConfig);
 
     const result: ConfigValidationResult = ConfigValidator.validateAll();
     expect(result.isValid).toBe(true);

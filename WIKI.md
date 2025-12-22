@@ -6,42 +6,85 @@
 
 LiteStore 提供丰富的配置选项，允许您根据项目需求调整性能、安全性和行为。
 
-**重要说明**：配置直接从打包文件加载。要修改配置，您需要编辑以下文件：
+### 配置来源
 
-```
-node_modules/expo-lite-data-store/dist/js/liteStore.config.js
-```
+LiteStore 支持从以下来源读取配置，优先级从高到低：
 
-**无运行时配置 API**：该库不提供运行时配置 API。所有配置更改必须通过直接编辑打包的配置文件来完成。这种方法确保了在不同环境中一致的配置加载，并防止了异步加载的问题。
+1. **app.json 中的 extra.liteStore 配置**（推荐）：
+   ```json
+   {
+     "expo": {
+       "extra": {
+         "liteStore": {
+           "autoSync": {
+             "enabled": true,
+             "interval": 60000,
+             "minItems": 10,
+             "batchSize": 100
+           },
+           "chunkSize": 1024
+         }
+       }
+     }
+   }
+   ```
+
+2. **默认配置**：
+   内置的默认配置，用于所有未明确指定的配置项
+
+**无运行时配置 API**：该库不提供运行时配置 API。所有配置更改必须通过在 app.json 中配置来完成。这种方法确保了在不同环境中一致的配置加载，并防止了异步加载的问题。
 
 ### 基础配置
 
-| 配置项          | 类型     | 默认值                  | 说明                                                                 |
-| --------------- | -------- | ----------------------- | -------------------------------------------------------------------- |
-| `chunkSize`     | `number` | `5 * 1024 * 1024` (5MB) | 数据文件分片大小，超过此大小的文件将被自动分片                       |
-| `storageFolder` | `string` | `'expo-litedatastore'`  | 数据存储目录名称                                                     |
-| `sortMethods`   | `string` | `'default'`             | 默认排序算法，可选值：`default`, `fast`, `counting`, `merge`, `slow` |
-| `timeout`       | `number` | `10000` (10秒)          | 操作超时时间                                                         |
+| 配置项          | 类型     | 默认值                   | 说明                                                                 |
+| --------------- | -------- | ------------------------ | -------------------------------------------------------------------- |
+| `chunkSize`     | `number` | `10 * 1024 * 1024` (10MB) | 数据文件分片大小，超过此大小的文件将被自动分片                       |
+| `storageFolder` | `string` | `'lite-data-store'`       | 数据存储目录名称                                                     |
+| `sortMethods`   | `string` | `'default'`              | 默认排序算法，可选值：`default`, `fast`, `counting`, `merge`, `slow` |
+| `timeout`       | `number` | `10000` (10秒)           | 操作超时时间                                                         |
+
+### API 配置
+
+| 配置项                      | 类型      | 默认值 | 说明                              |
+| --------------------------- | --------- | ------ | --------------------------------- |
+| `api.rateLimit.enabled`     | `boolean` | `false` | 是否启用速率限制                  |
+| `api.rateLimit.requestsPerSecond` | `number` | `10`   | 每秒最大请求数                    |
+| `api.rateLimit.burstCapacity` | `number`  | `20`   | 突发容量                          |
+| `api.retry.maxAttempts`     | `number`  | `3`    | 最大重试次数                      |
+| `api.retry.backoffMultiplier` | `number` | `2`    | 退避乘数                          |
 
 ### 加密配置
 
 | 配置项                       | 类型       | 默认值           | 说明                                         |
 | ---------------------------- | ---------- | ---------------- | -------------------------------------------- |
-| `algorithm`                  | `string`   | `'AES-CTR'`      | 加密算法，支持 `AES-CTR`                     |
-| `keySize`                    | `number`   | `256`            | 加密密钥长度，支持 `128`, `192`, `256`       |
-| `hmacAlgorithm`              | `string`   | `'SHA-512'`      | HMAC 完整性保护算法                          |
-| `keyIterations`              | `number`   | `120000`         | 密钥派生迭代次数，值越高安全性越强但性能越低 |
-
-| `encryptedFields`            | `string[]` | 常见敏感字段列表 | 默认加密的字段列表                           |
-| `cacheTimeout`               | `number`   | `30000` (30秒)   | 内存中 masterKey 的缓存超时时间              |
-| `maxCacheSize`               | `number`   | `50`             | LRU 缓存最多保留的派生密钥数量               |
-| `useBulkOperations`          | `boolean`  | `true`           | 是否启用批量操作优化                         |
+| `encryption.algorithm`       | `string`   | `'AES-CTR'`      | 加密算法，支持 `AES-CTR`                     |
+| `encryption.keySize`         | `number`   | `256`            | 加密密钥长度，支持 `128`, `192`, `256`       |
+| `encryption.hmacAlgorithm`   | `string`   | `'SHA-512'`      | HMAC 完整性保护算法                          |
+| `encryption.keyIterations`   | `number`   | `100000`         | 密钥派生迭代次数，值越高安全性越强但性能越低 |
+| `encryption.encryptedFields` | `string[]` | `['password', 'email', 'phone']` | 默认加密的字段列表       |
+| `encryption.cacheTimeout`    | `number`   | `30000` (30秒)   | 内存中 masterKey 的缓存超时时间              |
+| `encryption.maxCacheSize`    | `number`   | `50`             | LRU 缓存最多保留的派生密钥数量               |
+| `encryption.useBulkOperations` | `boolean`  | `true` | 是否启用批量操作优化                   |
 
 **重要说明**：
 - 整表加密和字段级加密**不能同时使用**，系统会自动检测冲突并抛出明确的错误信息
 - 整表加密模式通过 API 调用时的 `encryptFullTable` 参数启用
 - 字段级加密通过配置文件中的 `encryptedFields` 启用，当 `encryptedFields` 数组不为空时自动启用字段级加密
 - 非加密模式下，数据以明文形式存储，不会使用任何加密算法，也不会触发生物识别或密码认证
+
+### 加密推荐模式
+
+**除非有特殊要求，否则推荐使用字段级加密**，原因如下：
+
+1. **性能更好**：支持增量写入，无需每次操作都重新加密整个表
+2. **查询更灵活**：可以直接查询未加密字段，无需解密整个表
+3. **支持部分加密**：可以只加密敏感字段，提高性能
+4. **默认行为**：现在系统默认使用字段级加密，无需手动配置
+
+**整表加密仅在以下特殊情况下推荐使用**：
+- 要求最高级别的数据安全性
+- 表数据量较小，性能影响可接受
+- 需要确保所有数据字段都被加密
 
 ### 性能配置
 
@@ -52,75 +95,74 @@ node_modules/expo-lite-data-store/dist/js/liteStore.config.js
 | `enableBatchOptimization` | `boolean` | `true` | 是否启用批量操作优化              |
 | `memoryWarningThreshold`  | `number`  | `0.8`  | 内存使用触发警告的阈值（0-1之间） |
 
+### 自动同步配置
+
+| 配置项                      | 类型      | 默认值 | 说明                              |
+| --------------------------- | --------- | ------ | --------------------------------- |
+| `autoSync.enabled`          | `boolean` | `true` | 是否启用自动同步                  |
+| `autoSync.interval`         | `number`  | `30000` (30秒) | 自动同步间隔                      |
+| `autoSync.minItems`         | `number`  | `1`    | 触发同步的最小脏项数量            |
+| `autoSync.batchSize`        | `number`  | `100`  | 每次同步的最大项目数              |
+
 ### 缓存配置
 
 | 配置项                   | 类型      | 默认值            | 说明                       |
 | ------------------------ | --------- | ----------------- | -------------------------- |
 | `maxSize`                | `number`  | `1000`            | 缓存最大条目数             |
 | `defaultExpiry`          | `number`  | `3600000` (1小时) | 缓存默认过期时间           |
-| `enableCompression`      | `boolean` | `false`           | 是否启用缓存数据压缩       |
 | `cleanupInterval`        | `number`  | `300000` (5分钟)  | 缓存清理间隔               |
 | `memoryWarningThreshold` | `number`  | `0.8`             | 缓存内存使用触发警告的阈值 |
-| `autoSync.enabled`       | `boolean` | `true`            | 是否启用自动同步           |
-| `autoSync.interval`      | `number`  | `5000` (5秒)      | 自动同步间隔               |
-| `autoSync.minItems`      | `number`  | `1`               | 触发同步的最小脏项数量     |
-| `autoSync.batchSize`     | `number`  | `100`             | 每次同步的最大项目数       |
-
-
 
 ### 监控配置
 
 | 配置项                      | 类型      | 默认值              | 说明             |
 | --------------------------- | --------- | ------------------- | ---------------- |
-| `enablePerformanceTracking` | `boolean` | `true`              | 是否启用性能跟踪 |
+| `enablePerformanceTracking` | `boolean` | `false`             | 是否启用性能跟踪 |
 | `enableHealthChecks`        | `boolean` | `true`              | 是否启用健康检查 |
 | `metricsRetention`          | `number`  | `86400000` (24小时) | 性能指标保留时间 |
 
 ### 配置最佳实践
 
-要修改配置，您需要直接编辑打包的配置文件：
+要修改配置，推荐在 app.json 中进行配置，这是最方便且可靠的方式：
 
+```json
+{
+  "expo": {
+    "extra": {
+      "liteStore": {
+        "performance": {
+          "enableQueryOptimization": true,
+          "maxConcurrentOperations": 8, // 根据设备性能调整
+          "enableBatchOptimization": true
+        },
+        "encryption": {
+          "keyIterations": 200000, // 增加密钥派生迭代次数
+          "cacheTimeout": 15000 // 减少密钥缓存时间
+        },
+        "cache": {
+          "maxSize": 500, // 减少缓存大小
+          "memoryWarningThreshold": 0.7 // 降低内存警告阈值
+        }
+      }
+    }
+  }
+}
 ```
-node_modules/expo-lite-data-store/dist/js/liteStore.config.js
-```
+
+**配置建议**：
 
 1. **性能优化**：
-
-   ```javascript
-   // liteStore.config.js
-   module.exports = {
-     performance: {
-       enableQueryOptimization: true,
-       maxConcurrentOperations: 8, // 根据设备性能调整
-       enableBatchOptimization: true,
-     },
-   };
-   ```
+   - 根据设备性能调整 `maxConcurrentOperations`（建议值：4-10）
+   - 启用 `enableQueryOptimization` 以提高查询性能
+   - 启用 `enableBatchOptimization` 以提高批量操作性能
 
 2. **安全性增强**：
-
-   ```javascript
-   // liteStore.config.js
-   module.exports = {
-     encryption: {
-       keyIterations: 200000, // 增加密钥派生迭代次数
-       cacheTimeout: 15000, // 减少密钥缓存时间
-
-     },
-   };
-   ```
+   - 对于高敏感数据，增加 `keyIterations`（建议值：100000-200000）
+   - 减少 `cacheTimeout` 以降低密钥泄露风险
 
 3. **内存优化**：
-   ```javascript
-   // liteStore.config.js
-   module.exports = {
-     cache: {
-       maxSize: 500, // 减少缓存大小
-       enableCompression: true, // 启用缓存压缩
-       memoryWarningThreshold: 0.7, // 降低内存警告阈值
-     },
-   };
-   ```
+   - 对于低内存设备，减少 `cache.maxSize`
+   - 调整 `memoryWarningThreshold` 以适应设备内存情况
 
 ## 🎯 API 参考
 
@@ -165,7 +207,6 @@ createTable(tableName: string, options?: CreateTableOptions): Promise<void>
   - `initialData`: 初始数据（可选）
   - `mode`: 存储模式，`'single'` 或 `'chunked'`（可选）
   - `encrypted`: 是否启用加密存储，默认为 false（可选）
-  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **示例**：
 ```typescript
@@ -424,7 +465,7 @@ const paginatedUsers = await read('users', {
 
 **签名**：
 ```typescript
-findOne(tableName: string, { where, encrypted?, requireAuthOnAccess? }: { where: FilterCondition, encrypted?: boolean, requireAuthOnAccess?: boolean }): Promise<Record<string, any> | null>
+findOne(tableName: string, { where, encrypted? }: { where: FilterCondition, encrypted?: boolean }): Promise<Record<string, any> | null>
 ```
 
 **参数**：
@@ -432,7 +473,6 @@ findOne(tableName: string, { where, encrypted?, requireAuthOnAccess? }: { where:
 - `filter`: 查询条件
 - `options`: 可选配置项
   - `encrypted`: 是否启用加密存储，默认为 false（可选）
-  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `Record<string, any> | null`: 匹配的记录，如果没有匹配则返回 `null`
@@ -450,8 +490,7 @@ const activeUser = await findOne('users', {
 // 使用加密选项查询
 const encryptedUser = await findOne('sensitive_data', {
   where: { id: 1 },
-  encrypted: true,
-  requireAuthOnAccess: false
+  encrypted: true
 });
 ```
 
@@ -461,15 +500,14 @@ const encryptedUser = await findOne('sensitive_data', {
 
 **签名**：
 ```typescript
-findMany(tableName: string, { where?, skip?, limit?, sortBy?, order?, sortAlgorithm?, encrypted?, requireAuthOnAccess? }: {
+findMany(tableName: string, { where?, skip?, limit?, sortBy?, order?, sortAlgorithm?, encrypted? }: {
   where?: FilterCondition,
   skip?: number,
   limit?: number,
   sortBy?: string | string[],
   order?: 'asc' | 'desc' | ('asc' | 'desc')[],
   sortAlgorithm?: 'quick' | 'merge' | 'slow' | 'default' | 'radix',
-  encrypted?: boolean,
-  requireAuthOnAccess?: boolean
+  encrypted?: boolean
 }): Promise<Record<string, any>[]>
 ```
 
@@ -483,7 +521,6 @@ findMany(tableName: string, { where?, skip?, limit?, sortBy?, order?, sortAlgori
   - `order`: 排序方向或方向数组
   - `sortAlgorithm`: 排序算法
   - `encrypted`: 是否启用加密存储，默认为 false（可选）
-  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `Record<string, any>[]`: 匹配的记录数组
@@ -511,7 +548,6 @@ const chineseSortedUsers = await findMany('users', {
 const encryptedUsers = await findMany('sensitive_data', {
   where: { status: 'active' },
   encrypted: true,
-  requireAuthOnAccess: false,
   sortBy: 'created_at',
   order: 'desc'
 });
@@ -523,7 +559,7 @@ const encryptedUsers = await findMany('sensitive_data', {
 
 **签名**：
 ```typescript
-update(tableName: string, data: Record<string, any>, { where, encrypted?, requireAuthOnAccess? }: { where: FilterCondition, encrypted?: boolean, requireAuthOnAccess?: boolean }): Promise<number>
+update(tableName: string, data: Record<string, any>, { where, encrypted? }: { where: FilterCondition, encrypted?: boolean }): Promise<number>
 ```
 
 **参数**：
@@ -532,7 +568,6 @@ update(tableName: string, data: Record<string, any>, { where, encrypted?, requir
 - `options`: 选项对象
   - `where`: 更新条件
   - `encrypted`: 是否启用加密存储，默认为 false（可选）
-  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `number`: 更新的记录数
@@ -552,8 +587,7 @@ console.log(`更新了 ${updatedCount} 条记录`);
 // 使用加密选项更新
 const updatedCount = await update('sensitive_data', { status: 'active' }, {
   where: { id: 1 },
-  encrypted: true,
-  requireAuthOnAccess: false
+  encrypted: true
 });
 console.log(`更新了 ${updatedCount} 条记录`);
 ```
@@ -564,7 +598,7 @@ console.log(`更新了 ${updatedCount} 条记录`);
 
 **签名**：
 ```typescript
-remove(tableName: string, { where, encrypted?, requireAuthOnAccess? }: { where: FilterCondition, encrypted?: boolean, requireAuthOnAccess?: boolean }): Promise<number>
+remove(tableName: string, { where, encrypted? }: { where: FilterCondition, encrypted?: boolean }): Promise<number>
 ```
 
 **参数**：
@@ -572,7 +606,6 @@ remove(tableName: string, { where, encrypted?, requireAuthOnAccess? }: { where: 
 - `options`: 选项对象
   - `where`: 删除条件
   - `encrypted`: 是否启用加密存储，默认为 false（可选）
-  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `number`: 删除的记录数
@@ -592,8 +625,7 @@ console.log(`删除了 ${deletedCount} 条记录`);
 // 使用加密选项删除
 const deletedCount = await remove('sensitive_data', {
   where: { id: 1 },
-  encrypted: true,
-  requireAuthOnAccess: false
+  encrypted: true
 });
 console.log(`删除了 ${deletedCount} 条记录`);
 ```
@@ -619,7 +651,6 @@ bulkWrite(tableName: string, operations: Array<{
   - `where`: 操作条件（update和delete操作需要）
 - `options`: 可选配置项
   - `encrypted`: 是否启用加密存储，默认为 false（可选）
-  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **返回值**：
 - `WriteResult`: 写入结果
@@ -637,8 +668,7 @@ await bulkWrite('sensitive_data', [
   { type: 'insert', data: { id: 1, name: '敏感数据', value: '123456' } },
   { type: 'update', data: { value: '789012' }, where: { id: 1 } }
 ], {
-  encrypted: true,
-  requireAuthOnAccess: false
+  encrypted: true
 });
 ```
 
@@ -656,7 +686,6 @@ beginTransaction(options?: TableOptions): Promise<void>
 **参数**：
 - `options`: 可选配置项
   - `encrypted`: 是否启用加密存储，默认为 false（可选）
-  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **示例**：
 ```typescript
@@ -674,7 +703,7 @@ try {
 }
 
 // 使用加密选项开始事务
-await beginTransaction({ encrypted: true, requireAuthOnAccess: false });
+await beginTransaction({ encrypted: true });
 ```
 
 ##### commit
@@ -689,7 +718,6 @@ commit(options?: TableOptions): Promise<void>
 **参数**：
 - `options`: 可选配置项
   - `encrypted`: 是否启用加密存储，默认为 false（可选）
-  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **示例**：
 ```typescript
@@ -702,7 +730,7 @@ try {
 }
 
 // 使用加密选项提交事务
-await commit({ encrypted: true, requireAuthOnAccess: false });
+await commit({ encrypted: true });
 ```
 
 ##### rollback
@@ -717,7 +745,6 @@ rollback(options?: TableOptions): Promise<void>
 **参数**：
 - `options`: 可选配置项
   - `encrypted`: 是否启用加密存储，默认为 false（可选）
-  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
 
 **示例**：
 ```typescript
@@ -730,7 +757,7 @@ try {
 }
 
 // 使用加密选项回滚事务
-await rollback({ encrypted: true, requireAuthOnAccess: false });
+await rollback({ encrypted: true });
 ```
 
 
@@ -1174,7 +1201,7 @@ A: 运行 `npm run build:all` 来构建完整的TypeScript和JavaScript版本。
 <details>
 <summary>Q: 配置文件修改后不生效？</summary>
 
-A: 配置文件直接从打包文件加载，修改后需要重新启动应用才能生效。
+A: 配置文件直接从app.json中加载，修改后需要重新启动应用才能生效。
 </details>
 
 
@@ -1363,4 +1390,4 @@ module.exports = getDefaultConfig(__dirname, {
 
 ## 许可证
 
-MIT © QinIndex Qin
+MIT © QinIndexCode

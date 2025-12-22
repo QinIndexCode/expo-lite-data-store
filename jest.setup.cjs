@@ -207,6 +207,17 @@ if (typeof afterAll !== 'undefined') {
     } catch (e) {
       logger.warn('[jest.setup] afterAll: 清理全局数据库实例失败', e);
     }
+    
+    try {
+      // 清理自动同步服务实例，关闭所有定时器
+      const { AutoSyncService } = require('./src/core/service/AutoSyncService');
+      if (AutoSyncService && typeof AutoSyncService.cleanupInstance === 'function') {
+        logger.info('[jest.setup] afterAll: Cleaning up AutoSyncService instance');
+        await AutoSyncService.cleanupInstance();
+      }
+    } catch (e) {
+      logger.warn('[jest.setup] afterAll: 清理自动同步服务实例失败', e);
+    }
 
     // 清理所有可能存在的定时器
     try {

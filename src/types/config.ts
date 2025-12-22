@@ -25,13 +25,12 @@ export interface LiteStoreConfig {
     cacheTimeout: number;
     maxCacheSize: number;
     useBulkOperations: boolean;
-    requireAuthOnAccess?: boolean;
   };
 
   /** 性能配置 */
   performance: {
     enableQueryOptimization: boolean;
-    maxConcurrentOperations: number;
+    maxConcurrentOperations: number; // 推荐范围：3-10，根据设备性能调整
     enableBatchOptimization: boolean;
     memoryWarningThreshold: number;
   };
@@ -40,18 +39,15 @@ export interface LiteStoreConfig {
   cache: {
     maxSize: number;
     defaultExpiry: number;
-    enableCompression: boolean;
     cleanupInterval: number;
     memoryWarningThreshold: number;
   };
 
-
-
   /** 监控配置 */
   monitoring: {
-    enablePerformanceTracking: boolean;
-    enableHealthChecks: boolean;
-    metricsRetention: number;
+    enablePerformanceTracking: boolean; // 暂未完全支持
+    enableHealthChecks: boolean; // 启用可提升性能和稳定性
+    metricsRetention: number; // 24小时
   };
 
   /** 自动同步配置 */
@@ -60,5 +56,18 @@ export interface LiteStoreConfig {
     interval?: number;
     minItems?: number;
     batchSize?: number;
+  };
+  
+  /** API配置 */
+  api: {
+    rateLimit: {
+      enabled: boolean;
+      requestsPerSecond: number;
+      burstCapacity: number;
+    };
+    retry: {
+      maxAttempts: number;
+      backoffMultiplier: number;
+    };
   };
 }
