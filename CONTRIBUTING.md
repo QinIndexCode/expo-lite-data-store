@@ -1,4 +1,6 @@
-# 贡献指南
+# 贡献指南 / Contributing Guide 
+
+## 中文版本（Chinese）
 
 感谢你对 expo-lite-data-store 的兴趣和贡献！本项目为 React Native + Expo 提供轻量、纯 TypeScript 的本地数据存储方案。为了保持代码质量与协作效率，请在贡献前阅读本指南。
 
@@ -148,10 +150,163 @@ PR 模板（示例检查项）：
 
 ---
 
-## 需要我帮忙吗？
-我可以：
-- 将本 CONTRIBUTING.md 添加到仓库（请告知目标分支）。
-- 生成 Issue/PR 模板、CODE_OF_CONDUCT.md 或 PR 模板文件。
-- 基于仓库 package.json 自动填充脚本命令（需要我读取仓库内容）。
+---
 
-要我把 CONTRIBUTING.md 直接添加到仓库吗？如果要，请确认目标分支（默认 main）并告知是否同时创建 CODE_OF_CONDUCT.md / PR 模板等。
+## English Version 
+
+# Contributing Guide
+
+Thank you for your interest in contributing to expo-lite-data-store! This project provides a lightweight, TypeScript-only local data store for React Native + Expo projects. To keep code quality and collaboration efficient, please read this guide before contributing.
+
+## Table of Contents
+- What can I contribute?
+- Before you start
+- Reporting bugs / feature requests
+- Branching & commit conventions
+- Local development & scripts
+- Tests, checks & CI
+- Pull Request (PR) process
+- Code review checklist
+- Docs, examples & localization
+- Code of Conduct
+- License
+
+---
+
+## What can I contribute?
+- Bug fixes
+- Tests (unit/integration)
+- Performance improvements or API refinements
+- Documentation or example additions
+- New features (discuss with maintainers first)
+- Code style, typing, or build improvements
+
+---
+
+## Before you start
+1. Fork the repo and clone to your machine.
+2. Install dependencies (npm / yarn / pnpm):
+   - npm: npm install
+   - yarn: yarn
+   - pnpm: pnpm install
+3. Create a feature branch. Recommended naming:
+   - fix/short-desc
+   - feat/short-desc
+   - docs/short-desc
+   - chore/short-desc
+   e.g. git checkout -b feat/transaction-batch
+
+If the repo has an example app, follow README to run it for manual verification.
+
+---
+
+## Reporting bugs / feature requests
+Search existing issues before opening a new one.
+
+When reporting bugs include:
+- Steps to reproduce (minimal repro if possible)
+- Expected vs actual behavior
+- Versions used (this lib, Expo, React Native)
+- Logs or stack traces
+- Platform (iOS/Android/Expo/simulator) if relevant
+
+Feature requests should include use case, design ideas, and compatibility considerations.
+
+---
+
+## Branching & commit conventions
+- Branch from main (or default branch).
+- Use Pull Requests for merging and request a maintainer review.
+- Prefer Conventional Commits:
+  - feat: new feature
+  - fix: bug fix
+  - docs: documentation
+  - style: formatting
+  - refactor: refactor without behavior change
+  - test: tests
+  - chore: maintenance
+
+Example commits:
+- feat(index): add index-based query API
+- fix(transaction): ensure rollback on error
+
+If the repo uses commitlint/husky, follow those rules.
+
+---
+
+## Local development & scripts
+(Adjust commands based on repository scripts)
+- Install: npm install
+- Run example: npm run example
+- Build: npm run build
+- Test: npm test
+- Lint: npm run lint
+- Format: npm run format
+
+Check package.json scripts if unsure and document commands used in PR.
+
+---
+
+## Tests, checks & CI
+- Include tests for new features or bug fixes.
+- Ensure local tests and CI (e.g. GitHub Actions) pass.
+- Keep TypeScript type checks clean (tsc --noEmit).
+- Pass lint and formatting (ESLint / Prettier).
+
+---
+
+## Pull Request process
+1. Create a feature branch from main.
+2. Implement changes and run tests & linters locally.
+3. Write clear commits (see commit conventions).
+4. Open a PR with:
+   - Summary of changes and reasons
+   - Reproduction steps or example code (if applicable)
+   - Whether it includes breaking changes
+   - Reference to related issue(s)
+5. Request reviewers and wait for CI & review.
+
+Suggested PR checklist:
+- [ ] I read the contributing guide and worked on a feature branch
+- [ ] Changes include tests (if applicable)
+- [ ] Local test suite passes
+- [ ] Documentation updated where necessary
+- [ ] Commit messages follow Conventional Commits
+
+---
+
+## Code review checklist
+- Type safety and minimal use of any
+- API clarity and backward compatibility
+- Edge cases and error handling (transactions, rollback, concurrency)
+- Performance (indexes, query optimization)
+- Adequate test coverage
+- Documentation and examples updated
+
+---
+
+## Docs, examples & localization
+- Update README and examples for any public API changes.
+- Provide minimal usage examples for new features and migration notes for breaking changes.
+- README is primarily in Chinese; consider English summaries or an /en/ directory for important docs.
+
+---
+
+## Code of Conduct
+Be respectful and inclusive. Maintainers may close issues/PRs or take action for violations.
+
+Consider adding a short CODE_OF_CONDUCT.md (e.g., Contributor Covenant).
+
+---
+
+## License
+The project follows the LICENSE in the repository root. By contributing you agree to license your contributions under the same terms (or state attribution/source when applicable).
+
+---
+
+If you want, I can also:
+1) Add a CODE_OF_CONDUCT.md (Contributor Covenant short version) in both Chinese and English.
+2) Add PR and Issue templates under .github/. Let me know which templates you prefer.
+3) Update README to link to CONTRIBUTING.md and add a brief bilingual summary.
+
+Please confirm if you want me to proceed with any of the above (I will update files on branch main).
