@@ -150,15 +150,9 @@ PR 模板（示例检查项）：
 
 ---
 
-## 我可以提供的帮助
-我可以：
-- 将本 CONTRIBUTING.md 添加到仓库（已完成）。
-- 生成 Issue/PR 模板、CODE_OF_CONDUCT.md 或 PR 模板文件。
-- 基于仓库 package.json 自动填充脚本命令（需要我读取仓库内容）。
-
 ---
 
-## English Version (简明英文版)
+## English Version 
 
 # Contributing Guide
 
