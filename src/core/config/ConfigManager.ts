@@ -368,6 +368,18 @@ export class ConfigManager {
     const lastKey = keys.pop();
     if (!lastKey) return;
 
+    // 检查所有键名，防止原型污染
+    const validateKey = (key: string) => {
+      // 拒绝特殊键名，防止原型污染
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+        throw new Error(`Invalid configuration key: ${key}`);
+      }
+    };
+
+    // 验证所有键名
+    keys.forEach(validateKey);
+    validateKey(lastKey);
+
     let config: any = this.customConfig;
     for (const key of keys) {
       if (!config[key]) {
