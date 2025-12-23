@@ -1,4 +1,4 @@
-# 贡献指南 / Contributing Guide (中英双语)
+# 贡献指南 / Contributing Guide 
 
 ## 中文版本（Chinese）
 
