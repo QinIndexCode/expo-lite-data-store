@@ -4,16 +4,21 @@ on:
   push:
     branches: [ main ]  
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
-  update:
+  update-contributors:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Contributors Table
-        uses: akhilmhdh/contributors-readme-action@v2.3.11
+      - name: Update Contributors
+        uses: jaywcjlove/github-action-contributors@v1.4.0
         with:
-          readme_path: README.md
-          marker_start: "<!-- readme: contributors -start -->"
-          marker_end: "<!-- readme: contributors -end -->"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          filter-author: (renovate\[bot\]|dependabot\[bot\])
+          image_size: 100
+          columns_per_row: 6
+          commit_message: 'docs: update contributors'
+          committer_username: 'github-actions[bot]'
+          committer_email: 'github-actions[bot]@users.noreply.github.com'
