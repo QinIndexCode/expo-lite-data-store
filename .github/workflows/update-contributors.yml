@@ -17,8 +17,5 @@ jobs:
         uses: jaywcjlove/github-action-contributors@main
         with:
           filter-author: (renovate\[bot\]|dependabot\[bot\])
-          image_size: 100
-          columns_per_row: 6
-          commit_message: 'docs: update contributors'
-          committer_username: 'github-actions[bot]'
-          committer_email: 'github-actions[bot]@users.noreply.github.com'
+          excludeBots: true
+          avatarSize: 100
