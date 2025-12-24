@@ -59,9 +59,14 @@ Designed specifically for React Native + Expo projects, with no native dependenc
 
 ## ✨ 贡献者 / Contributors
 
-<!--GAMFC-->
-<!--GAMFC-END-->
+感谢所有贡献者！/ Thanks to all contributors! 
+(按照贡献量排序 / Sorted by contribution quantity)
 
+<a href="https://github.com/QinIndexCode/expo-lite-data-store/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=QinIndexCode/expo-lite-data-store&s=200&columns=12" />
+</a>
+
+欢迎更多开发者加入，一起完善项目！/Welcome more developers to join and improve the project! 🚀
 ---
 喜欢的话别忘了点个 ⭐ Star，让更多人发现这个项目！
 
