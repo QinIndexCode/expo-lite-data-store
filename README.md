@@ -59,8 +59,14 @@ Designed specifically for React Native + Expo projects, with no native dependenc
 
 ## ✨ 贡献者 / Contributors
 
-<!--GAMFC-->
-<!--GAMFC-END-->
+<!--GAMFC--><table><tr>
+  <td align="center">
+    <a href="https://github.com/QinIndexCode" title="Qin">
+      <img src="https://avatars.githubusercontent.com/u/177287013?v=4" width="100;" alt="Qin"/>
+    <br /><sub><b>Qin</b></sub>
+    </a>
+  </td>
+</tr></table><!--GAMFC-END-->
 
 ---
 喜欢的话别忘了点个 ⭐ Star，让更多人发现这个项目！
