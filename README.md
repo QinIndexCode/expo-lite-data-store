@@ -57,6 +57,12 @@ Designed specifically for React Native + Expo projects, with no native dependenc
 
 ---
 
+## 贡献者 / Contributors
+
+<!-- readme: contributors -start -->
+<!-- readme: contributors -end -->
+
+---
 喜欢的话别忘了点个 ⭐ Star，让更多人发现这个项目！
 
 If you like it, don't forget to give it a ⭐ Star to let more people discover this project!

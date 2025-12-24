@@ -1,0 +1,19 @@
+name: Update Contributors
+
+on:
+  push:
+    branches: [ main ]  
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Contributors Table
+        uses: akhilmhdh/contributors-readme-action@v2.3.11
+        with:
+          readme_path: README.md
+          marker_start: "<!-- readme: contributors -start -->"
+          marker_end: "<!-- readme: contributors -end -->"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
