@@ -1,37 +1,63 @@
 # Expo LiteDBStore Architecture Design Document
 
+// Created on: 2025-11-28
+// Last Modified: 2025-12-24
+
 ## 1. System Overview
 
-Expo LiteDBStore is a lightweight local database solution based on Expo File System, supporting single-file and sharded storage modes, providing complete CRUD operations, transaction support, caching mechanism, and indexing functionality.
+Expo Lite Data Store is a lightweight local database solution based on Expo File System, supporting single-file and sharded storage modes, providing complete CRUD operations, transaction support, caching mechanism, indexing functionality, API routing, and data encryption.
 
 ## 2. System Architecture
 
 ### 2.1 Layered Architecture
 
-Expo LiteDBStore adopts a layered architecture design, mainly divided into the following layers:
+Expo Lite Data Store adopts a layered architecture design, mainly divided into the following layers:
 
 | Layer             | Responsibility                                             | Main Components                                                 |
 | ----------------- | ---------------------------------------------------------- | --------------------------------------------------------------- |
-| Interface Layer   | Provides unified API interface externally                  | FileSystemStorageAdapter                                        |
-| Data Access Layer | Handles data read/write operations                         | DataReader, DataWriter                                          |
-| Cache Layer       | Provides caching mechanism to improve query performance    | CacheManager, CacheController, CacheService                     |
+| API Layer         | Provides API routing and request handling                  | ApiRouter, ApiWrapper, ErrorHandler, RateLimiter, RestController, ValidationWrapper |
+| Interface Layer   | Provides unified API interface externally                  | FileSystemStorageAdapter, EncryptedStorageAdapter, StorageAdapterFactory |
+| Data Access Layer | Handles data read/write operations                         | DataReader, DataWriter, QueryEngine                             |
+| Cache Layer       | Provides caching mechanism to improve query performance    | CacheManager, CacheController, CacheService, CacheCoordinator   |
 | Index Layer       | Provides indexing functionality to accelerate data queries | IndexManager                                                    |
-| Storage Layer     | Handles physical storage of data                           | FileSystemStorageAdapter, ChunkedFileHandler, SingleFileHandler |
+| Encryption Layer  | Provides data encryption and key management                | KeyManager, EncryptedStorageAdapter                             |
+| Storage Layer     | Handles physical storage of data                           | FileHandlerFactory, ChunkedFileHandler, SingleFileHandler, FileHandlerBase, FileInfoCache |
 | Metadata Layer    | Manages database metadata                                  | MetadataManager                                                 |
 | Transaction Layer | Provides transaction support to ensure data consistency    | TransactionService                                              |
 | Task Queue Layer  | Asynchronously processes batch operations                  | StorageTaskProcessor, taskQueue                                 |
 | Sync Layer        | Automatically syncs dirty data in cache to disk            | AutoSyncService                                                 |
+| Monitor Layer     | Monitors system performance and cache status               | CacheMonitor, PerformanceMonitor                                |
+| Utility Layer     | Provides common utility functions                          | FileOperationManager, PermissionChecker, StorageStrategy        |
 
 ### 2.2 Core Module Relationships
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           FileSystemStorageAdapter                     │
-└─────────────────────────────────────────────────────────────────────────┘
+│                             API Layer                                  │
+├─────────────────┬─────────────────┬─────────────────┬───────────────────┤
+│    ApiRouter    │   ApiWrapper    │  ErrorHandler   │    RateLimiter    │
+└─────────────────┴─────────────────┴─────────────────┴───────────────────┘
+                    │                    │                    │
+                    ▼                    ▼                    ▼
+┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
+│  ValidationWrapper      │  │    RestController      │  │   StorageAdapterFactory │
+└─────────────────────────┴─────────────────────────┴─────────────────────────┘
+                                                  │
+                                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       Interface Layer                                  │
+├─────────────────────────────────┬───────────────────────────────────────┤
+│  FileSystemStorageAdapter       │    EncryptedStorageAdapter            │
+└─────────────────────────────────┴───────────────────────────────────────┘
                     │                    │                    │
                     ▼                    ▼                    ▼
 ┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
 │       DataReader        │  │       DataWriter        │  │   TransactionService    │
+└─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
+                    │                    │                    │
+                    ▼                    ▼                    ▼
+┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
+│      QueryEngine        │  │       KeyManager        │  │     CacheCoordinator    │
 └─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
                     │                    │                    │
                     └────────────────────┼────────────────────┘
@@ -39,31 +65,86 @@ Expo LiteDBStore adopts a layered architecture design, mainly divided into the f
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                           StorageTaskProcessor                         │
 └─────────────────────────────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                             taskQueue                                  │
-└─────────────────────────────────────────────────────────────────────────┘
-                    │
-                    ▼
+                    │                    │                    │
+                    ▼                    ▼                    ▼
 ┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
-│       CacheManager      │  │       IndexManager      │  │    MetadataManager      │
+│       taskQueue         │  │      IndexManager       │  │    MetadataManager      │
 └─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
                     │                    │                    │
                     ▼                    ▼                    ▼
 ┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
-│       CacheService      │  │    FileOperationManager │  │                         │
+│       CacheManager      │  │  FileOperationManager   │  │     CacheService        │
 └─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
                     │                    │                    │
                     ▼                    ▼                    ▼
 ┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
-│     AutoSyncService     │  │   ChunkedFileHandler    │  │   SingleFileHandler     │
+│     CacheMonitor        │  │   FileHandlerFactory    │  │     AutoSyncService     │
 └─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
+                                │                    │
+                                ▼                    ▼
+┌─────────────────────────┐  ┌─────────────────────────┐
+│  ChunkedFileHandler     │  │   SingleFileHandler     │
+└─────────────────────────┘  └─────────────────────────┘
 ```
 
 ## 3. Core Module Design
 
-### 3.1 FileSystemStorageAdapter
+### 3.1 API Layer Modules
+
+#### 3.1.1 ApiRouter
+
+**Responsibility**: Manages API routes and handles requests for different API versions.
+
+**Main Functions**:
+
+- Support multi-version API management
+- Route requests to corresponding handler functions
+- Support API version checking
+- Provide default API version configuration
+
+#### 3.1.2 ApiWrapper
+
+**Responsibility**: Wraps API calls and handles request/response wrapping.
+
+**Main Functions**:
+
+- Wrap API requests and responses
+- Handle API call context
+- Support API call logging
+
+#### 3.1.3 RestController
+
+**Responsibility**: Handles RESTful API requests and provides standard RESTful interfaces.
+
+**Main Functions**:
+
+- Provide RESTful API interfaces
+- Handle HTTP methods (GET, POST, PUT, DELETE)
+- Support request parameter validation
+
+#### 3.1.4 RateLimiter
+
+**Responsibility**: Limits API request rates to prevent malicious requests and overload.
+
+**Main Functions**:
+
+- Support IP-based rate limiting
+- Configurable rate limiting rules
+- Support multiple rate limiting algorithms
+
+#### 3.1.5 ValidationWrapper
+
+**Responsibility**: Validates API request parameters to ensure data validity.
+
+**Main Functions**:
+
+- Validate request parameter types and formats
+- Handle validation errors
+- Support custom validation rules
+
+### 3.2 Interface Layer Modules
+
+#### 3.2.1 FileSystemStorageAdapter
 
 **Responsibility**: As the external unified interface, coordinates the work of various modules, and handles data read/write operations.
 
@@ -75,7 +156,30 @@ Expo LiteDBStore adopts a layered architecture design, mainly divided into the f
 - Batch operations
 - Schema migration
 
-### 3.2 DataReader
+#### 3.2.2 EncryptedStorageAdapter
+
+**Responsibility**: Provides encrypted storage functionality to protect sensitive data.
+
+**Main Functions**:
+
+- Data encryption and decryption
+- Key management
+- Support for different encryption algorithms
+- Integration with existing storage systems
+
+#### 3.2.3 StorageAdapterFactory
+
+**Responsibility**: Creates and manages storage adapter instances.
+
+**Main Functions**:
+
+- Create appropriate storage adapters based on configuration
+- Support multiple storage modes
+- Manage adapter lifecycle
+
+### 3.3 Data Access Layer Modules
+
+#### 3.3.1 DataReader
 
 **Responsibility**: Handles data read operations, including reading data from single files and sharded files, and applying filtering and pagination.
 
@@ -87,7 +191,7 @@ Expo LiteDBStore adopts a layered architecture design, mainly divided into the f
 - Support index querying
 - Support caching
 
-### 3.3 DataWriter
+#### 3.3.2 DataWriter
 
 **Responsibility**: Handles data write operations, including insertion, update, deletion, and batch operations.
 
@@ -100,7 +204,135 @@ Expo LiteDBStore adopts a layered architecture design, mainly divided into the f
 - Update indexes
 - Update metadata
 
-### 3.4 CacheManager
+#### 3.3.3 QueryEngine
+
+**Responsibility**: Handles complex query logic, including filtering, sorting, grouping, etc.
+
+**Main Functions**:
+
+- Support complex query conditions
+- Implement multiple query operators
+- Support sorting and grouping
+- Optimize query performance
+
+### 3.4 Encryption Layer Modules
+
+#### 3.4.1 KeyManager
+
+**Responsibility**: Manages encryption keys to ensure secure storage and usage.
+
+**Main Functions**:
+
+- Key generation and management
+- Key encryption and decryption
+- Support for multiple key storage methods
+- Key rotation and update
+
+### 3.5 Storage Layer Modules
+
+#### 3.5.1 FileHandlerFactory
+
+**Responsibility**: Creates and manages file handler instances.
+
+**Main Functions**:
+
+- Create appropriate file handlers based on storage mode
+- Support single-file and sharded storage modes
+- Manage file handler lifecycle
+
+#### 3.5.2 FileHandlerBase
+
+**Responsibility**: Base class for file handlers, defining common interfaces for file operations.
+
+**Main Functions**:
+
+- Define common methods for file operations
+- Provide basic implementation for file operations
+- Support file read/write and deletion
+
+#### 3.5.3 FileInfoCache
+
+**Responsibility**: Caches file information to improve file operation performance.
+
+**Main Functions**:
+
+- Cache file metadata
+- Reduce file system access times
+- Support cache update and invalidation
+
+#### 3.5.4 PermissionChecker
+
+**Responsibility**: Checks file operation permissions to ensure secure access.
+
+**Main Functions**:
+
+- Check file read/write permissions
+- Handle permission errors
+- Support different platform permission models
+
+### 3.6 Monitor Layer Modules
+
+#### 3.6.1 CacheMonitor
+
+**Responsibility**: Monitors cache status and performance.
+
+**Main Functions**:
+
+- Monitor cache hit rate
+- Statistic cache usage
+- Support cache event listening
+- Provide cache performance reports
+
+#### 3.6.2 PerformanceMonitor
+
+**Responsibility**: Monitors overall system performance.
+
+**Main Functions**:
+
+- Monitor system response time
+- Statistic system throughput
+- Support performance event listening
+- Provide performance reports and analysis
+
+### 3.7 Utility Layer Modules
+
+#### 3.7.1 FileOperationManager
+
+**Responsibility**: Manages file operations and provides a unified interface for file operations.
+
+**Main Functions**:
+
+- Unified file operation interface
+- Support file read/write, deletion, and movement
+- Handle file operation exceptions
+- Provide transaction support for file operations
+
+#### 3.7.2 StorageStrategy
+
+**Responsibility**: Defines storage strategies to determine data storage methods.
+
+**Main Functions**:
+
+- Define storage strategy interfaces
+- Support different storage strategy implementations
+- Select appropriate storage strategy based on configuration
+
+### 3.8 Cache Layer Modules
+
+#### 3.8.1 CacheCoordinator
+
+**Responsibility**: Coordinates cache usage to ensure cache consistency and performance.
+
+**Main Functions**:
+
+- Manage multiple cache instances
+- Coordinate cache read/write operations
+- Ensure cache consistency
+- Optimize cache usage efficiency
+
+### 3.9 Original Core Modules
+
+#### 3.9.1 CacheManager
 
 **Responsibility**: Manages cache data, implements different caching strategies and protective measures.
 
@@ -112,7 +344,7 @@ Expo LiteDBStore adopts a layered architecture design, mainly divided into the f
 - Support thread-safe cache operations
 - Support cache consistency maintenance
 
-### 3.5 CacheController
+#### 3.9.2 CacheController
 
 **Responsibility**: Manages cache consistency, ensuring consistency between cache and stored data.
 
@@ -123,7 +355,7 @@ Expo LiteDBStore adopts a layered architecture design, mainly divided into the f
 - Record cache keys
 - Provide cache event system
 
-### 3.6 CacheService
+#### 3.9.3 CacheService
 
 **Responsibility**: Provides unified cache operation interface, encapsulates CacheManager functionality, and manages data cache.
 
@@ -139,7 +371,7 @@ Expo LiteDBStore adopts a layered architecture design, mainly divided into the f
 - Record table-related cache keys
 - Clear all cache related to specific tables
 
-### 3.7 IndexManager
+#### 3.9.4 IndexManager
 
 **Responsibility**: Manages index creation, querying, and updating.
 
@@ -152,7 +384,7 @@ Expo LiteDBStore adopts a layered architecture design, mainly divided into the f
 - Update indexes
 - Use indexes for data querying
 
-### 3.8 MetadataManager
+#### 3.9.5 MetadataManager
 
 **Responsibility**: Manages database metadata, including table structure, index information, etc.
 
@@ -165,7 +397,7 @@ Expo LiteDBStore adopts a layered architecture design, mainly divided into the f
 - Get all table names
 - Get table record count
 
-### 3.9 TransactionService
+#### 3.9.6 TransactionService
 
 **Responsibility**: Provides transaction support to ensure data consistency.
 
@@ -177,7 +409,7 @@ Expo LiteDBStore adopts a layered architecture design, mainly divided into the f
 - Save data snapshots
 - Manage transaction operation queues
 
-### 3.10 StorageTaskProcessor
+#### 3.9.7 StorageTaskProcessor
 
 **Responsibility**: Processes asynchronous tasks, including batch operations, schema migration, etc.
 
@@ -188,7 +420,7 @@ Expo LiteDBStore adopts a layered architecture design, mainly divided into the f
 - Execute tasks asynchronously
 - Provide task callbacks
 
-### 3.11 ChunkedFileHandler
+#### 3.9.8 ChunkedFileHandler
 
 **Responsibility**: Handles file operations in sharded storage mode.
 
@@ -199,7 +431,7 @@ Expo LiteDBStore adopts a layered architecture design, mainly divided into the f
 - Clear sharded files
 - Support parallel reading of sharded files
 
-### 3.12 SingleFileHandler
+#### 3.9.9 SingleFileHandler
 
 **Responsibility**: Handles file operations in single-file storage mode.
 
@@ -209,7 +441,7 @@ Expo LiteDBStore adopts a layered architecture design, mainly divided into the f
 - Read data from single files
 - Delete single files
 
-### 3.13 AutoSyncService
+#### 3.9.10 AutoSyncService
 
 **Responsibility**: Regularly syncs dirty data in cache to disk, ensuring data persistence.
 

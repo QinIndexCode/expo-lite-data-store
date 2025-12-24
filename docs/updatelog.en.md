@@ -1,6 +1,14 @@
 
 <!-- Update Log -->
 
+### 📅 2025-12-24 `v2.0.0-beta.2`  Security Fixes and Documentation Updates
+
+> Security Fix: Fixed prototype pollution vulnerability in ConfigManager.ts by adding key name validation to prevent malicious key names from modifying Object.prototype
+> Documentation Update: Completely updated architecture design documents (Chinese and English versions), adding descriptions for new components like API layer, encryption layer, and monitor layer
+> Documentation Update: Redrawn core module relationship diagram to reflect actual code structure
+> Security Policy: Created GitHub standard SECURITY.md file, defining vulnerability reporting process and version support
+> Testing: All tests passed, ensuring fixes don't break existing functionality
+
 ### 📅 2025-12-22 `v2.0.0-beta.2`  Configuration System Simplification and Documentation Improvement
 
 > Documentation Update: Updated README.md, README.en.md, WIKI.md, WIKI_EN.md, simplifying configuration descriptions and encryption recommendations
