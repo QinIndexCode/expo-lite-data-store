@@ -30,7 +30,7 @@ tsconfig.js.json
 # 开发和环境配置文件
 package-dev.json
 package-env.json
-
+package-lock.json
 # Expo / React Native 开发文件
 .expo/
 .expo-shared/
