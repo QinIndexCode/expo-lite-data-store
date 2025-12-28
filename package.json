@@ -70,7 +70,7 @@
     "crypto-es": "^3.1.2",
     "expo-crypto": "~15.0.8",
     "expo-file-system": "~18.1.11",
-    "expo-secure-store": "~15.0.8",
+    "expo-secure-store": "~15.0.8"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
