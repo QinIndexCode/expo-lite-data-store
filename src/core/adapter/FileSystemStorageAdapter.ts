@@ -224,6 +224,95 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    * @throws {Error} 当表名或数据无效时抛出
    * @returns Promise<WriteResult> 写入结果
    */
+  /**
+   * 覆盖数据（总是使用覆盖模式）
+   * @param tableName 表名
+   * @param data 要覆盖的数据
+   * @param options 写入选项（mode将被强制设为overwrite）
+   * @returns Promise<WriteResult>
+   */
+  async overwrite(
+    tableName: string,
+    data: Record<string, any> | Record<string, any>[],
+    options?: Omit<WriteOptions, 'mode'>
+  ): Promise<WriteResult> {
+    return ErrorHandler.handleAsyncError(
+      async () => {
+        // 输入验证：表名不能为空且必须是字符串
+        if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
+          throw new Error('Invalid table name: must be a non-empty string');
+        }
+
+        // 输入验证：数据不能为空且必须是对象或对象数组
+        if (data === undefined || data === null) {
+          throw new Error('Invalid data: must be an object or array of objects');
+        }
+
+        // 验证数组中的每个元素都是对象
+        if (Array.isArray(data)) {
+          for (const item of data) {
+            if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+              throw new Error('Invalid data: all items in the array must be objects');
+            }
+          }
+        }
+        // 验证单个数据是对象
+        else if (typeof data !== 'object' || Array.isArray(data)) {
+          throw new Error('Invalid data: must be an object or array of objects');
+        }
+
+        const startTime = Date.now();
+        const dataSize = Array.isArray(data) ? data.length : 1;
+
+        // 事务处理逻辑
+        if (this.transactionService.isInTransaction()) {
+          // 将操作添加到事务操作队列
+          this.transactionService.addOperation({
+            tableName,
+            type: 'overwrite',
+            data,
+            options,
+          });
+
+          // 事务中返回模拟结果，不实际修改数据
+          return {
+            written: Array.isArray(data) ? data.length : 1,
+            totalAfterWrite: Array.isArray(data) ? data.length : 1,
+            chunked: this.metadataManager.get(tableName)?.mode === 'chunked',
+          };
+        }
+
+        // 覆盖模式：直接写入数据
+        const finalData = Array.isArray(data) ? data : [data];
+        const result = await this.dataWriter.write(tableName, finalData, { ...options, mode: 'overwrite' });
+
+        // 删除与该表相关的所有缓存，确保后续读取能获取到最新数据
+        this.cacheService.clearTableCache(tableName);
+
+        // 记录性能指标
+        performanceMonitor.record({
+          operation: 'overwrite',
+          duration: Date.now() - startTime,
+          timestamp: Date.now(),
+          success: true,
+          dataSize,
+        });
+
+        return result;
+      },
+      // 捕获并处理写入操作中的错误
+      (cause: unknown) => ErrorHandler.createFileError('overwrite', `table ${tableName}`, cause)
+    );
+  }
+
+  /**
+   * 写入数据（支持追加或覆盖模式，用于向后兼容）
+   * @deprecated 请使用 insert（追加模式）或 overwrite（覆盖模式）
+   * @param tableName 表名
+   * @param data 要写入的数据
+   * @param options 写入选项，包括模式（'append' | 'overwrite'）
+   * @returns Promise<WriteResult>
+   */
   async write(
     tableName: string,
     data: Record<string, any> | Record<string, any>[],
@@ -278,6 +367,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
         // 不在事务中，或者directWrite为true，根据directWrite选项决定是同步还是异步写入
         let result;
+        let writtenCount = Array.isArray(data) ? data.length : 1;
 
         // 处理不同的写入模式
         let finalData;
@@ -287,6 +377,8 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
           existingData = await this.dataReader.read(tableName, options);
           finalData = Array.isArray(data) ? [...existingData, ...data] : [...existingData, data];
           result = await this.dataWriter.write(tableName, finalData, { ...options, mode: 'overwrite' });
+          // 修正written值为本次实际写入的数据量
+          result.written = writtenCount;
         } else {
           // 直接写入模式：直接写入数据
           finalData = Array.isArray(data) ? data : [data];
@@ -567,17 +659,27 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   /**
    * 批量操作
    * @param tableName 表名
-   * @param operations 操作数组
+   * @param operations 操作数组，使用联合类型确保类型安全
    * @param options 操作选项
    * @returns Promise<WriteResult> 操作结果
    */
   async bulkWrite(
     tableName: string,
-    operations: Array<{
-      type: 'insert' | 'update' | 'delete';
-      data: Record<string, any> | Record<string, any>[];
-      where?: Record<string, any>;
-    }>,
+    operations: Array<
+      | {
+          type: 'insert';
+          data: Record<string, any> | Record<string, any>[];
+        }
+      | {
+          type: 'update';
+          data: Record<string, any>;
+          where: Record<string, any>;
+        }
+      | {
+          type: 'delete';
+          where: Record<string, any>;
+        }
+    >,
     options?: { directWrite?: boolean }
   ): Promise<WriteResult> {
     const startTime = Date.now();
@@ -627,11 +729,10 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
       // 处理当前批次的操作
       for (const op of batchOperations) {
-        const items = Array.isArray(op.data) ? op.data : [op.data];
-
         switch (op.type) {
           case 'insert':
-            items.forEach((item: Record<string, any>) => {
+            const insertItems = Array.isArray(op.data) ? op.data : [op.data];
+            insertItems.forEach((item: Record<string, any>) => {
               if (item['id'] !== undefined) {
                 dataMap.set(item.id, item);
               } else {
@@ -642,9 +743,6 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
             });
             break;
           case 'update':
-            // 处理所有数据项
-            const updateData = items.length > 0 ? items[0] : {};
-            
             if (op.where) {
               // 使用QueryEngine进行复杂条件过滤，确保与findOne/findMany一致
               // 将Map转换为数组进行过滤
@@ -654,7 +752,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
               // 更新所有匹配的记录
               for (const matchedItem of matchedItems) {
                 if (matchedItem.id !== undefined) {
-                  const updatedItem = QueryEngine.update(matchedItem, updateData);
+                  const updatedItem = QueryEngine.update(matchedItem, op.data);
                   
                   dataMap.set(matchedItem.id, updatedItem);
                   writtenCount++;
@@ -662,7 +760,8 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
               }
             } else {
               // 原逻辑：通过id更新记录
-              items.forEach((item: Record<string, any>) => {
+              const updateItems = Array.isArray(op.data) ? op.data : [op.data];
+              updateItems.forEach((item: Record<string, any>) => {
                 if (item.id !== undefined) {
                   const existing = dataMap.get(item['id']);
                   if (existing) {
@@ -688,13 +787,14 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
                 }
               }
             } else {
-              // 原逻辑：通过id删除记录
-              items.forEach((item: Record<string, any>) => {
-                if (item['id'] !== undefined && dataMap.has(item['id'])) {
-                  dataMap.delete(item['id']);
+              // 原逻辑：通过id删除记录（不再使用op.data，因为delete操作只需要where条件）
+              const allData = Array.from(dataMap.values());
+              for (const item of allData) {
+                if (item.id !== undefined) {
+                  dataMap.delete(item.id);
                   writtenCount++;
                 }
-              });
+              }
             }
             break;
         }

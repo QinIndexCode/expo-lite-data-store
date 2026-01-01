@@ -60,11 +60,12 @@ LiteStore 支持从以下来源读取配置，优先级从高到低：
 | `encryption.algorithm`       | `string`   | `'AES-CTR'`      | 加密算法，支持 `AES-CTR`                     |
 | `encryption.keySize`         | `number`   | `256`            | 加密密钥长度，支持 `128`, `192`, `256`       |
 | `encryption.hmacAlgorithm`   | `string`   | `'SHA-512'`      | HMAC 完整性保护算法                          |
-| `encryption.keyIterations`   | `number`   | `100000`         | 密钥派生迭代次数，值越高安全性越强但性能越低 |
+| `encryption.keyIterations`   | `number`   | `50000`         | 密钥派生迭代次数，值越高安全性越强但性能越低。Expo Go 环境自动降低到 60,000 次，移动设备推荐 50,000 次 |
 | `encryption.encryptedFields` | `string[]` | `['password', 'email', 'phone']` | 默认加密的字段列表       |
 | `encryption.cacheTimeout`    | `number`   | `30000` (30秒)   | 内存中 masterKey 的缓存超时时间              |
 | `encryption.maxCacheSize`    | `number`   | `50`             | LRU 缓存最多保留的派生密钥数量               |
 | `encryption.useBulkOperations` | `boolean`  | `true` | 是否启用批量操作优化                   |
+| `encryption.autoSelectHMAC` | `boolean`  | `true` | 是否根据数据大小自动选择 HMAC 算法（小数据用 SHA-256，大数据用 SHA-512） |
 
 **重要说明**：
 - 整表加密和字段级加密**不能同时使用**，系统会自动检测冲突并抛出明确的错误信息
@@ -175,6 +176,7 @@ LiteStore 支持从以下来源读取配置，优先级从高到低：
 |              | `hasTable`        | 检查表是否存在                 |
 |              | `listTables`      | 获取所有表名                   |
 |              | `countTable`      | 获取表记录数                   |
+|              | `verifyCountTable` | 验证表计数准确性（诊断工具）       |
 |              | `clearTable`      | 清空表数据                     |
 | **数据操作** | `insert`          | 插入单条或多条数据             |
 |              | `read`            | 读取数据（支持过滤、分页、排序） |
@@ -348,6 +350,68 @@ const encryptedCount = await countTable('sensitive_data', {
 });
 ```
 
+##### verifyCountTable
+
+**功能**：验证并修复表元数据与实际数据的不一致
+
+**功能定位**：数据一致性诊断工具
+
+**使用场景**：
+- 数据一致性诊断：验证元数据与实际数据是否一致
+- 故障排查：诊断数据不一致问题
+- 数据修复：自动修复元数据中的计数错误
+- 元数据同步：定期检查和维护数据一致性
+
+**与countTable的区别**：
+- `countTable`：获取当前记录数（快速，直接从元数据读取）
+- `verifyCountTable`：验证并修复数据一致性（较慢，需要扫描实际数据）
+
+**最佳实践**：
+- 仅在诊断数据问题时使用
+- 定期维护任务中使用（如每天检查一次）
+- 不在常规业务流程中使用，以避免性能开销
+
+**签名**：
+```typescript
+verifyCountTable(
+  tableName: string,
+  options?: TableOptions
+): Promise<{ metadata: number; actual: number; match: boolean }>
+```
+
+**参数**：
+- `tableName`: 表名
+- `options`: 可选配置项
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
+
+**返回值**：
+- `{ metadata: number; actual: number; match: boolean }`: 验证结果
+  - `metadata`: 元数据中的记录数
+  - `actual`: 实际数据记录数
+  - `match`: 是否匹配（true表示一致，false表示不一致）
+
+**示例**：
+```typescript
+// 验证表计数
+const result = await verifyCountTable('users');
+
+if (!result.match) {
+  console.log(`数据不一致：元数据=${result.metadata}, 实际=${result.actual}`);
+  // API已自动修复元数据，无需手动操作
+}
+
+// 定期数据一致性检查
+setInterval(async () => {
+  for (const table of await listTables()) {
+    const result = await verifyCountTable(table);
+    if (!result.match) {
+      logger.warn(`表${table}数据不一致，已自动修复`);
+    }
+  }
+}, 24 * 60 * 60 * 1000); // 每天检查一次
+```
+
 ##### clearTable
 
 **功能**：清空指定表中的所有数据
@@ -378,7 +442,7 @@ await clearTable('sensitive_data', {
 
 ##### insert
 
-**功能**：向指定表中插入单条或多条数据
+**功能**：向指定表中插入单条或多条数据（总是使用追加模式）
 
 **签名**：
 ```typescript
@@ -389,7 +453,6 @@ insert(tableName: string, data: Record<string, any> | Record<string, any>[], opt
 - `tableName`: 表名
 - `data`: 要插入的数据，可以是单条记录或记录数组
 - `options`: 可选配置项
-  - `mode`: 写入模式，`'append'` 或 `'overwrite'`（可选）
   - `forceChunked`: 是否强制使用分片写入（可选）
   - `encryptFullTable`: 是否启用整表加密（可选）
   - `encrypted`: 是否启用加密存储，默认为 false（可选）
@@ -417,6 +480,60 @@ await insert('sensitive_data', {
   encrypted: true
 });
 ```
+
+##### overwrite
+
+**功能**：向指定表中覆盖数据，总是使用覆盖模式
+
+**签名**：
+```typescript
+overwrite(tableName: string, data: Record<string, any> | Record<string, any>[], options?: Omit<WriteOptions, 'mode'>): Promise<WriteResult>
+```
+
+**参数**：
+- `tableName`: 表名
+- `data`: 要覆盖的数据，可以是单条记录或记录数组
+- `options`: 可选配置项
+  - `forceChunked`: 是否强制使用分片写入（可选）
+  - `encryptFullTable`: 是否启用整表加密（可选）
+  - `encrypted`: 是否启用加密存储，默认为 false（可选）
+  - `requireAuthOnAccess`: 是否需要生物识别验证，默认为 false（可选）
+
+**返回值**：
+- `WriteResult`: 写入结果，包含写入字节数、总字节数等信息
+
+**示例**：
+```typescript
+// 覆盖写入数据
+await overwrite('users', [
+  { id: 1, name: '新数据', age: 20 }
+]);
+
+// 覆盖加密数据
+await overwrite('sensitive_data', {
+  id: 1,
+  password: 'secure_password'
+}, {
+  encrypted: true
+});
+```
+
+**insert vs overwrite 对比**：
+
+| 特性       | insert             | overwrite                        |
+| -------- | ------------------ | -------------------------------- |
+| **写入模式** | 固定为追加模式              | 固定为覆盖模式                   |
+| **参数**   | data, options    | data, options (不包含mode参数)     |
+| **使用场景** | 仅用于追加新数据             | 用于完全替换表数据                       |
+| **底层实现** | 调用adapter.insert() | 调用adapter.overwrite()                |
+
+**使用建议**：
+- **使用 insert**：当您需要保证数据不会被覆盖时，例如日志记录、事件追踪、初始化数据导入
+- **使用 overwrite**：当您需要完全替换表数据时，例如数据同步、缓存刷新、批量数据更新
+
+**注意**：
+- `insert` 和 `overwrite` 的区别：`insert` 总是追加数据，而 `overwrite` 总是覆盖数据
+- 使用 `overwrite` 会替换表中的所有数据，请谨慎使用
 
 ##### read
 
@@ -513,7 +630,7 @@ findMany(tableName: string, { where?, skip?, limit?, sortBy?, order?, sortAlgori
 
 **参数**：
 - `tableName`: 表名
-- `filter`: 查询条件
+- `where`: 查询条件（推荐使用）
 - `options`: 查询选项
   - `skip`: 跳过的记录数
   - `limit`: 返回的最大记录数
@@ -524,6 +641,22 @@ findMany(tableName: string, { where?, skip?, limit?, sortBy?, order?, sortAlgori
 
 **返回值**：
 - `Record<string, any>[]`: 匹配的记录数组
+
+**read vs findMany 对比**：
+
+| 特性       | read                                                     | findMany                                                                                               |
+| -------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **参数结构** | `options?: ReadOptions`                                    | `options?: { where?, skip?, limit?, sortBy?, order?, sortAlgorithm?, encrypted?, requireAuthOnAccess? }` |
+| **过滤参数** | `options.filter`                                           | `options.where`                                                                                          |
+| **分页参数** | `options.skip`, `options.limit`                            | `options.skip`, `options.limit`                                                                          |
+| **排序参数** | `options.sortBy`, `options.order`, `options.sortAlgorithm` | `options.sortBy`, `options.order`, `options.sortAlgorithm`                                                 |
+| **加密参数** | `options.encrypted`, `options.requireAuthOnAccess`         | `options.encrypted`, `options.requireAuthOnAccess`                                                         |
+| **功能覆盖** | 完全覆盖                                                       | 完全覆盖                                                                                                   |
+| **使用频率** | 高（基础查询）                                                | 高（高级查询）                                                                                                |
+
+**使用建议**：
+- **推荐使用 findMany**：`findMany` 的 `where` 参数更符合 Prisma/Mongoose 等主流 ORM 的设计，语义更清晰
+- **read 作为别名**：`read` 是 `findMany` 的别名，保持向后兼容，内部将 `filter` 参数转换为 `where` 参数
 
 **示例**：
 ```typescript
@@ -636,18 +769,32 @@ console.log(`删除了 ${deletedCount} 条记录`);
 
 **签名**：
 ```typescript
-bulkWrite(tableName: string, operations: Array<{
-  type: 'insert' | 'update' | 'delete';
-  data: Record<string, any> | Record<string, any>[];
-  where?: FilterCondition;
-}>, options?: TableOptions): Promise<WriteResult>
+bulkWrite(
+  tableName: string,
+  operations: Array<
+    | {
+        type: 'insert';
+        data: Record<string, any> | Record<string, any>[];
+      }
+    | {
+        type: 'update';
+        data: Record<string, any>;
+        where: Record<string, any>;
+      }
+    | {
+        type: 'delete';
+        where: Record<string, any>;
+      }
+  >,
+  options?: TableOptions
+): Promise<WriteResult>
 ```
 
 **参数**：
 - `tableName`: 表名
-- `operations`: 操作数组
+- `operations`: 操作数组，使用联合类型确保类型安全
   - `type`: 操作类型，`'insert'`、`'update'` 或 `'delete'`
-  - `data`: 操作数据
+  - `data`: 操作数据（insert和update操作需要）
   - `where`: 操作条件（update和delete操作需要）
 - `options`: 可选配置项
   - `encrypted`: 是否启用加密存储，默认为 false（可选）

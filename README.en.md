@@ -24,13 +24,14 @@ Designed specifically for React Native + Expo projects, with no native dependenc
 | Feature                          | Description                                                                     |
 | -------------------------------- | ------------------------------------------------------------------------------- |
 | 🚀 **Easy configuration**        | Only depends on React Native FS, no Metro configuration                         |
-| 🔒 **Optional encryption**       | AES-CTR encryption with optional biometric authentication, keys automatically generated and managed by the system      |
+| 🔒 **Optional encryption**       | AES-CTR encryption with optional biometric authentication, keys automatically generated and managed by system, default 50,000 PBKDF2 iterations (mobile optimized)      |
 | 📦 **Intelligent chunking**      | Automatically handles >5MB files, avoiding RN FS limits                         |
 | 🔄 **Transaction support**       | Transaction support, data consistency ensured                                   |
 | 📝 **TypeScript native support** | Complete type definitions, ready to use                                         |
 | 🔍 **Advanced queries**          | Supports advanced queries like where, skip, limit, sort                         |
 | 📱 **Fully offline**             | No network required, 100% local data storage                                    |
 | 🎯 **Intelligent sorting**       | 5 sorting algorithms, automatically selects appropriate algorithm based on data size |
+| ⏰ **Auto-sync**                 | Periodically syncs dirty data from cache to disk, ensuring data persistence      |
 
 ## 📦 Installation
 
@@ -135,7 +136,7 @@ await createTable('users', {
 The library provides complete CRUD operations, transaction support, and advanced query features, categorized as follows:
 
 - **Table Management**: `createTable`, `deleteTable`, `hasTable`, `listTables`, `countTable`, `clearTable`
-- **Data Operations**: `insert`, `read`, `findOne`, `findMany`, `update`, `remove`, `bulkWrite`
+- **Data Operations**: `insert`, `write`, `read`, `findOne`, `findMany`, `update`, `remove`, `bulkWrite`
 - **Transaction Management**: `beginTransaction`, `commit`, `rollback`
 
 **Detailed API Documentation**: Please refer to the API reference section in [WIKI_EN.md](./WIKI_EN.md) for complete API signatures and parameter descriptions.
@@ -226,11 +227,12 @@ All configuration should be done in your app.json file under the `expo.extra.lit
           "algorithm": "AES-CTR", // Encryption algorithm
           "keySize": 256, // Key size
           "hmacAlgorithm": "SHA-512", // HMAC algorithm
-          "keyIterations": 100000, // Key iteration count
+          "keyIterations": 50000, // Key iteration count (50,000 for mobile optimization)
           "encryptedFields": ["password", "email", "phone"], // Fields to encrypt
           "cacheTimeout": 30000, // Cache timeout (30 seconds)
           "maxCacheSize": 50, // Maximum number of cached keys
-          "useBulkOperations": true // Enable bulk operations
+          "useBulkOperations": true, // Enable bulk operations
+          "autoSelectHMAC": true // Auto-select HMAC algorithm based on data size
         },
         
         // Performance configuration
@@ -302,10 +304,10 @@ A: For large datasets, it is recommended to use:
 
 A: Encryption operations do increase certain performance overhead, here are some optimization suggestions:
 
-1. **Use field-level encryption instead of full-table encryption**: Only encrypt sensitive fields instead of the entire table, which can improve query performance
-2. **Increase key cache timeout**: Increase the value of `encryption.cacheTimeout` in the configuration to reduce the number of key derivations
+1. **Use field-level encryption instead of full-table encryption**: Only encrypt sensitive fields instead of entire table, which can improve query performance
+2. **Increase key cache timeout**: Increase the value of `encryption.cacheTimeout` in configuration to reduce the number of key derivations
 3. **Enable batch operations**: Ensure `encryption.useBulkOperations` is `true`, which can reduce the number of encryption/decryption operations
-4. **Reduce key iteration count**: Appropriately reduce the value of `encryption.keyIterations` (not less than 100000) to speed up key derivation
+4. **Reduce key iteration count**: Appropriately reduce the value of `encryption.keyIterations` (not less than 50000) to speed up key derivation. The default is 50,000 iterations for mobile optimization
 5. **Reasonably set `maxConcurrentOperations`**: Adjust the number of concurrent operations according to device performance, recommended range: 3-10
 
 ## 📞 Support and Feedback

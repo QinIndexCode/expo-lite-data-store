@@ -275,10 +275,76 @@ export class ApiWrapper {
   }
 
   /**
-   * 写入数据
+   * 覆盖数据（总是使用覆盖模式）
+   * @param tableName 表名
+   * @param data 要覆盖的数据
+   * @param options 写入选项（mode将被强制设为overwrite）
+   * @param version API版本
+   * @param clientId 客户端ID，用于限流
+   * @returns 统一格式的API响应
+   */
+  async overwrite(
+    tableName: string,
+    data: Record<string, any> | Record<string, any>[],
+    options?: Omit<WriteOptions, 'mode'>,
+    version?: string,
+    clientId: string = 'default'
+  ): Promise<ApiResponse<WriteResult>> {
+    const startTime = Date.now();
+    const requestId = this.errorHandler.generateRequestId();
+    const apiVersion = this.apiRouter.getApiVersion(version);
+
+    try {
+      const tokens = Array.isArray(data) ? Math.min(data.length, 10) : 3;
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, tokens);
+      if (!rateLimitStatus.allowed) {
+        return {
+          success: false,
+          data: undefined,
+          error: {
+            code: 'RATE_LIMIT_EXCEEDED',
+            message: 'Rate limit exceeded',
+            details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
+            suggestion: 'Reduce of frequency of requests or contact support to increase your rate limit',
+          },
+          meta: {
+            requestId,
+            timestamp: Date.now(),
+            duration: Date.now() - startTime,
+            version: apiVersion,
+          },
+          status: 'success',
+        };
+      }
+
+      this.validationWrapper.validateTableName(tableName);
+      this.validationWrapper.validateWriteData(data);
+
+      const result = await this.storageAdapter.overwrite(tableName, data, options);
+
+      return {
+        success: true,
+        data: result,
+        error: undefined,
+        meta: {
+          requestId,
+          timestamp: Date.now(),
+          duration: Date.now() - startTime,
+          version: apiVersion,
+        },
+        status: 'success',
+      };
+    } catch (error) {
+      return this.errorHandler.handleError(error, requestId, startTime, apiVersion);
+    }
+  }
+
+  /**
+   * 写入数据（支持追加或覆盖模式，用于向后兼容）
+   * @deprecated 请使用 insert（追加模式）或 overwrite（覆盖模式）
    * @param tableName 表名
    * @param data 要写入的数据
-   * @param options 写入选项
+   * @param options 写入选项，包括模式（'append' | 'overwrite'）
    * @param version API版本
    * @param clientId 客户端ID，用于限流
    * @returns 统一格式的API响应
@@ -603,10 +669,21 @@ export class ApiWrapper {
    */
   async bulkWrite(
     tableName: string,
-    operations: Array<{
-      type: 'insert' | 'update' | 'delete';
-      data: Record<string, any> | Record<string, any>[];
-    }>,
+    operations: Array<
+      | {
+          type: 'insert';
+          data: Record<string, any> | Record<string, any>[];
+        }
+      | {
+          type: 'update';
+          data: Record<string, any>;
+          where: Record<string, any>;
+        }
+      | {
+          type: 'delete';
+          where: Record<string, any>;
+        }
+    >,
     version?: string,
     clientId: string = 'default'
   ): Promise<ApiResponse<WriteResult>> {
@@ -617,7 +694,11 @@ export class ApiWrapper {
     try {
       // 检查限流
       const totalOperations = operations.reduce((count, op) => {
-        return count + (Array.isArray(op.data) ? op.data.length : 1);
+        if (op.type === 'insert') {
+          const insertOp = op as { type: 'insert'; data: Record<string, any> | Record<string, any>[] };
+          return count + (Array.isArray(insertOp.data) ? insertOp.data.length : 1);
+        }
+        return count + 1;
       }, 0);
       const tokens = Math.min(totalOperations * 2, 20); // 批量操作消耗2-20个令牌
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, tokens);

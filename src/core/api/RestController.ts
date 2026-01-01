@@ -207,6 +207,7 @@ export class RestController {
         {
           type: 'update',
           data: updatedData,
+          where: { id: request.id },
         },
       ],
       request.version
@@ -229,7 +230,7 @@ export class RestController {
       [
         {
           type: 'delete',
-          data: { id: request.id },
+          where: { id: request.id },
         },
       ],
       request.version
@@ -245,10 +246,21 @@ export class RestController {
    */
   async bulkOperation(request: {
     tableName: string;
-    operations: Array<{
-      type: 'insert' | 'update' | 'delete';
-      data: Record<string, any> | Record<string, any>[];
-    }>;
+    operations: Array<
+      | {
+          type: 'insert';
+          data: Record<string, any> | Record<string, any>[];
+        }
+      | {
+          type: 'update';
+          data: Record<string, any>;
+          where: Record<string, any>;
+        }
+      | {
+          type: 'delete';
+          where: Record<string, any>;
+        }
+    >;
     version?: string;
   }): Promise<ApiResponse<WriteResult>> {
     return this.apiWrapper.bulkWrite(request.tableName, request.operations, request.version);
@@ -286,16 +298,13 @@ export class RestController {
     data: Record<string, any>[];
     version?: string;
   }): Promise<ApiResponse<WriteResult>> {
-    return this.apiWrapper.bulkWrite(
-      request.tableName,
-      [
-        {
-          type: 'update',
-          data: request.data,
-        },
-      ],
-      request.version
-    );
+    // 使用bulkWrite进行更新操作
+    const operations = request.data.map(item => ({
+      type: 'update' as const,
+      data: item,
+      where: { id: item.id }
+    }));
+    return this.apiWrapper.bulkWrite(request.tableName, operations, request.version);
   }
 
   /**
@@ -311,7 +320,7 @@ export class RestController {
     // 将ids转换为delete操作
     const operations = request.ids.map(id => ({
       type: 'delete' as const,
-      data: { id },
+      where: { id }
     }));
 
     return this.apiWrapper.bulkWrite(request.tableName, operations, request.version);

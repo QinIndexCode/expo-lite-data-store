@@ -139,7 +139,6 @@ describe('API Integration Tests', () => {
         // 删除：不活跃的用户
         {
           type: 'delete' as const,
-          data: {},
           where: { active: false }
         },
         // 更新：将特定用户标记为不活跃

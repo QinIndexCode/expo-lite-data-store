@@ -25,6 +25,7 @@ export interface LiteStoreConfig {
     cacheTimeout: number;
     maxCacheSize: number;
     useBulkOperations: boolean;
+    autoSelectHMAC?: boolean;
   };
 
   /** 性能配置 */

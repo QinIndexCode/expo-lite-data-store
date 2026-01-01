@@ -170,6 +170,107 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     return storage.listTables();
   }
 
+  /**
+   * 覆盖数据（总是使用覆盖模式）
+   * @param tableName 表名
+   * @param data 要覆盖的数据
+   * @param options 写入选项（mode将被强制设为overwrite）
+   * @returns Promise<WriteResult>
+   */
+  async overwrite(
+    tableName: string,
+    data: Record<string, any> | Record<string, any>[],
+    options?: Omit<WriteOptions, 'mode'>
+  ): Promise<WriteResult> {
+    return ErrorHandler.handleAsyncError(
+      async () => {
+        // 清除该表的缓存
+        this.clearTableCache(tableName);
+
+        const finalData = Array.isArray(data) ? data : [data];
+        const key = await this.key();
+        
+        let encryptedData: Record<string, any>[] = [];
+        
+        // 获取配置，优先使用表级配置，然后是全局配置
+        const config = configManager.getConfig();
+        const tableMeta = (storage as any).getTableMeta(tableName);
+        
+        // 决定使用哪种加密策略
+        const useFieldLevelEncryption = 
+          options?.encryptFullTable !== true &&
+          (options?.encryptFullTable !== false ||
+           tableMeta?.encryptedFields?.length > 0 ||
+           config.encryption.encryptedFields && config.encryption.encryptedFields.length > 0 ||
+           !tableMeta?.encryptedFields);
+        
+        if (useFieldLevelEncryption) {
+          // 字段级加密模式
+          const encryptedFields = tableMeta?.encryptedFields?.length > 0 
+            ? tableMeta.encryptedFields 
+            : (config.encryption.encryptedFields || []);
+          
+          if (encryptedFields.length > 0) {
+            if (config.encryption.useBulkOperations && finalData.length > 1) {
+              encryptedData = await encryptFieldsBulk(finalData, { 
+                fields: encryptedFields, 
+                masterKey: key,
+              });
+            } else {
+              const encryptionPromises = finalData.map(item =>
+                encryptFields(item, {
+                  fields: encryptedFields,
+                  masterKey: key,
+                })
+              );
+              encryptedData = await Promise.all(encryptionPromises);
+            }
+          } else {
+            if (config.encryption.useBulkOperations && finalData.length > 1) {
+              encryptedData = await encryptFieldsBulk(finalData, { 
+                fields: Object.keys(finalData[0] || {}),
+                masterKey: key,
+              });
+            } else {
+              const encryptionPromises = finalData.map(item =>
+                encryptFields(item, {
+                  fields: Object.keys(item),
+                  masterKey: key,
+                })
+              );
+              encryptedData = await Promise.all(encryptionPromises);
+            }
+          }
+          
+          return storage.write(tableName, encryptedData, { ...options, mode: 'overwrite' });
+        } else {
+          // 整表加密模式
+          const shouldEncryptFullTable = options?.encryptFullTable === true;
+          if (shouldEncryptFullTable) {
+            // 覆盖模式：直接加密写入
+            const serializedData = JSON.stringify(finalData);
+            const encrypted = await encrypt(serializedData, key);
+            encryptedData = [{ __enc: encrypted }];
+            
+            // 清除缓存，因为数据被覆盖了
+            const cacheKey = `__enc_full_table_${tableName}`;
+            (this.cachedData as any).delete(cacheKey);
+          }
+        }
+
+        return storage.write(tableName, encryptedData, { ...options, mode: 'overwrite' });
+      },
+      cause =>
+        ErrorHandler.createGeneralError(
+          `Failed to overwrite table ${tableName}`,
+          'TABLE_UPDATE_FAILED',
+          cause,
+          'Storage operation failed',
+          'Check if you have write permissions. For better performance with encrypted storage, consider using field-level encryption instead of full-table encryption.'
+        )
+    );
+  }
+
   async write(
     tableName: string,
     data: Record<string, any> | Record<string, any>[],
@@ -542,11 +643,21 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
   async bulkWrite(
     tableName: string,
-    operations: Array<{
-      type: 'insert' | 'update' | 'delete';
-      data: Record<string, any> | Record<string, any>[];
-      where?: Record<string, any>;
-    }>,
+    operations: Array<
+      | {
+          type: 'insert';
+          data: Record<string, any> | Record<string, any>[];
+        }
+      | {
+          type: 'update';
+          data: Record<string, any>;
+          where: Record<string, any>;
+        }
+      | {
+          type: 'delete';
+          where: Record<string, any>;
+        }
+    >,
     options?: any
   ): Promise<WriteResult> {
     // 清除缓存
@@ -566,31 +677,27 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         finalData = [...finalData, ...insertData];
         writtenCount += insertData.length;
       } else if (operation.type === 'update') {
-        // 更新操作
-        const updateItems = Array.isArray(operation.data) ? operation.data : [operation.data];
-        
-        for (const updateItem of updateItems) {
-          if (operation.where) {
-            // 有where条件的更新
-            const matchedItems = QueryEngine.filter(finalData, operation.where);
-            for (const matchedItem of matchedItems) {
-              const index = finalData.findIndex(item => item.id === matchedItem.id);
-              if (index !== -1) {
-                finalData[index] = QueryEngine.update(finalData[index], updateItem);
-                writtenCount++;
-              }
-            }
-          } else {
-            // 通过id更新
-            const index = finalData.findIndex(item => item.id === updateItem.id);
+        // 更新操作（operation.data现在是单个对象，不是数组）
+        if (operation.where) {
+          // 有where条件的更新
+          const matchedItems = QueryEngine.filter(finalData, operation.where);
+          for (const matchedItem of matchedItems) {
+            const index = finalData.findIndex(item => item.id === matchedItem.id);
             if (index !== -1) {
-              finalData[index] = QueryEngine.update(finalData[index], updateItem);
+              finalData[index] = QueryEngine.update(finalData[index], operation.data);
               writtenCount++;
             }
           }
+        } else {
+          // 通过id更新
+          const index = finalData.findIndex(item => item.id === operation.data.id);
+          if (index !== -1) {
+            finalData[index] = QueryEngine.update(finalData[index], operation.data);
+            writtenCount++;
+          }
         }
       } else if (operation.type === 'delete') {
-        // 删除操作
+        // 删除操作（不再需要处理operation.data）
         if (operation.where) {
           // 有where条件的删除
           const matchedItems = QueryEngine.filter(finalData, operation.where);
@@ -602,15 +709,9 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
             }
           }
         } else {
-          // 通过id删除
-          const deleteItems = Array.isArray(operation.data) ? operation.data : [operation.data];
-          for (const deleteItem of deleteItems) {
-            const index = finalData.findIndex(item => item.id === deleteItem.id);
-            if (index !== -1) {
-              finalData.splice(index, 1);
-              writtenCount++;
-            }
-          }
+          // 删除所有数据
+          finalData = [];
+          writtenCount = allData.length;
         }
       }
     }

@@ -107,7 +107,7 @@ describe('Edge Cases and Error Handling Tests', () => {
       const result = await bulkWrite(TEST_TABLE, operations);
       // 只有50条记录，所以只能更新50条
       expect(result.written).toBe(50);
-
+ 
       const activeUsers = await findMany(TEST_TABLE, { where: { active: true } });
       expect(activeUsers.length).toBe(0);
     });

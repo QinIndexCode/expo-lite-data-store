@@ -60,7 +60,7 @@ LiteStore supports reading configuration from the following sources with the fol
 | `encryption.algorithm`                   | `string`   | `'AES-CTR'`             | Encryption algorithm, supports `AES-CTR`                                                      |
 | `encryption.keySize`                     | `number`   | `256`                   | Encryption key length, supports `128`, `192`, `256`                                           |
 | `encryption.hmacAlgorithm`               | `string`   | `'SHA-512'`             | HMAC integrity protection algorithm                                                           |
-| `encryption.keyIterations`               | `number`   | `100000`                | Key derivation iteration count, higher values provide stronger security but lower performance |
+| `encryption.keyIterations`               | `number`   | `50000`                | Key derivation iteration count, higher values provide stronger security but lower performance. Expo Go environment automatically reduces to 60,000 iterations, mobile devices recommended 50,000 iterations |
 | `encryption.encryptedFields`             | `string[]` | `['password', 'email', 'phone']` | List of fields to be encrypted by default     |
 | `encryption.cacheTimeout`                | `number`   | `30000` (30 seconds)    | Cache timeout for masterKey in memory                                                         |
 | `encryption.maxCacheSize`                | `number`   | `50`                    | Maximum number of derived keys to retain in LRU cache                                         |
@@ -175,6 +175,7 @@ To modify configuration, it is recommended to configure in app.json, which is th
 |                | `hasTable`         | Check if table exists                              |
 |                | `listTables`       | Get all table names                                |
 |                | `countTable`       | Get table record count                             |
+|                | `verifyCountTable` | Verify table count accuracy (diagnostic tool)        |
 |                | `clearTable`       | Clear table data                                   |
 | **Data Ops**   | `insert`           | Insert single or multiple records                  |
 |                | `read`             | Read data (supports filtering, pagination, sorting) |
@@ -327,11 +328,73 @@ clearTable(tableName: string, options?: TableOptions): Promise<void>
 await clearTable('users');
 ```
 
+##### verifyCountTable
+
+**Functionality**: Verify and repair inconsistencies between table metadata and actual data
+
+**Function Position**: Data consistency diagnostic tool
+
+**Use Cases**:
+- Data consistency diagnosis: Verify if metadata matches actual data
+- Troubleshooting: Diagnose data inconsistency issues
+- Data repair: Automatically repair count errors in metadata
+- Metadata synchronization: Regularly check and maintain data consistency
+
+**Difference from countTable**:
+- `countTable`: Get current record count (fast, reads directly from metadata)
+- `verifyCountTable`: Verify and repair data consistency (slower, needs to scan actual data)
+
+**Best Practices**:
+- Only use when diagnosing data issues
+- Use in periodic maintenance tasks (e.g., check once per day)
+- Do not use in regular business flows to avoid performance overhead
+
+**Signature**:
+```typescript
+verifyCountTable(
+  tableName: string,
+  options?: TableOptions
+): Promise<{ metadata: number; actual: number; match: boolean }>
+```
+
+**Parameters**:
+- `tableName`: Table name
+- `options`: Optional configuration
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
+
+**Returns**:
+- `{ metadata: number; actual: number; match: boolean }`: Verification result
+  - `metadata`: Record count in metadata
+  - `actual`: Actual data record count
+  - `match`: Whether matched (true means consistent, false means inconsistent)
+
+**Examples**:
+```typescript
+// Verify table count
+const result = await verifyCountTable('users');
+
+if (!result.match) {
+  console.log(`Data inconsistency: metadata=${result.metadata}, actual=${result.actual}`);
+  // API has automatically repaired metadata, no manual operation needed
+}
+
+// Periodic data consistency check
+setInterval(async () => {
+  for (const table of await listTables()) {
+    const result = await verifyCountTable(table);
+    if (!result.match) {
+      logger.warn(`Table ${table} data inconsistency, automatically repaired`);
+    }
+  }
+}, 24 * 60 * 60 * 1000); // Check once per day
+```
+
 #### Data Operation APIs
 
 ##### insert
 
-**Functionality**: Insert single or multiple records into a specified table
+**Functionality**: Insert single or multiple records into a specified table (always uses append mode)
 
 **Signature**:
 ```typescript
@@ -342,7 +405,6 @@ insert(tableName: string, data: Record<string, any> | Record<string, any>[], opt
 - `tableName`: Table name
 - `data`: Data to insert, can be single record or array of records
 - `options`: Optional configuration
-  - `mode`: Write mode, `'append'` or `'overwrite'` (optional)
   - `forceChunked`: Whether to force chunked writing (optional)
   - `encryptFullTable`: Whether to enable full table encryption (optional)
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
@@ -361,7 +423,69 @@ await insert('users', [
   { id: 2, name: 'Jane Smith', age: 30 },
   { id: 3, name: 'Bob Johnson', age: 35 }
 ]);
+
+// Insert encrypted data
+await insert('sensitive_data', {
+  id: 1,
+  password: 'secure_password'
+}, {
+  encrypted: true
+});
 ```
+
+##### overwrite
+
+**Functionality**: Overwrite data in a specified table, always uses overwrite mode
+
+**Signature**:
+```typescript
+overwrite(tableName: string, data: Record<string, any> | Record<string, any>[], options?: Omit<WriteOptions, 'mode'>): Promise<WriteResult>
+```
+
+**Parameters**:
+- `tableName`: Table name
+- `data`: Data to overwrite, can be single record or array of records
+- `options`: Optional configuration
+  - `forceChunked`: Whether to force chunked writing (optional)
+  - `encryptFullTable`: Whether to enable full table encryption (optional)
+  - `encrypted`: Whether to enable encrypted storage, default is false (optional)
+  - `requireAuthOnAccess`: Whether biometric verification is required, default is false (optional)
+
+**Returns**:
+- `WriteResult`: Write result, including bytes written, total bytes, etc.
+
+**Examples**:
+```typescript
+// Overwrite data
+await overwrite('users', [
+  { id: 1, name: 'New Data', age: 20 }
+]);
+
+// Overwrite encrypted data
+await overwrite('sensitive_data', {
+  id: 1,
+  password: 'secure_password'
+}, {
+  encrypted: true
+});
+```
+
+**insert vs overwrite Comparison**:
+
+| Feature       | insert             | overwrite                        |
+| -------- | ------------------ | -------------------------------- |
+| **Write Mode** | Always append mode | Always overwrite mode                   |
+| **Parameters**   | data, options    | data, options (does not include mode parameter)     |
+| **Use Cases**   | Only for appending new data             | Used for completely replacing table data                       |
+| **Underlying Implementation** | Calls adapter.insert() | Calls adapter.overwrite()                |
+
+**Usage Recommendations**:
+- **Use insert**: When you need to ensure data won't be overwritten, such as logging, event tracking, initial data import
+- **Use overwrite**: When you need to completely replace table data, such as data synchronization, cache refresh, batch data updates
+
+**Note**:
+- The difference between `insert` and `overwrite`: `insert` always appends data, while `overwrite` always overwrites data
+- Use `overwrite` with caution as it will replace all data in the table
 
 ##### read
 
@@ -463,7 +587,7 @@ findMany(tableName: string, { where?, skip?, limit?, sortBy?, order?, sortAlgori
 **Parameters**:
 - `tableName`: Table name
 - `options`: Options object
-  - `where`: Query condition
+  - `where`: Query condition (recommended to use)
   - `skip`: Number of records to skip
   - `limit`: Maximum number of records to return
   - `sortBy`: Sort field or array of fields
@@ -473,6 +597,22 @@ findMany(tableName: string, { where?, skip?, limit?, sortBy?, order?, sortAlgori
 
 **Returns**:
 - `Record<string, any>[]`: Array of matching records
+
+**read vs findMany Comparison**:
+
+| Feature       | read                                                     | findMany                                                                                               |
+| -------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **Parameter Structure** | `options?: ReadOptions`                                    | `options?: { where?, skip?, limit?, sortBy?, order?, sortAlgorithm?, encrypted?, requireAuthOnAccess? }` |
+| **Filter Parameter** | `options.filter`                                           | `options.where`                                                                                          |
+| **Pagination Parameters** | `options.skip`, `options.limit`                            | `options.skip`, `options.limit`                                                                          |
+| **Sort Parameters** | `options.sortBy`, `options.order`, `options.sortAlgorithm` | `options.sortBy`, `options.order`, `options.sortAlgorithm`                                                 |
+| **Encryption Parameters** | `options.encrypted`, `options.requireAuthOnAccess`         | `options.encrypted`, `options.requireAuthOnAccess`                                                         |
+| **Feature Coverage** | Complete coverage                                               | Complete coverage                                                                                                   |
+| **Usage Frequency** | High (basic queries)                                                | High (advanced queries)                                                                                                |
+
+**Usage Recommendations**:
+- **Recommended to use findMany**: `findMany`'s `where` parameter is more consistent with mainstream ORM designs like Prisma/Mongoose, with clearer semantics
+- **read as an alias**: `read` is an alias for `findMany`, maintaining backward compatibility, internally converting `filter` parameter to `where` parameter
 
 **Examples**:
 ```typescript
@@ -585,19 +725,33 @@ console.log(`Deleted ${deletedCount} records`);
 
 **Signature**:
 ```typescript
-bulkWrite(tableName: string, operations: Array<{
-  type: 'insert' | 'update' | 'delete';
-  data: Record<string, any> | Record<string, any>[];
-  where?: FilterCondition;
-}>, options?: TableOptions): Promise<WriteResult>
+bulkWrite(
+  tableName: string,
+  operations: Array<
+    | {
+        type: 'insert';
+        data: Record<string, any> | Record<string, any>[];
+      }
+    | {
+        type: 'update';
+        data: Record<string, any>;
+        where: Record<string, any>;
+      }
+    | {
+        type: 'delete';
+        where: Record<string, any>;
+      }
+  >,
+  options?: TableOptions
+): Promise<WriteResult>
 ```
 
 **Parameters**:
 - `tableName`: Table name
-- `operations`: Array of operations
+- `operations`: Array of operations, using union types for type safety
   - `type`: Operation type, `'insert'`, `'update'` or `'delete'`
-  - `data`: Operation data
-  - `where`: Operation condition (required for update and delete)
+  - `data`: Operation data (required for insert and update operations)
+  - `where`: Operation condition (required for update and delete operations)
 - `options`: Optional configuration
   - `encrypted`: Whether to enable encrypted storage, default is false (optional)
 

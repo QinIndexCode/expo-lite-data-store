@@ -6,7 +6,11 @@
 // Directly import database instance
 import { plainStorage, dbManager } from './core/db';
 import { configManager, ConfigManager } from './core/config/ConfigManager';
+import { performanceMonitor } from './core/monitor/PerformanceMonitor';
+import { getKeyCacheStats, getKeyCacheHitRate } from './utils/crypto';
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult, TableOptions } from './types/storageTypes';
+import type { PerformanceStats, HealthCheckResult } from './core/monitor/PerformanceMonitor';
+import type { KeyCacheStats } from './utils/crypto';
 
 /**
  * Plain storage instance, no encryption support
@@ -17,6 +21,18 @@ export { plainStorage };
  * Configuration management
  */
 export { configManager, ConfigManager };
+
+/**
+ * Performance monitoring
+ */
+export { performanceMonitor };
+export type { PerformanceStats, HealthCheckResult };
+
+/**
+ * Encryption performance monitoring
+ */
+export { getKeyCacheStats, getKeyCacheHitRate };
+export type { KeyCacheStats };
 
 /**
  * Create table
@@ -77,36 +93,96 @@ export const listTables = async (
 };
 
 /**
- * Insert data
+ * Insert data (always uses append mode)
+ * 
+ * 功能定位：专门用于向表中追加新数据，不支持覆盖
+ * 
+ * 使用场景：
+ *   - 初始化数据导入
+ *   - 日志记录
+ *   - 事件追踪
+ *   - 需要保证数据不被覆盖的场景
+ * 
+ * 与write的区别：
+ *   - insert：固定为追加模式，不支持覆盖
+ *   - write：支持追加和覆盖两种模式
+ * 
  * @param tableName Table name
- * @param data Data to insert
+ * @param data Data to insert (single record or array of records)
  * @param options Write options, including common options
- * @returns Promise<WriteResult>
+ * @returns Promise<WriteResult> Write result with written bytes, total bytes, and chunking info
  */
 export const insert = async (
   tableName: string,
   data: Record<string, any> | Record<string, any>[],
   options: WriteOptions = {}
 ): Promise<WriteResult> => {
-  // 如果requireAuthOnAccess为true，则默认encrypted为true
   const { requireAuthOnAccess = false, encrypted = requireAuthOnAccess || false, ...finalWriteOptions } = options;
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.write(tableName, data, finalWriteOptions);
+  return adapter.insert(tableName, data, finalWriteOptions);
 };
 
 /**
- * Read data
+ * Overwrite data (always uses overwrite mode)
+ * 
+ * 功能定位：专门用于覆盖表中的数据
+ * 
+ * 使用场景：
+ *   - 完全替换表数据
+ *   - 数据同步
+ *   - 缓存刷新
+ *   - 批量数据更新
+ *   - 初始化表数据
+ * 
+ * 与insert的区别：
+ *   - insert：追加模式，保留现有数据
+ *   - overwrite：覆盖模式，替换所有数据
+ * 
  * @param tableName Table name
- * @param options Read options, including common options
- * @returns Promise<Record<string, any>[]>
+ * @param data Data to overwrite (single record or array of records)
+ * @param options Write options, excluding mode (always uses overwrite mode), and common options
+ * @returns Promise<WriteResult> Write result with written bytes, total bytes, and chunking info
+ */
+export const overwrite = async (
+  tableName: string,
+  data: Record<string, any> | Record<string, any>[],
+  options: Omit<WriteOptions, 'mode'> = {}
+): Promise<WriteResult> => {
+  const { requireAuthOnAccess = false, encrypted = requireAuthOnAccess || false, ...finalWriteOptions } = options;
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  return adapter.overwrite(tableName, data, finalWriteOptions);
+};
+
+/**
+ * Read data (alias for findMany)
+ * 
+ * 功能定位：findMany的别名，保持向后兼容
+ * 
+ * 使用场景：
+ *   - 向后兼容的代码迁移
+ *   - 简单查询场景
+ * 
+ * 与findMany的区别：
+ *   - read：向后兼容别名，参数名为filter
+ *   - findMany：推荐使用的接口，参数名为where
+ *   - 两者功能完全相同
+ * 
+ * @param tableName Table name
+ * @param options Read options, including filter (alias for where), skip, limit, sortBy, order, sortAlgorithm, and common options
+ * @returns Promise<Record<string, any>[]> Array of records
  */
 export const read = async (
   tableName: string,
   options: ReadOptions = {}
 ): Promise<Record<string, any>[]> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { requireAuthOnAccess = false, encrypted = requireAuthOnAccess || false, ...finalReadOptions } = options;
+  const { requireAuthOnAccess = false, encrypted = requireAuthOnAccess || false } = options;
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
+  
+  // 将filter参数转换为where参数，以兼容findMany的参数命名
+  const { filter, ...otherOptions } = options;
+  const finalReadOptions = { where: filter, ...otherOptions } as any;
+  
   return adapter.read(tableName, finalReadOptions);
 };
 
@@ -128,9 +204,27 @@ export const countTable = async (
 
 /**
  * Verify table count accuracy
+ * 
+ * 功能定位：数据一致性诊断工具
+ * 
+ * 使用场景：
+ *   - 数据一致性诊断：验证元数据与实际数据是否一致
+ *   - 故障排查：诊断数据不一致问题
+ *   - 数据修复：自动修复元数据中的计数错误
+ *   - 元数据同步：定期检查和维护数据一致性
+ * 
+ * 与countTable的区别：
+ *   - countTable：获取当前记录数（快速，直接从元数据读取）
+ *   - verifyCountTable：验证并修复数据一致性（较慢，需要扫描实际数据）
+ * 
+ * 最佳实践：
+ *   - 仅在诊断数据问题时使用
+ *   - 定期维护任务中使用（如每天检查一次）
+ *   - 不在常规业务流程中使用，以避免性能开销
+ * 
  * @param tableName Table name
  * @param options Operation options, including common options
- * @returns Promise<{ metadata: number; actual: number; match: boolean }>
+ * @returns Promise<{ metadata: number; actual: number; match: boolean }> Comparison result with metadata count, actual count, and match status
  */
 export const verifyCountTable = async (
   tableName: string,
@@ -220,18 +314,42 @@ export const remove = async (
 
 /**
  * Bulk operations
+ * 
+ * 功能定位：批量执行多个操作（插入、更新、删除）
+ * 
+ * 使用场景：
+ *   - 批量数据导入
+ *   - 批量数据更新
+ *   - 批量数据删除
+ *   - 复杂的数据处理流程
+ * 
+ * 操作类型说明：
+ *   - insert: 插入数据，只需要data参数
+ *   - update: 更新数据，需要data和where参数
+ *   - delete: 删除数据，只需要where参数
+ * 
  * @param tableName Table name
- * @param operations Operations array
+ * @param operations Array of operations, using union types for type safety
  * @param options Operation options, including common options
- * @returns Promise<WriteResult>
+ * @returns Promise<WriteResult> Write result with written bytes, total bytes, and chunking info
  */
 export const bulkWrite = async (
   tableName: string,
-  operations: Array<{
-    type: 'insert' | 'update' | 'delete';
-    data: Record<string, any> | Record<string, any>[];
-    where?: Record<string, any>;
-  }>,
+  operations: Array<
+    | {
+        type: 'insert';
+        data: Record<string, any> | Record<string, any>[];
+      }
+    | {
+        type: 'update';
+        data: Record<string, any>;
+        where: Record<string, any>;
+      }
+    | {
+        type: 'delete';
+        where: Record<string, any>;
+      }
+  >,
   options: TableOptions = {}
 ): Promise<WriteResult> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
@@ -343,6 +461,7 @@ export default {
   hasTable,
   listTables,
   insert,
+  overwrite,
   read,
   countTable,
   verifyCountTable,

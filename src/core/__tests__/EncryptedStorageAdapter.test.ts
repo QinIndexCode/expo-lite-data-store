@@ -43,7 +43,7 @@ describe('EncryptedStorageAdapter', () => {
       // 打印写入数据信息
       console.log(`[Test] 写入单条数据: 数据大小 = ${JSON.stringify(testData).length} 字节`);
 
-      await adapter.write(tableName, testData);
+      await adapter.overwrite(tableName, testData);
       const result = await adapter.read(tableName);
       
       // 打印读取结果信息
@@ -63,7 +63,7 @@ describe('EncryptedStorageAdapter', () => {
       // 打印写入数据信息
       console.log(`[Test] 写入数据数组: 数据条数 = ${testData.length}, 数据大小 = ${JSON.stringify(testData).length} 字节`);
 
-      await adapter.write(tableName, testData);
+      await adapter.overwrite(tableName, testData);
       const result = await adapter.read(tableName);
       
       // 打印读取结果信息
@@ -81,7 +81,7 @@ describe('EncryptedStorageAdapter', () => {
         { id: 2, name: 'Bob', age: 30 },
         { id: 3, name: 'Charlie', age: 35 },
       ];
-      await adapter.write(tableName, testData);
+      await adapter.overwrite(tableName, testData);
     });
 
     it('应该能够通过findOne查找单条数据', async () => {
@@ -121,7 +121,7 @@ describe('EncryptedStorageAdapter', () => {
       // 打印写入数据信息
       console.log(`[Test] 写入数据用于计数: 数据条数 = ${testData.length}, 数据大小 = ${JSON.stringify(testData).length} 字节`);
 
-      await adapter.write(tableName, testData);
+      await adapter.overwrite(tableName, testData);
       const count = await adapter.count(tableName);
       
       // 打印计数结果信息
@@ -138,7 +138,7 @@ describe('EncryptedStorageAdapter', () => {
         { id: 2, name: 'Bob', age: 30 },
         { id: 3, name: 'Charlie', age: 35 },
       ];
-      await adapter.write(tableName, testData);
+      await adapter.overwrite(tableName, testData);
     });
 
     it('应该能够根据条件删除数据', async () => {
@@ -183,12 +183,12 @@ describe('EncryptedStorageAdapter', () => {
         { id: 1, name: 'Alice', age: 25 },
         { id: 2, name: 'Bob', age: 30 },
       ];
-      await adapter.write(tableName, initialData);
-      console.log(`[Test] 批量更新前数据: 数据条数 = ${initialData.length}, 数据大小 = ${JSON.stringify(initialData).length} 字节`);
+      await adapter.overwrite(tableName, initialData);
+      console.log(`[Test] 批量更新前数据: 数据条数 = ${initialData.length}, 数据大小 = ${JSON.stringify(initialData.length)} 字节`);
 
       const operations = [
-        { type: 'update' as const, data: { id: 1, age: 26 } },
-        { type: 'update' as const, data: { id: 2, age: 31 } },
+        { type: 'update' as const, data: { age: 26 }, where: { id: 1 } },
+        { type: 'update' as const, data: { age: 31 }, where: { id: 2 } },
       ];
       console.log(`[Test] 批量更新: 操作条数 = ${operations.length}`);
 
@@ -210,12 +210,12 @@ describe('EncryptedStorageAdapter', () => {
         { id: 2, name: 'Bob' },
         { id: 3, name: 'Charlie' },
       ];
-      await adapter.write(tableName, initialData);
+      await adapter.overwrite(tableName, initialData);
       console.log(`[Test] 批量删除前数据: 数据条数 = ${initialData.length}, 数据大小 = ${JSON.stringify(initialData).length} 字节`);
 
       const operations = [
-        { type: 'delete' as const, data: { id: 1 } },
-        { type: 'delete' as const, data: { id: 2 } },
+        { type: 'delete' as const, where: { id: 1 } },
+        { type: 'delete' as const, where: { id: 2 } },
       ];
       console.log(`[Test] 批量删除: 操作条数 = ${operations.length}`);
 
@@ -240,7 +240,7 @@ describe('EncryptedStorageAdapter', () => {
       
       console.log(`[Test] 迁移前数据: 数据条数 = ${testData.length}, 数据大小 = ${JSON.stringify(testData).length} 字节`);
 
-      await adapter.write(tableName, testData);
+      await adapter.overwrite(tableName, testData);
       await adapter.migrateToChunked(tableName);
 
       const migratedData = await adapter.read(tableName);

@@ -80,11 +80,21 @@ export class ValidationWrapper {
    * @param operations 批量操作数组
    */
   validateBulkOperations(
-    operations: Array<{
-      type: 'insert' | 'update' | 'delete';
-      data?: Record<string, any>;
-      filter?: Record<string, any>;
-    }>
+    operations: Array<
+      | {
+          type: 'insert';
+          data: Record<string, any> | Record<string, any>[];
+        }
+      | {
+          type: 'update';
+          data: Record<string, any>;
+          where: Record<string, any>;
+        }
+      | {
+          type: 'delete';
+          where: Record<string, any>;
+        }
+    >
   ): void {
     if (!Array.isArray(operations) || operations.length === 0) {
       throw new StorageError('Invalid bulk operations: operations must be a non-empty array', 'BULK_OPERATION_FAILED');
@@ -104,16 +114,23 @@ export class ValidationWrapper {
         );
       }
 
-      if (op.type === 'insert' && !op.data) {
+      if (op.type === 'insert' && !('data' in op)) {
         throw new StorageError(
           `Invalid insert operation at index ${i}: data is required for insert operations`,
           'BULK_OPERATION_FAILED'
         );
       }
 
-      if ((op.type === 'update' || op.type === 'delete') && !op.filter) {
+      if (op.type === 'update' && (!('data' in op) || !('where' in op))) {
         throw new StorageError(
-          `Invalid ${op.type} operation at index ${i}: filter is required for ${op.type} operations`,
+          `Invalid update operation at index ${i}: data and where are required for update operations`,
+          'BULK_OPERATION_FAILED'
+        );
+      }
+
+      if (op.type === 'delete' && !('where' in op)) {
+        throw new StorageError(
+          `Invalid delete operation at index ${i}: where is required for delete operations`,
           'BULK_OPERATION_FAILED'
         );
       }

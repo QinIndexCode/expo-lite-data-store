@@ -179,8 +179,8 @@ describe('ValidationWrapper', () => {
       expect(() => {
         validationWrapper.validateBulkOperations([
           { type: 'insert', data: { id: 1, name: 'Test' } },
-          { type: 'update', filter: { id: 1 }, data: { name: 'Updated' } },
-          { type: 'delete', filter: { id: 1 } }
+          { type: 'update', data: { name: 'Updated' }, where: { id: 1 } },
+          { type: 'delete', where: { id: 1 } }
         ]);
       }).not.toThrow();
     });
@@ -212,15 +212,15 @@ describe('ValidationWrapper', () => {
     it('应该拒绝缺少数据的插入操作', () => {
       expect(() => {
         validationWrapper.validateBulkOperations([
-          { type: 'insert' }
+          { type: 'insert' } as any
         ]);
       }).toThrow(StorageError);
     });
 
-    it('应该拒绝缺少过滤条件的更新操作', () => {
+    it('应该拒绝缺少数据的更新操作', () => {
       expect(() => {
         validationWrapper.validateBulkOperations([
-          { type: 'update', data: { name: 'Updated' } }
+          { type: 'update', data: { name: 'Updated' } } as any
         ]);
       }).toThrow(StorageError);
     });
@@ -228,7 +228,7 @@ describe('ValidationWrapper', () => {
     it('应该拒绝缺少过滤条件的删除操作', () => {
       expect(() => {
         validationWrapper.validateBulkOperations([
-          { type: 'delete' }
+          { type: 'delete' } as any
         ]);
       }).toThrow(StorageError);
     });
@@ -239,7 +239,6 @@ describe('ValidationWrapper', () => {
           null as any
         ]);
       }).toThrow(StorageError);
-
       expect(() => {
         validationWrapper.validateBulkOperations([
           'string' as any

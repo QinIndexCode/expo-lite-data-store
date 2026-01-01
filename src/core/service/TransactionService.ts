@@ -64,7 +64,7 @@ export interface Operation {
   /** 表名 */
   tableName: string;
   /** 操作类型 */
-  type: 'write' | 'delete' | 'bulkWrite' | 'update';
+  type: 'overwrite' | 'write' | 'delete' | 'bulkWrite' | 'update';
   /** 操作数据 */
   data: Record<string, any> | Record<string, any>[];
   /** 操作选项 */

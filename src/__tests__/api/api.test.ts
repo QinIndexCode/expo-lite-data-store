@@ -7,6 +7,7 @@ import {
   hasTable,
   listTables,
   insert,
+  overwrite,
   read,
   countTable,
   verifyCountTable,
@@ -107,11 +108,11 @@ describe('Complete API Tests', () => {
   });
 
   describe('Data Write APIs', () => {
-    it('should test insert with single and multiple records', async () => {
+    it('should test overwrite with single and multiple records', async () => {
       await createTable(testTable);
 
-      // 插入单条记录
-      const singleResult = await insert(testTable, {
+      // 覆盖单条记录
+      const singleResult = await overwrite(testTable, {
         id: 1,
         name: 'Single Record',
         value: 100
@@ -119,13 +120,82 @@ describe('Complete API Tests', () => {
       expect(singleResult.written).toBe(1);
       expect(singleResult.totalAfterWrite).toBe(1);
 
-      // 插入多条记录
-      const multipleResult = await insert(testTable, [
+      // 覆盖多条记录
+      const multipleResult = await overwrite(testTable, [
         { id: 2, name: 'Multiple 1', value: 200 },
         { id: 3, name: 'Multiple 2', value: 300 }
       ]);
       expect(multipleResult.written).toBe(2);
-      expect(multipleResult.totalAfterWrite).toBe(3);
+      expect(multipleResult.totalAfterWrite).toBe(2);
+    });
+
+    it('should test insert with append mode', async () => {
+      await createTable(testTable);
+
+      // 初始数据
+      await insert(testTable, [
+        { id: 1, name: 'Initial 1', value: 100 },
+        { id: 2, name: 'Initial 2', value: 200 }
+      ]);
+
+      // 追加数据（insert总是使用append模式）
+      const appendResult = await insert(testTable, [
+        { id: 3, name: 'Appended 1', value: 300 },
+        { id: 4, name: 'Appended 2', value: 400 }
+      ]);
+
+      expect(appendResult.written).toBe(2);
+      expect(appendResult.totalAfterWrite).toBe(4);
+
+      // 验证数据
+      const data = await read(testTable);
+      expect(data.length).toBe(4);
+      expect(data[0].name).toBe('Initial 1');
+      expect(data[2].name).toBe('Appended 1');
+    });
+
+    it('should test overwrite', async () => {
+      await createTable(testTable);
+
+      // 初始数据
+      await insert(testTable, [
+        { id: 1, name: 'Original 1', value: 100 },
+        { id: 2, name: 'Original 2', value: 200 }
+      ]);
+
+      // 覆盖数据（overwrite总是使用覆盖模式）
+      const overwriteResult = await overwrite(testTable, [
+        { id: 3, name: 'New 1', value: 300 },
+        { id: 4, name: 'New 2', value: 400 }
+      ]);
+
+      expect(overwriteResult.written).toBe(2);
+      expect(overwriteResult.totalAfterWrite).toBe(2);
+
+      // 验证数据被覆盖
+      const data = await read(testTable);
+      expect(data.length).toBe(2);
+      expect(data[0].name).toBe('New 1');
+      expect(data[1].name).toBe('New 2');
+      expect(data.find(item => item.name === 'Original 1')).toBeUndefined();
+    });
+
+    it('should test insert with single record', async () => {
+      await createTable(testTable);
+
+      // 写入单条记录
+      const result = await insert(testTable, {
+        id: 1,
+        name: 'Single Insert',
+        value: 100
+      });
+
+      expect(result.written).toBe(1);
+      expect(result.totalAfterWrite).toBe(1);
+
+      const data = await read(testTable);
+      expect(data.length).toBe(1);
+      expect(data[0].name).toBe('Single Insert');
     });
 
     it('should test bulkWrite with mixed operations', async () => {
@@ -153,7 +223,6 @@ describe('Complete API Tests', () => {
         // 删除记录
         {
           type: 'delete',
-          data: {},
           where: { id: 2 }
         }
       ]);

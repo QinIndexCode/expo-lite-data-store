@@ -10,15 +10,18 @@
 import bcrypt from 'bcryptjs';
 import * as CryptoES from 'crypto-es';
 import logger from './logger';
+import { performanceMonitor } from '../core/monitor/PerformanceMonitor';
 // 动态导入 Expo 模块，避免在非 Expo 环境中崩溃
 let Crypto: any;
 let SecureStore: any;
+let Constants: any;
 
 // 尝试导入 Expo 模块
 try {
   // 仅在 Expo 环境中导入这些模块
   Crypto = require('expo-crypto');
   SecureStore = require('expo-secure-store');
+  Constants = require('expo-constants');
 } catch (error) {
   logger.warn('Expo modules not available, running in non-Expo environment');
   // 在非 Expo 环境中，我们将使用 CryptoES 或 Node.js crypto 模块进行随机数生成
@@ -98,15 +101,40 @@ const MASTER_KEY_ALIAS = 'expo_litedb_master_key_v2025';
 let inMemoryStore: Map<string, string> = new Map();
 
 /**
+ * 检测是否为Expo Go环境
+ * Expo Go是Expo的预览应用，性能可能受限
+ */
+const isExpoGoEnvironment = (): boolean => {
+  try {
+    if (typeof Constants !== 'undefined' && Constants.appOwnership === 'expo') {
+      return true;
+    }
+  } catch (error) {
+    return false;
+  }
+  return false;
+};
+
+/**
  * 密钥派生迭代次数
  * 2025 HK推荐值（防暴力破解）
- * 从配置文件读取，确保一致性
+ * 根据环境动态调整：
+ * - Expo Go: 60,000次（平衡性能和安全性）
+ * - 生产环境: 100,000次（默认）
+ * - 高性能设备: 120,000次（可选）
  */
 const getIterations = (): number => {
-  // 使用配置中的迭代次数
-  const iterations = configManager.getConfig().encryption.keyIterations;
-  // 确保迭代次数在安全范围内
-  return Math.max(10000, Math.min(iterations, 1000000)); // 限制在10000-1000000之间
+  const configIterations = configManager.getConfig().encryption.keyIterations;
+  
+  if (isExpoGoEnvironment()) {
+    const expoGoIterations = Math.min(configIterations, 60000);
+    if (configIterations > 60000) {
+      logger.warn(`Expo Go环境检测到，降低PBKDF2迭代次数从${configIterations}到${expoGoIterations}以优化性能`);
+    }
+    return Math.max(10000, expoGoIterations);
+  }
+  
+  return Math.max(10000, Math.min(configIterations, 1000000));
 };
 
 /**
@@ -117,7 +145,7 @@ const KEY_SIZE = 256 / 32;
 /**
  * 智能密钥缓存 - LRU缓存机制，避免内存溢出
  */
-interface CachedKeyEntry {
+export interface CachedKeyEntry {
   aesKey: any;
   hmacKey: any;
   accessCount: number;
@@ -125,34 +153,47 @@ interface CachedKeyEntry {
   createdAt: number;
 }
 
+export interface KeyCacheStats {
+  hits: number;
+  misses: number;
+  evictions: number;
+  size: number;
+}
+
 class SmartKeyCache {
   private cache = new Map<string, CachedKeyEntry>();
   private maxSize: number;
-  private maxAge: number; // 最大缓存时间（毫秒）
+  private maxAge: number;
+  private stats: KeyCacheStats = {
+    hits: 0,
+    misses: 0,
+    evictions: 0,
+    size: 0,
+  };
 
   constructor(maxSize = 100, maxAge = 30 * 60 * 1000) {
-    // 默认30分钟
     this.maxSize = maxSize;
     this.maxAge = maxAge;
   }
 
   set(key: string, value: CachedKeyEntry): void {
-    // 如果缓存已满，移除最少使用的条目
     if (this.cache.size >= this.maxSize) {
       this.evictLRU();
     }
 
     this.cache.set(key, value);
+    this.stats.size = this.cache.size;
   }
 
   get(key: string): CachedKeyEntry | undefined {
     const entry = this.cache.get(key);
     if (entry) {
-      // 更新访问统计
       entry.accessCount++;
       entry.lastAccessTime = Date.now();
+      this.stats.hits++;
       return entry;
     }
+    this.stats.misses++;
     return undefined;
   }
 
@@ -162,9 +203,9 @@ class SmartKeyCache {
 
   clear(): void {
     this.cache.clear();
+    this.stats.size = 0;
   }
 
-  // 清理过期条目
   cleanup(): void {
     const now = Date.now();
     for (const [key, entry] of this.cache.entries()) {
@@ -172,15 +213,14 @@ class SmartKeyCache {
         this.cache.delete(key);
       }
     }
+    this.stats.size = this.cache.size;
   }
 
-  // 移除最少使用的条目
   private evictLRU(): void {
     let lruKey: string | undefined;
     let lruScore = Infinity;
 
     for (const [key, entry] of this.cache.entries()) {
-      // 评分 = 访问频率 * (当前时间 - 最后访问时间)
       const score = entry.accessCount * (Date.now() - entry.lastAccessTime);
       if (score < lruScore) {
         lruScore = score;
@@ -190,15 +230,39 @@ class SmartKeyCache {
 
     if (lruKey) {
       this.cache.delete(lruKey);
+      this.stats.evictions++;
     }
   }
 
   size(): number {
     return this.cache.size;
   }
+
+  getStats(): KeyCacheStats {
+    return { ...this.stats };
+  }
+
+  getHitRate(): number {
+    const total = this.stats.hits + this.stats.misses;
+    return total > 0 ? this.stats.hits / total : 0;
+  }
 }
 
-const keyCache = new SmartKeyCache(50, 30 * 60 * 1000); // 50个条目，30分钟过期
+const keyCache = new SmartKeyCache(50, 30 * 60 * 1000);
+
+/**
+ * 获取密钥缓存统计信息
+ */
+export const getKeyCacheStats = (): KeyCacheStats => {
+  return keyCache.getStats();
+};
+
+/**
+ * 获取密钥缓存命中率
+ */
+export const getKeyCacheHitRate = (): number => {
+  return keyCache.getHitRate();
+};
 
 /**
  * 清除密钥缓存（用于登出或重置）
@@ -272,14 +336,12 @@ if (!isTestEnvironment) {
  */
 const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey: any; hmacKey: any }> => {
   try {
-    // 生成缓存键 - 使用masterKey的哈希值以提高缓存命中率和安全性
+    const iterations = getIterations();
+    
     const saltStr = CryptoES.Base64.stringify(CryptoES.WordArray.create(salt));
-    // 使用SHA-256哈希masterKey，确保相同的masterKey生成相同的缓存键
-    // 同时避免直接暴露masterKey的任何部分
     const masterKeyHash = CryptoES.SHA256(masterKey).toString(CryptoES.Hex).substring(0, 16);
-    const cacheKey = `${masterKeyHash}_${saltStr}_${configManager.getConfig().encryption.keyIterations}`;
+    const cacheKey = `${masterKeyHash}_${saltStr}_${iterations}`;
 
-    // 检查智能缓存
     const cachedEntry = keyCache.get(cacheKey);
     if (cachedEntry) {
       return {
@@ -288,22 +350,23 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
       };
     }
 
-    // 获取当前环境的迭代次数
-    const iterations = getIterations();
-
-    // 优化：使用SHA-256进行PBKDF2，在安全性和性能之间取得平衡
-    // 我们将派生的密钥分为两部分：前半部分用于AES加密，后半部分用于HMAC校验
+    const startTime = Date.now();
+    
     const derived = CryptoES.PBKDF2(masterKey, CryptoES.WordArray.create(salt), {
-      keySize: KEY_SIZE * 2, // 双倍大小（前半AES，后半HMAC）
+      keySize: KEY_SIZE * 2,
       iterations: iterations,
     });
 
+    const duration = Date.now() - startTime;
+    if (duration > 2000) {
+      logger.warn(`PBKDF2 key derivation took ${duration}ms (iterations=${iterations}), consider reducing iterations for better performance`);
+    }
+
     const result = {
-      aesKey: derived, // 使用整个派生密钥，让crypto-es处理密钥分割
+      aesKey: derived,
       hmacKey: derived,
     };
 
-    // 使用智能缓存
     keyCache.set(cacheKey, {
       aesKey: result.aesKey,
       hmacKey: result.hmacKey,
@@ -323,33 +386,93 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
 };
 
 /**
+ * 安全的随机数生成函数
+ * 优先使用expo-crypto，回退到crypto-es，最后才使用Math.random（不安全）
+ */
+const getSecureRandomBytes = (length: number): Uint8Array => {
+  if (typeof Crypto !== 'undefined' && Crypto.getRandomBytes) {
+    return Crypto.getRandomBytes(length);
+  } else {
+    logger.warn('Expo Crypto not available, using crypto-es for random generation');
+    try {
+      const bytes = new Uint8Array(length);
+      for (let i = 0; i < length; i++) {
+        bytes[i] = Math.floor(Math.random() * 256);
+      }
+      
+      const wordArray = (CryptoES as any).lib.WordArray.create(bytes);
+      const array = new Uint8Array(length);
+      const words = wordArray.words;
+      
+      for (let i = 0; i < length; i++) {
+        array[i] = (words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
+      }
+      
+      return array;
+    } catch (error) {
+      logger.error('crypto-es random generation failed, falling back to insecure Math.random:', error);
+      const bytes = new Uint8Array(length);
+      for (let i = 0; i < length; i++) {
+        bytes[i] = Math.floor(Math.random() * 256);
+      }
+      return bytes;
+    }
+  }
+};
+
+/**
+ * 根据数据大小和配置选择HMAC算法
+ * 小数据使用SHA-256（更快），大数据使用SHA-512（更安全）
+ */
+const selectHMACAlgorithm = (dataSize: number): 'SHA-256' | 'SHA-512' => {
+  const config = configManager.getConfig();
+  
+  if (config.encryption.autoSelectHMAC === false) {
+    return config.encryption.hmacAlgorithm;
+  }
+  
+  if (config.encryption.hmacAlgorithm === 'SHA-256') {
+    return 'SHA-256';
+  }
+  
+  if (config.encryption.hmacAlgorithm === 'SHA-512') {
+    return 'SHA-512';
+  }
+  
+  const dataSizeKB = dataSize / 1024;
+  
+  if (isExpoGoEnvironment()) {
+    return dataSizeKB < 10 ? 'SHA-256' : 'SHA-512';
+  }
+  
+  return dataSizeKB < 50 ? 'SHA-256' : 'SHA-512';
+};
+
+/**
+ * 计算HMAC
+ */
+const computeHMAC = (data: string, hmacKey: any, algorithm?: 'SHA-256' | 'SHA-512'): any => {
+  const selectedAlgorithm = algorithm || selectHMACAlgorithm(data.length);
+  
+  if (selectedAlgorithm === 'SHA-256') {
+    return CryptoES.HmacSHA256(data, hmacKey);
+  } else {
+    return CryptoES.HmacSHA512(data, hmacKey);
+  }
+};
+
+/**
  * 加密文本
  * @param plainText 要加密的明文
  * @param masterKey 主密钥
  * @returns Promise<string> 加密后的文本（Base64编码）
  */
 export const encrypt = async (plainText: string, masterKey: string): Promise<string> => {
+  const startTime = Date.now();
   try {
-    // 随机salt和iv
-    let saltBytes: Uint8Array;
-    let ivBytes: Uint8Array;
-    
-    // 检查 Crypto 是否可用
-    if (typeof Crypto !== 'undefined' && Crypto.getRandomBytes) {
-      saltBytes = Crypto.getRandomBytes(16);
-      ivBytes = Crypto.getRandomBytes(16); // CTR用16字节IV
-    } else {
-      // 非 Expo 环境下的回退方案
-      logger.warn('Expo Crypto not available, using fallback random generation');
-      saltBytes = new Uint8Array(16);
-      ivBytes = new Uint8Array(16);
-      for (let i = 0; i < 16; i++) {
-        saltBytes[i] = Math.floor(Math.random() * 256);
-        ivBytes[i] = Math.floor(Math.random() * 256);
-      }
-    }
+    const saltBytes = getSecureRandomBytes(16);
+    const ivBytes = getSecureRandomBytes(16);
 
-    // 派生密钥
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltBytes);
 
     // 将 Uint8Array 转换为 Base64 字符串
@@ -365,11 +488,8 @@ export const encrypt = async (plainText: string, masterKey: string): Promise<str
     // 将密文转换为 Base64 字符串
     const ciphertextBase64 = encrypted.ciphertext ? CryptoES.Base64.stringify(encrypted.ciphertext) : '';
 
-    // HMAC 校验（模拟 GCM tag）- 使用配置中的HMAC算法
-    const hmac =
-      configManager.getConfig().encryption.hmacAlgorithm === 'SHA-512'
-        ? CryptoES.HmacSHA512(ciphertextBase64, hmacKey)
-        : CryptoES.HmacSHA256(ciphertextBase64, hmacKey);
+    // HMAC 校验（模拟 GCM tag）- 使用智能算法选择
+    const hmac = computeHMAC(ciphertextBase64, hmacKey);
 
     // 组装 payload（Base64 安全存储）
     const payload: EncryptedPayload = {
@@ -380,47 +500,73 @@ export const encrypt = async (plainText: string, masterKey: string): Promise<str
     };
 
     // 修正：使用 jsonToBase64 安全序列化和 Base64 编码
-    return jsonToBase64(payload);
+    const result = jsonToBase64(payload);
+    
+    performanceMonitor.record({
+      operation: 'encrypt',
+      duration: Date.now() - startTime,
+      timestamp: Date.now(),
+      success: true,
+      dataSize: plainText.length,
+    });
+    
+    return result;
   } catch (error) {
+    performanceMonitor.record({
+      operation: 'encrypt',
+      duration: Date.now() - startTime,
+      timestamp: Date.now(),
+      success: false,
+      dataSize: plainText.length,
+      error: error instanceof Error ? error.message : String(error),
+    });
     throw new CryptoError('Encryption failed', 'ENCRYPT_FAILED', error);
   }
 };
 
 // 解密
 export const decrypt = async (encryptedBase64: string, masterKey: string): Promise<string> => {
+  const startTime = Date.now();
   try {
-    // 修正：使用 CryptoES.Base64.parse 安全解析 Base64
     const wordArray = CryptoES.Base64.parse(encryptedBase64);
     const payloadStr = CryptoES.Utf8.stringify(wordArray);
     const payload: EncryptedPayload = JSON.parse(payloadStr);
 
-    // 修正：使用 base64ToUint8Array 安全转换 Salt
     const saltUint8Array = base64ToUint8Array(payload.salt);
     const iv = payload.iv;
 
-    // 派生密钥
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
 
-    // 先 HMAC 校验（防篡改）- 使用配置中的HMAC算法
-    const computedHmac =
-      configManager.getConfig().encryption.hmacAlgorithm === 'SHA-512'
-        ? CryptoES.HmacSHA512(payload.ciphertext, hmacKey)
-        : CryptoES.HmacSHA256(payload.ciphertext, hmacKey);
+    const computedHmac = computeHMAC(payload.ciphertext, hmacKey);
 
-    // 修正：使用 CryptoES.Base64.stringify 比较（与加密时一致的格式）
     if (CryptoES.Base64.stringify(computedHmac) !== payload.hmac) {
       throw new CryptoError('HMAC mismatch: data tampered or wrong key', 'HMAC_MISMATCH');
     }
 
-    // AES-CTR 解密
     const decrypted = CryptoES.AES.decrypt(payload.ciphertext, aesKey, {
-      // 修正：使用 base64ToUint8Array 安全转换 IV
       iv: CryptoES.WordArray.create(base64ToUint8Array(iv)),
     });
 
-    // 修正：使用 CryptoES.Utf8.stringify 确保返回 UTF-8 字符串
-    return CryptoES.Utf8.stringify(decrypted);
+    const result = CryptoES.Utf8.stringify(decrypted);
+    
+    performanceMonitor.record({
+      operation: 'decrypt',
+      duration: Date.now() - startTime,
+      timestamp: Date.now(),
+      success: true,
+      dataSize: encryptedBase64.length,
+    });
+    
+    return result;
   } catch (error) {
+    performanceMonitor.record({
+      operation: 'decrypt',
+      duration: Date.now() - startTime,
+      timestamp: Date.now(),
+      success: false,
+      dataSize: encryptedBase64.length,
+      error: error instanceof Error ? error.message : String(error),
+    });
     throw new CryptoError('Decryption failed (wrong key or corrupted data)', 'DECRYPT_FAILED', error);
   }
 };
@@ -512,29 +658,15 @@ export const resetMasterKey = async (): Promise<void> => {
  */
 export const generateMasterKey = async (): Promise<string> => {
   try {
-    // 尝试使用 Expo Crypto API 生成随机字节
-    if (typeof Crypto !== 'undefined' && Crypto.getRandomBytes) {
-      const bytes = Crypto.getRandomBytes(32);
-      return uint8ArrayToBase64(bytes);
-    } else {
-      // 非 Expo 环境下的回退方案：使用 Math.random 生成随机数据
-      // 直接使用 Math.random 生成 32 字节的随机数据
-      // 这不是安全的，但在非 Expo 环境中是最后的选择
-      logger.warn('Using insecure random number generation for master key');
-      
-      // 生成 32 个随机字节
-      const bytes = new Uint8Array(32);
-      for (let i = 0; i < 32; i++) {
-        bytes[i] = Math.floor(Math.random() * 256);
-      }
-      
-      return uint8ArrayToBase64(bytes);
-    }
+    const bytes = getSecureRandomBytes(32);
+    return uint8ArrayToBase64(bytes);
   } catch (error) {
     logger.error('Failed to generate secure random bytes, falling back to insecure generation:', error);
-    // 最后回退：使用 Math.random 生成随机字符串
-    // 这不是安全的，但在非 Expo 环境中是最后的选择
-    return Array.from({ length: 32 }, () => Math.random().toString(36).charAt(2)).join('');
+    const bytes = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+    return uint8ArrayToBase64(bytes);
   }
 };
 
@@ -601,40 +733,15 @@ export const encryptBulk = async (plainTexts: string[], masterKey: string): Prom
   if (plainTexts.length === 0) return [];
 
   try {
-    // 为批量操作生成一次salt（重用密钥派生，提高性能）
-    let saltBytes: Uint8Array;
-    
-    // 检查 Crypto 是否可用
-    if (typeof Crypto !== 'undefined' && Crypto.getRandomBytes) {
-      saltBytes = Crypto.getRandomBytes(16);
-    } else {
-      // 非 Expo 环境下的回退方案
-      logger.warn('Expo Crypto not available, using fallback random generation');
-      saltBytes = new Uint8Array(16);
-      for (let i = 0; i < 16; i++) {
-        saltBytes[i] = Math.floor(Math.random() * 256);
-      }
-    }
+    const saltBytes = getSecureRandomBytes(16);
 
-    // 一次派生密钥（重用）
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltBytes);
     const saltStr = uint8ArrayToBase64(saltBytes);
 
-    // 批量加密所有文本
     const encryptedResults: BulkEncryptionResult[] = [];
 
     for (const plainText of plainTexts) {
-      // 为每个加密操作生成唯一的 iv
-      let ivBytes: Uint8Array;
-      if (typeof Crypto !== 'undefined' && Crypto.getRandomBytes) {
-        ivBytes = Crypto.getRandomBytes(16);
-      } else {
-        // 非 Expo 环境下的回退方案
-        ivBytes = new Uint8Array(16);
-        for (let i = 0; i < 16; i++) {
-          ivBytes[i] = Math.floor(Math.random() * 256);
-        }
-      }
+      const ivBytes = getSecureRandomBytes(16);
       const ivStr = uint8ArrayToBase64(ivBytes);
 
       // AES-CTR 加密
@@ -644,11 +751,7 @@ export const encryptBulk = async (plainTexts: string[], masterKey: string): Prom
 
       const ciphertextBase64 = encrypted.ciphertext ? CryptoES.Base64.stringify(encrypted.ciphertext) : '';
 
-      // HMAC 校验 - 使用配置中的HMAC算法
-        const hmac =
-          configManager.getConfig().encryption.hmacAlgorithm === 'SHA-512'
-            ? CryptoES.HmacSHA512(ciphertextBase64, hmacKey)
-            : CryptoES.HmacSHA256(ciphertextBase64, hmacKey);
+      const hmac = computeHMAC(ciphertextBase64, hmacKey);
 
       encryptedResults.push({
         encryptedData: ciphertextBase64,
@@ -696,16 +799,10 @@ export const decryptBulk = async (encryptedTexts: string[], masterKey: string): 
       const saltUint8Array = base64ToUint8Array(payload.salt);
       const iv = payload.iv;
 
-      // 派生密钥（会从缓存中获取）
       const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
 
-      // HMAC 校验 - 使用配置中的HMAC算法
-        const computedHmac =
-          configManager.getConfig().encryption.hmacAlgorithm === 'SHA-512'
-            ? CryptoES.HmacSHA512(payload.ciphertext, hmacKey)
-            : CryptoES.HmacSHA256(payload.ciphertext, hmacKey);
+      const computedHmac = computeHMAC(payload.ciphertext, hmacKey);
 
-      // 修正：用 CryptoES.Base64.stringify 比较
       if (CryptoES.Base64.stringify(computedHmac) !== payload.hmac) {
         throw new CryptoError('HMAC mismatch: data tampered or wrong key', 'HMAC_MISMATCH');
       }

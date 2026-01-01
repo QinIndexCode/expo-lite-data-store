@@ -1,5 +1,8 @@
 // src/core/monitor/PerformanceMonitor.ts
-
+/**
+ * 性能监控器
+ * 用于收集和统计应用程序的性能指标
+ */
 import { configManager } from '../config/ConfigManager';
 /**
  * 性能指标接口

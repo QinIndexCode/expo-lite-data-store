@@ -75,19 +75,12 @@ export interface IStorageAdapter {
 
   /**
    * zh-CN:
-   * 写入数据
-   * 表名：tableName 需判断是否时分片写入，如果是，则需要根据分片大小分片写入
-   * 数据：data
-   * 选项：options:[mode]
-   *              mode : 写入模式（append:追加写入，overwrite:覆盖写入）
+   * 覆盖数据（总是使用覆盖模式）
    * en:
-   * write data to table tableName
-   * data:data
-   * options:options
-   *              mode : write mode(append:append write,overwrite:overwrite write) / 写入模式（追加写入或覆盖写入）
+   * overwrite data (always uses overwrite mode)
    * ————————
    * @param tableName table name / 表名
-   * @param data data to write / 要写入的数据
+   * @param data data to overwrite / 要覆盖的数据
    * @returns Promise<{
    *         written: number; // 实际写入的条数
    *         totalAfterWrite: number; // 写入后表总条数
@@ -96,17 +89,17 @@ export interface IStorageAdapter {
    * }>
    **/
 
-  write(
+  overwrite(
     tableName: string,
     data: Record<string, any> | Record<string, any>[],
-    options?: WriteOptions
+    options?: Omit<WriteOptions, 'mode'>
   ): Promise<WriteResult>;
 
   /**
    * zh-CN:
-   * 插入数据（总是使用追加模式，与write方法的append模式功能相同）
+   * 插入数据（总是使用追加模式）
    * en:
-   * insert data (always uses append mode, same as write method with append mode)
+   * insert data (always uses append mode)
    * ————————
    * @param tableName table name / 表名
    * @param data data to insert / 要插入的数据
@@ -114,6 +107,24 @@ export interface IStorageAdapter {
    * @returns Promise<WriteResult>
    */
   insert(
+    tableName: string,
+    data: Record<string, any> | Record<string, any>[],
+    options?: WriteOptions
+  ): Promise<WriteResult>;
+
+  /**
+   * zh-CN:
+   * 写入数据（支持追加或覆盖模式，用于向后兼容）
+   * en:
+   * write data (supports append or overwrite mode, for backward compatibility)
+   * ————————
+   * @param tableName table name / 表名
+   * @param data data to write / 要写入的数据
+   * @param options write options / 写入选项，包括模式（'append' | 'overwrite'）
+   * @returns Promise<WriteResult>
+   * @deprecated 请使用 insert（追加模式）或 overwrite（覆盖模式）
+   */
+  write(
     tableName: string,
     data: Record<string, any> | Record<string, any>[],
     options?: WriteOptions
@@ -213,16 +224,26 @@ export interface IStorageAdapter {
    * bulk operations
    * ————————
    * @param tableName table name / 表名
-   * @param operations array of operations / 操作数组
+   * @param operations array of operations / 操作数组，使用联合类型确保类型安全
    * @returns Promise<WriteResult>
    */
   bulkWrite(
     tableName: string,
-    operations: Array<{
-      type: 'insert' | 'update' | 'delete';
-      data: Record<string, any> | Record<string, any>[];
-      where?: Record<string, any>;
-    }>
+    operations: Array<
+      | {
+          type: 'insert';
+          data: Record<string, any> | Record<string, any>[];
+        }
+      | {
+          type: 'update';
+          data: Record<string, any>;
+          where: Record<string, any>;
+        }
+      | {
+          type: 'delete';
+          where: Record<string, any>;
+        }
+    >
   ): Promise<WriteResult>;
 
   /**

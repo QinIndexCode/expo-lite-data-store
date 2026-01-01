@@ -72,7 +72,7 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
 
   describe('批量更新操作', () => {
     beforeEach(async () => {
-      await adapter.write(tableName, [
+      await adapter.overwrite(tableName, [
         { id: 1, name: 'Alice', age: 25, active: true },
         { id: 2, name: 'Bob', age: 30, active: true },
         { id: 3, name: 'Charlie', age: 35, active: false },
@@ -83,8 +83,8 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
 
     it('应该能够批量更新多条数据', async () => {
       const operations = [
-        { type: 'update' as const, data: { id: 1, age: 26 } },
-        { type: 'update' as const, data: { id: 2, age: 31 } },
+        { type: 'update' as const, data: { age: 26 }, where: { id: 1 } },
+        { type: 'update' as const, data: { age: 31 }, where: { id: 2 } },
       ];
 
       const result = await adapter.bulkWrite(tableName, operations);
@@ -135,7 +135,7 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
     });
 
     it('应该能够更新不存在的记录而不报错', async () => {
-      const operations = [{ type: 'update' as const, data: { id: 999, age: 99 } }];
+      const operations = [{ type: 'update' as const, data: { age: 99 }, where: { id: 999 } }];
 
       const result = await adapter.bulkWrite(tableName, operations);
 
@@ -145,7 +145,7 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
 
   describe('批量删除操作', () => {
     beforeEach(async () => {
-      await adapter.write(tableName, [
+      await adapter.overwrite(tableName, [
         { id: 1, name: 'Alice', age: 25, active: true },
         { id: 2, name: 'Bob', age: 30, active: true },
         { id: 3, name: 'Charlie', age: 35, active: false },
@@ -156,8 +156,8 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
 
     it('应该能够批量删除多条数据', async () => {
       const operations = [
-        { type: 'delete' as const, data: { id: 1 } },
-        { type: 'delete' as const, data: { id: 2 } },
+        { type: 'delete' as const, where: { id: 1 } },
+        { type: 'delete' as const, where: { id: 2 } },
       ];
 
       const result = await adapter.bulkWrite(tableName, operations);
@@ -173,7 +173,6 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
       const operations = [
         { 
           type: 'delete' as const, 
-          data: {}, 
           where: { active: false } 
         },
       ];
@@ -191,7 +190,6 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
       const operations = [
         { 
           type: 'delete' as const, 
-          data: {}, 
           where: { $or: [{ age: { $lt: 27 } }, { age: { $gt: 33 } }] } 
         },
       ];
@@ -209,7 +207,6 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
       const operations = [
         { 
           type: 'delete' as const, 
-          data: {}, 
           where: { $and: [{ name: 'Alice' }, { active: true }] } 
         },
       ];
@@ -227,15 +224,15 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
   describe('混合操作', () => {
     it('应该能够执行插入、更新、删除的混合操作', async () => {
       // 先插入一些初始数据
-      await adapter.write(tableName, [
+      await adapter.overwrite(tableName, [
         { id: 1, name: 'Alice', age: 25 },
         { id: 2, name: 'Bob', age: 30 },
       ]);
 
       const operations = [
         { type: 'insert' as const, data: { id: 3, name: 'Charlie', age: 35 } },
-        { type: 'update' as const, data: { id: 1, age: 26 } },
-        { type: 'delete' as const, data: { id: 2 } },
+        { type: 'update' as const, data: { age: 26 }, where: { id: 1 } },
+        { type: 'delete' as const, where: { id: 2 } },
       ];
 
       const result = await adapter.bulkWrite(tableName, operations);
@@ -277,7 +274,7 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
       // 单个插入
       const startTime2 = Date.now();
       for (const item of largeDataSet) {
-        await adapter.write(tableName, item);
+        await adapter.insert(tableName, item);
       }
       const singleTime = Date.now() - startTime2;
 
