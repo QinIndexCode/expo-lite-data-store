@@ -25,6 +25,9 @@
       "types": "./dist/types/index.d.ts",
       "import": "./dist/js/index.js",
       "require": "./dist/js/index.js"
+    },
+    "./ts": {
+      "types": "./dist/types/index.d.ts"
     }
   },
 

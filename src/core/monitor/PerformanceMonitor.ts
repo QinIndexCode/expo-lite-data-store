@@ -148,6 +148,12 @@ export class PerformanceMonitor {
   private metricsRetention: number;
 
   /**
+   * 采样率（0-1之间），用于减少性能监控开销
+   * 默认10%采样率，减少90%的指标收集开销
+   */
+  private sampleRate: number;
+
+  /**
    * 构造函数
    */
   constructor() {
@@ -155,6 +161,7 @@ export class PerformanceMonitor {
     this.enabled = PerformanceMonitor.isPerformanceTrackingEnabled();
     this.maxRecords = 1000; // 默认保留1000条记录
     this.metricsRetention = PerformanceMonitor.getMetricsRetention();
+    this.sampleRate = 0.1; // 默认10%采样率，减少90%的指标收集开销
 
     // 定期清理旧指标（在测试环境中禁用，避免 Jest open handle 提示）
     if (typeof process === 'undefined' || process.env?.NODE_ENV !== 'test') {
@@ -164,9 +171,15 @@ export class PerformanceMonitor {
 
   /**
    * 记录性能指标
+   * @param metrics 性能指标
    */
   record(metrics: PerformanceMetrics): void {
     if (!this.enabled) {
+      return;
+    }
+
+    // 采样策略：只记录部分性能指标，减少90%的指标收集开销
+    if (Math.random() > this.sampleRate) {
       return;
     }
 

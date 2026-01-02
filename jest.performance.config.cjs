@@ -14,7 +14,7 @@ module.exports = {
   transformIgnorePatterns: [
     'node_modules/(?!(expo-file-system|expo-constants|expo-crypto|expo-secure-store|@expo|expo-*)/)',
   ],
-  testMatch: ['**/performance-optimization.test.ts'],
+  testMatch: ['**/benchmark.test.ts'],
   testPathIgnorePatterns: ['<rootDir>/node_modules/', '<rootDir>/test.ts'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   testEnvironment: 'node',
