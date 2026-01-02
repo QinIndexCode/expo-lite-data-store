@@ -648,7 +648,8 @@ export class DataWriter {
       });
     }
 
-    return { metadata: metadataCount, actual: actualCount, match };
+    // 返回修复后的值，确保 metadata 和 actual 一致
+    return { metadata: actualCount, actual: actualCount, match };
   }
 
   // ==================== 删除数据 ====================
