@@ -27,6 +27,10 @@ export class DataWriter {
   // 并发控制：互斥锁，防止并发操作导致的数据不一致
   private operationLocks = new Map<string, Promise<void>>();
   private lockPromises = new Map<string, () => void>();
+  // 智能并发控制：限制最大并发数，提高并发处理能力
+  private activeOperations = 0;
+  private readonly maxConcurrentOperations = 5;
+  private operationQueue: Array<() => void> = [];
 
   constructor(
     metadataManager: IMetadataManager,
@@ -106,12 +110,23 @@ export class DataWriter {
 
   /**
    * 获取操作锁，确保同一表的并发操作串行执行
+   * 优化：添加智能并发控制，限制最大并发数
    */
   private async acquireLock(tableName: string): Promise<void> {
+    // 智能并发控制：如果并发数达到上限，将操作加入队列
+    if (this.activeOperations >= this.maxConcurrentOperations) {
+      await new Promise<void>(resolve => {
+        this.operationQueue.push(resolve);
+      });
+    }
+
     // 如果已经有锁，等待它释放
     while (this.operationLocks.has(tableName)) {
       await this.operationLocks.get(tableName);
     }
+
+    // 增加活跃操作计数
+    this.activeOperations++;
 
     // 创建新的锁
     let resolveLock: () => void;
@@ -125,6 +140,7 @@ export class DataWriter {
 
   /**
    * 释放操作锁，允许后续操作执行
+   * 优化：添加智能并发控制，处理队列中的操作
    */
   private releaseLock(tableName: string): void {
     const resolveLock = this.lockPromises.get(tableName);
@@ -132,6 +148,17 @@ export class DataWriter {
       resolveLock();
       this.operationLocks.delete(tableName);
       this.lockPromises.delete(tableName);
+    }
+
+    // 减少活跃操作计数
+    this.activeOperations--;
+
+    // 智能并发控制：如果队列中有等待的操作，执行下一个
+    if (this.operationQueue.length > 0 && this.activeOperations < this.maxConcurrentOperations) {
+      const nextOperation = this.operationQueue.shift();
+      if (nextOperation) {
+        nextOperation();
+      }
     }
   }
 

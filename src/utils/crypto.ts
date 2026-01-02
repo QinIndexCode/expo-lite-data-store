@@ -171,7 +171,7 @@ class SmartKeyCache {
     size: 0,
   };
 
-  constructor(maxSize = 100, maxAge = 30 * 60 * 1000) {
+  constructor(maxSize = 500, maxAge = 60 * 60 * 1000) {
     this.maxSize = maxSize;
     this.maxAge = maxAge;
   }
