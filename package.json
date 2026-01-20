@@ -69,7 +69,7 @@
     "@noble/ciphers": "^0.5.3",
     "@noble/hashes": "^1.8.0",
     "bcryptjs": "^2.4.3",
-    "expo-constants": "~18.0.8",
+    "expo-constants": "~18.0.12",
     "expo-crypto": "~15.0.8",
     "expo-file-system": "~18.1.11",
     "expo-secure-store": "~15.0.8"
