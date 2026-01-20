@@ -4,8 +4,8 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'WIKI.md'
-      - 'WIKI_EN.md'
+      - 'README.zh-CN.md'
+      - 'README.en.md'
       - '.github/workflows/sync-wiki.yml'
 
 permissions:
@@ -27,11 +27,11 @@ jobs:
 
       - name: Copy and rename Chinese description
         run: |
-          cp "WIKI.md" "wiki/Description(Zh).md"
+          cp "README.zh-CN.md" "wiki/Description(Zh).md"
 
       - name: Copy and rename English description
         run: |
-          cp "WIKI_EN.md" "wiki/Description(En).md"
+          cp "README.en.md" "wiki/Description(En).md"
 
       - name: Commit and push to wiki if changed
         run: |

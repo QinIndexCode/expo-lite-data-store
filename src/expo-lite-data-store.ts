@@ -1,9 +1,11 @@
-// src/expo-lite-data-store.ts
-// Expo Lite Data Store Main API Export File
-// Provides all public interfaces for database operations, including table management, data read/write, queries, transactions, etc.
-// Created: 2025-11-19
-// Last Modified: 2025-12-17
-// Directly import database instance
+/**
+ * Expo Lite Data Store Main API Export File
+ * Provides all public interfaces for database operations, including table management, data read/write, queries, transactions, etc.
+ * 
+ * @module expo-lite-data-store
+ * @since 2025-11-19
+ * @version 1.0.0
+ */
 import { plainStorage, dbManager } from './core/db';
 import { configManager, ConfigManager } from './core/config/ConfigManager';
 import { performanceMonitor } from './core/monitor/PerformanceMonitor';
@@ -44,7 +46,7 @@ export const createTable = async (
   tableName: string,
   options: CreateTableOptions = {}
 ): Promise<void> => {
-  const { encrypted = false, requireAuthOnAccess = false, ...tableOptions } = options;
+  const { encrypted = false, requireAuthOnAccess = false, ...tableOptions } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.createTable(tableName, tableOptions);
 };
@@ -59,7 +61,7 @@ export const deleteTable = async (
   tableName: string,
   options: TableOptions = {}
 ): Promise<void> => {
-  const { encrypted = false, requireAuthOnAccess = false } = options;
+  const { encrypted = false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.deleteTable(tableName, options);
 };
@@ -74,7 +76,7 @@ export const hasTable = async (
   tableName: string,
   options: TableOptions = {}
 ): Promise<boolean> => {
-  const { encrypted = false, requireAuthOnAccess = false } = options;
+  const { encrypted = false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.hasTable(tableName, options);
 };
@@ -87,7 +89,7 @@ export const hasTable = async (
 export const listTables = async (
   options: TableOptions = {}
 ): Promise<string[]> => {
-  const { encrypted = false, requireAuthOnAccess = false } = options;
+  const { encrypted = false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.listTables(options);
 };
@@ -117,7 +119,7 @@ export const insert = async (
   data: Record<string, any> | Record<string, any>[],
   options: WriteOptions = {}
 ): Promise<WriteResult> => {
-  const { requireAuthOnAccess = false, encrypted = requireAuthOnAccess || false, ...finalWriteOptions } = options;
+  const { requireAuthOnAccess = false, encrypted = requireAuthOnAccess || false, ...finalWriteOptions } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.insert(tableName, data, finalWriteOptions);
 };
@@ -148,7 +150,7 @@ export const overwrite = async (
   data: Record<string, any> | Record<string, any>[],
   options: Omit<WriteOptions, 'mode'> = {}
 ): Promise<WriteResult> => {
-  const { requireAuthOnAccess = false, encrypted = requireAuthOnAccess || false, ...finalWriteOptions } = options;
+  const { requireAuthOnAccess = false, encrypted = requireAuthOnAccess || false, ...finalWriteOptions } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.overwrite(tableName, data, finalWriteOptions);
 };
@@ -176,11 +178,11 @@ export const read = async (
   options: ReadOptions = {}
 ): Promise<Record<string, any>[]> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { requireAuthOnAccess = false, encrypted = requireAuthOnAccess || false } = options;
+  const { requireAuthOnAccess = false, encrypted = requireAuthOnAccess || false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   
   // 将filter参数转换为where参数，以兼容findMany的参数命名
-  const { filter, ...otherOptions } = options;
+  const { filter, ...otherOptions } = options ?? {};
   const finalReadOptions = { where: filter, ...otherOptions } as any;
   
   return adapter.read(tableName, finalReadOptions);
@@ -197,7 +199,7 @@ export const countTable = async (
   options: TableOptions = {}
 ): Promise<number> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { encrypted = options.requireAuthOnAccess || false, requireAuthOnAccess = false } = options;
+  const { encrypted = options?.requireAuthOnAccess || false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.count(tableName);
 };
@@ -231,32 +233,65 @@ export const verifyCountTable = async (
   options: TableOptions = {}
 ): Promise<{ metadata: number; actual: number; match: boolean }> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { encrypted = options.requireAuthOnAccess || false, requireAuthOnAccess = false } = options;
+  const { encrypted = options?.requireAuthOnAccess || false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.verifyCount(tableName);
 };
 
 /**
- * Find single record
- * @param tableName Table name
- * @param options Operation options, including where condition and common options
- * @returns Promise<Record<string, any> | null>
+ * Find a single record that matches the specified criteria.
+ * 
+ * @param tableName Table name to search in
+ * @param options Query options including filter criteria and security settings
+ * @param options.where Filter condition to match records against
+ * @param options.encrypted Whether to use encrypted storage (defaults to false)
+ * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
+ * @returns Promise<Record<string, any> | null> Found record or null if no match
+ * 
+ * @example
+ * ```typescript
+ * const user = await findOne('users', {
+ *   where: { id: '123' },
+ *   encrypted: true
+ * });
+ * ```
  */
 export const findOne = async (
   tableName: string,
   options: { where: Record<string, any>, encrypted?: boolean, requireAuthOnAccess?: boolean }
 ): Promise<Record<string, any> | null> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { where, encrypted = options.requireAuthOnAccess || false, requireAuthOnAccess = false } = options;
+  const { where, encrypted = options?.requireAuthOnAccess || false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.findOne(tableName, where, options);
 };
 
 /**
- * Find multiple records
- * @param tableName Table name
- * @param options Query options, including where condition, skip, limit, sortBy, order, sortAlgorithm, and common options
- * @returns Promise<Record<string, any>[]>
+ * Find multiple records that match the specified criteria.
+ * 
+ * @param tableName Table name to search in
+ * @param options Query options including filter criteria, pagination, sorting, and security settings
+ * @param options.where Filter condition to match records against (defaults to {})
+ * @param options.skip Number of records to skip for pagination (defaults to 0)
+ * @param options.limit Maximum number of records to return (defaults to unlimited)
+ * @param options.sortBy Field or fields to sort by
+ * @param options.order Sort order (asc/desc) for each sort field
+ * @param options.sortAlgorithm Custom sort algorithm to use
+ * @param options.encrypted Whether to use encrypted storage (defaults to false)
+ * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
+ * @returns Promise<Record<string, any>[]> Array of matching records
+ * 
+ * @example
+ * ```typescript
+ * const users = await findMany('users', {
+ *   where: { age: { $gt: 18 } },
+ *   skip: 10,
+ *   limit: 20,
+ *   sortBy: 'createdAt',
+ *   order: 'desc',
+ *   encrypted: true
+ * });
+ * ```
  */
 export const findMany = async (
   tableName: string,
@@ -271,17 +306,7 @@ export const findMany = async (
     requireAuthOnAccess?: boolean
   }
 ): Promise<Record<string, any>[]> => {
-  const {
-    where = {},
-    skip,
-    limit,
-    sortBy,
-    order,
-    sortAlgorithm,
-    requireAuthOnAccess = false,
-    // 如果requireAuthOnAccess为true，则默认encrypted为true
-    encrypted = requireAuthOnAccess || false
-  } = options || {};
+  const { where = {}, skip, limit, sortBy, order, sortAlgorithm, requireAuthOnAccess = false, encrypted = requireAuthOnAccess ?? false } = options ?? {};
 
   // Extract query-specific options, exclude common options
   const finalFindOptions = {
@@ -297,17 +322,29 @@ export const findMany = async (
 };
 
 /**
- * Delete data
- * @param tableName Table name
- * @param options Operation options, including where condition and common options
- * @returns Promise<number>
+ * Delete records that match the specified criteria.
+ * 
+ * @param tableName Table name to delete records from
+ * @param options Delete options including filter criteria and security settings
+ * @param options.where Filter condition to match records for deletion
+ * @param options.encrypted Whether to use encrypted storage (defaults to false)
+ * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
+ * @returns Promise<number> Number of records deleted
+ * 
+ * @example
+ * ```typescript
+ * const deletedCount = await remove('users', {
+ *   where: { id: '123' },
+ *   encrypted: true
+ * });
+ * ```
  */
 export const remove = async (
   tableName: string,
   options: { where: Record<string, any>, encrypted?: boolean, requireAuthOnAccess?: boolean }
 ): Promise<number> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { where, encrypted = options.requireAuthOnAccess || false, requireAuthOnAccess = false } = options;
+  const { where, encrypted = options?.requireAuthOnAccess || false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.delete(tableName, where, options);
 };
@@ -353,7 +390,7 @@ export const bulkWrite = async (
   options: TableOptions = {}
 ): Promise<WriteResult> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { encrypted = options.requireAuthOnAccess || false, requireAuthOnAccess = false } = options;
+  const { encrypted = options?.requireAuthOnAccess || false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.bulkWrite(tableName, operations);
 };
@@ -367,7 +404,7 @@ export const beginTransaction = async (
   options: TableOptions = {}
 ): Promise<void> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { encrypted = options.requireAuthOnAccess || false, requireAuthOnAccess = false } = options;
+  const { encrypted = options?.requireAuthOnAccess || false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.beginTransaction(options);
 };
@@ -381,7 +418,7 @@ export const commit = async (
   options: TableOptions = {}
 ): Promise<void> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { encrypted = options.requireAuthOnAccess || false, requireAuthOnAccess = false } = options;
+  const { encrypted = options?.requireAuthOnAccess || false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.commit(options);
 };
@@ -395,7 +432,7 @@ export const rollback = async (
   options: TableOptions = {}
 ): Promise<void> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { encrypted = options.requireAuthOnAccess || false, requireAuthOnAccess = false } = options;
+  const { encrypted = options?.requireAuthOnAccess || false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.rollback(options);
 };
@@ -411,17 +448,32 @@ export const migrateToChunked = async (
   options: TableOptions = {}
 ): Promise<void> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { encrypted = options.requireAuthOnAccess || false, requireAuthOnAccess = false } = options;
+  const { encrypted = options?.requireAuthOnAccess || false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.migrateToChunked(tableName);
 };
 
 /**
- * Update matching data
- * @param tableName Table name
- * @param data Data to update
- * @param options Operation options, including where condition and common options
+ * Update records that match the specified criteria.
+ * 
+ * @param tableName Table name to update records in
+ * @param data Update data to apply to matching records
+ * @param options Update options including filter criteria and security settings
+ * @param options.where Filter condition to match records for updating
+ * @param options.encrypted Whether to use encrypted storage (defaults to false)
+ * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
  * @returns Promise<number> Number of records updated
+ * 
+ * @example
+ * ```typescript
+ * const updatedCount = await update('users', {
+ *   name: 'Updated Name',
+ *   email: 'updated@example.com'
+ * }, {
+ *   where: { id: '123' },
+ *   encrypted: true
+ * });
+ * ```
  */
 export const update = async (
   tableName: string,
@@ -429,23 +481,34 @@ export const update = async (
   options: { where: Record<string, any>, encrypted?: boolean, requireAuthOnAccess?: boolean }
 ): Promise<number> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { where, encrypted = options.requireAuthOnAccess || false, requireAuthOnAccess = false } = options;
+  const { where, encrypted = options?.requireAuthOnAccess || false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.update(tableName, data, where, options);
 };
 
 /**
- * Clear table data
- * @param tableName Table name
- * @param options Operation options, including common options
+ * Clear all data from the specified table.
+ * 
+ * @param tableName Table name to clear
+ * @param options Clear options including security settings
+ * @param options.encrypted Whether to use encrypted storage (defaults to false)
+ * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
  * @returns Promise<void>
+ * 
+ * @example
+ * ```typescript
+ * await clearTable('users', {
+ *   encrypted: true,
+ *   requireAuthOnAccess: true
+ * });
+ * ```
  */
 export const clearTable = async (
   tableName: string,
   options: TableOptions = {}
 ): Promise<void> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { encrypted = options.requireAuthOnAccess || false, requireAuthOnAccess = false } = options;
+  const { encrypted = options?.requireAuthOnAccess || false, requireAuthOnAccess = false } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.clearTable(tableName);
 };
@@ -453,7 +516,7 @@ export const clearTable = async (
 
 
 // Export types
-export type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult, CommonOptions, TableOptions, FindOptions, FilterCondition } from './types/storageTypes.js';
+export type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult, CommonOptions, TableOptions, FindOptions, FilterCondition } from './types/storageTypes';
 
 export default {
   createTable,

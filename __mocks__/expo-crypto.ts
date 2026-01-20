@@ -1,6 +1,6 @@
 // __mocks__/expo-crypto.ts
 // Mock implementation for expo-crypto
-// 本文件 
+
 
 // Mock CryptoDigestAlgorithm enum
 enum CryptoDigestAlgorithm {

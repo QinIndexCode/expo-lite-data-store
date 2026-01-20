@@ -1,16 +1,46 @@
 /**
- * 加密工具模块
- * 2025 年 11 月 17 日 Expo SDK 54 合规版（AES-256-CTR + HMAC-SHA512 模拟 GCM）
- * 2025-11-17 Expo SDK 54 compliant version (AES-256-CTR + HMAC-SHA512 emulates GCM)
- * 依赖：expo-crypto (随机) + crypto-es (加密 + HMAC)
- * Dependencies: expo-crypto (randomness) + crypto-es (encryption & HMAC)
- * 2025-12-09 修复 Expo 环境下的 Base64 编码解码问题
- *
+ * Encryption utility module
+ * Expo SDK 54 compliant version (AES-256-CTR + HMAC-SHA512 emulates GCM)
+ * Dependencies: expo-crypto (randomness) + @noble/ciphers (encryption) + @noble/hashes (HMAC & hashing)
+ * 
+ * @module crypto
+ * @since 2025-11-17
+ * @version 2.0.0
+ * @changelog
+ *   - 2025-11-17: Initial implementation for Expo SDK 54
+ *   - 2025-12-09: Fixed Base64 encoding/decoding issues in Expo environment
+ *   - 2026-01-20: Migrated from crypto-es to @noble/ciphers and @noble/hashes
  */
 import bcrypt from 'bcryptjs';
-import * as CryptoES from 'crypto-es';
+import { ctr } from '@noble/ciphers/aes';
+import { hmac } from '@noble/hashes/hmac';
+import { sha256 } from '@noble/hashes/sha256';
+import { sha512 } from '@noble/hashes/sha512';
+import { pbkdf2 } from '@noble/hashes/pbkdf2';
+import { bytesToHex } from '@noble/hashes/utils';
 import logger from './logger';
 import { performanceMonitor } from '../core/monitor/PerformanceMonitor';
+import { configManager } from '../core/config/ConfigManager';
+
+/**
+ * Converts Uint8Array to Base64 string using Buffer.
+ * 
+ * @param bytes Uint8Array to convert
+ * @returns Base64 encoded string
+ */
+const bytesToBase64 = (bytes: Uint8Array): string => {
+  return Buffer.from(bytes).toString('base64');
+};
+
+/**
+ * Converts Base64 string to Uint8Array using Buffer.
+ * 
+ * @param base64 Base64 encoded string
+ * @returns Uint8Array of decoded bytes
+ */
+const base64ToBytes = (base64: string): Uint8Array => {
+  return new Uint8Array(Buffer.from(base64, 'base64'));
+};
 // 动态导入 Expo 模块，避免在非 Expo 环境中崩溃
 let Crypto: any;
 let SecureStore: any;
@@ -24,46 +54,89 @@ try {
   Constants = require('expo-constants');
 } catch (error) {
   logger.warn('Expo modules not available, running in non-Expo environment');
-  // 在非 Expo 环境中，我们将使用 CryptoES 或 Node.js crypto 模块进行随机数生成
+  // 在非 Expo 环境中，我们将使用 Node.js crypto 模块或内置方法进行随机数生成
   // 对于 SecureStore，我们将使用内存存储作为回退
 }
 
-import { configManager } from '../core/config/ConfigManager';
+/**
+ * Converts Uint8Array to Base64 string using secure conversion.
+ * 
+ * @param arr Uint8Array to convert
+ * @returns Base64 encoded string
+ */
+const uint8ArrayToBase64 = (arr: Uint8Array): string => {
+  return bytesToBase64(arr);
+};
 
 /**
- * 加密错误类
- * 用于处理加密相关的错误
+ * Converts Base64 string to Uint8Array using secure conversion.
+ * 
+ * @param str Base64 encoded string
+ * @returns Uint8Array of decoded bytes
  */
-// Expo 环境下安全的 Base64 编码（替代 Buffer.from(arr).toString('base64')）
-const uint8ArrayToBase64 = (arr: Uint8Array): string => {
-  return CryptoES.Base64.stringify(CryptoES.WordArray.create(arr as any));
-};
-
-// Expo 环境下安全的 Base64 解码成 Uint8Array（替代 new Uint8Array(Buffer.from(str, 'base64'))）
 const base64ToUint8Array = (str: string): Uint8Array => {
-  const wordArray = CryptoES.Base64.parse(str);
-  const array = new Uint8Array(wordArray.sigBytes);
-  const words = wordArray.words;
-  for (let i = 0; i < wordArray.sigBytes; i++) {
-    array[i] = (words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
-  }
-  return array;
-};
-// 安全的 JSON + Base64 序列化（替代 Buffer.from(JSON.stringify(...)).toString('base64')）
-const jsonToBase64 = (obj: any): string => {
-  return CryptoES.Base64.stringify(CryptoES.Utf8.parse(JSON.stringify(obj)));
+  return base64ToBytes(str);
 };
 
+/**
+ * Serializes object to JSON and then encodes to Base64.
+ * 
+ * @param obj Object to serialize
+ * @returns Base64 encoded JSON string
+ */
+const jsonToBase64 = (obj: any): string => {
+  const jsonStr = JSON.stringify(obj);
+  const utf8Bytes = new TextEncoder().encode(jsonStr);
+  return bytesToBase64(utf8Bytes);
+};
+
+/**
+ * Decodes Base64 string to JSON object.
+ * 
+ * @param str Base64 encoded JSON string
+ * @returns Deserialized object
+ */
+const base64ToJson = (str: string): any => {
+  const bytes = base64ToBytes(str);
+  const jsonStr = new TextDecoder().decode(bytes);
+  return JSON.parse(jsonStr);
+};
+
+/**
+ * Encryption error class for handling crypto-related errors
+ * 
+ * @class CryptoError
+ * @extends Error
+ * @since 2025-11-17
+ */
 export class CryptoError extends Error {
   /**
-   * 构造函数
-   * @param message 错误消息
-   * @param code 错误代码
-   * @param error 原始错误对象（可选）
+   * Error code indicating the type of crypto error
+   */
+  public code:
+    | 'ENCRYPT_FAILED'
+    | 'DECRYPT_FAILED'
+    | 'KEY_DERIVE_FAILED'
+    | 'HMAC_MISMATCH'
+    | 'HASH_FAILED'
+    | 'VERIFY_FAILED';
+
+  /**
+   * Creates a new CryptoError instance
+   * 
+   * @constructor
+   * @param message Error message
+   * @param code Error code
+   * @param error Original error object (optional)
+   * 
+   * @example
+   * ```typescript
+   * throw new CryptoError('Encryption failed', 'ENCRYPT_FAILED', originalError);
+   * ```
    */
   constructor(
     message: string,
-    public code:
+    code:
       | 'ENCRYPT_FAILED'
       | 'DECRYPT_FAILED'
       | 'KEY_DERIVE_FAILED'
@@ -74,6 +147,7 @@ export class CryptoError extends Error {
   ) {
     super(message);
     this.name = 'CryptoError';
+    this.code = code;
     if (error) {
       this.message += `:\n${error}`;
     }
@@ -81,13 +155,20 @@ export class CryptoError extends Error {
 }
 
 /**
- * AES加密负载接口
+ * Interface representing an encrypted payload structure
+ * 
+ * @interface EncryptedPayload
+ * @since 2025-11-17
  */
 interface EncryptedPayload {
-  salt: string; // Base64编码的盐值
-  iv: string; // Base64编码的初始化向量
-  ciphertext: string; // Base64编码的密文
-  hmac: string; // HMAC-SHA512（Base64，模拟GCM标签）
+  /** Base64 encoded salt value */
+  salt: string;
+  /** Base64 encoded initialization vector */
+  iv: string;
+  /** Base64 encoded ciphertext */
+  ciphertext: string;
+  /** HMAC-SHA512 signature (Base64, simulates GCM tag) */
+  hmac: string;
 }
 
 /**
@@ -101,8 +182,10 @@ const MASTER_KEY_ALIAS = 'expo_litedb_master_key_v2025';
 let inMemoryStore: Map<string, string> = new Map();
 
 /**
- * 检测是否为Expo Go环境
- * Expo Go是Expo的预览应用，性能可能受限
+ * Detects if the current environment is Expo Go.
+ * Expo Go is Expo's preview app, which may have performance limitations.
+ * 
+ * @returns boolean True if running in Expo Go environment
  */
 const isExpoGoEnvironment = (): boolean => {
   try {
@@ -116,12 +199,13 @@ const isExpoGoEnvironment = (): boolean => {
 };
 
 /**
- * 密钥派生迭代次数
- * 2025 HK推荐值（防暴力破解）
- * 根据环境动态调整：
- * - Expo Go: 60,000次（平衡性能和安全性）
- * - 生产环境: 100,000次（默认）
- * - 高性能设备: 120,000次（可选）
+ * Gets the number of iterations for PBKDF2 key derivation.
+ * Dynamically adjusts based on the environment:
+ * - Expo Go: 60,000 iterations (balance of performance and security)
+ * - Production: 100,000 iterations (default)
+ * - High-performance devices: Up to 120,000 iterations (optional)
+ * 
+ * @returns number Number of iterations to use
  */
 const getIterations = (): number => {
   const configIterations = configManager.getConfig().encryption.keyIterations;
@@ -143,27 +227,55 @@ const getIterations = (): number => {
 const KEY_SIZE = 256 / 32;
 
 /**
- * 智能密钥缓存 - LRU缓存机制，避免内存溢出
+ * Interface representing a cached key entry with LRU tracking
+ * 
+ * @interface CachedKeyEntry
+ * @since 2025-11-17
  */
 export interface CachedKeyEntry {
-  aesKey: any;
-  hmacKey: any;
+  /** AES encryption key */
+  aesKey: Uint8Array;
+  /** HMAC verification key */
+  hmacKey: Uint8Array;
+  /** Number of times this key has been accessed */
   accessCount: number;
+  /** Timestamp of last access */
   lastAccessTime: number;
+  /** Timestamp of creation */
   createdAt: number;
 }
 
+/**
+ * Interface representing key cache statistics
+ * 
+ * @interface KeyCacheStats
+ * @since 2025-11-17
+ */
 export interface KeyCacheStats {
+  /** Number of cache hits */
   hits: number;
+  /** Number of cache misses */
   misses: number;
+  /** Number of cache evictions */
   evictions: number;
+  /** Current cache size */
   size: number;
 }
 
+/**
+ * Smart key cache with LRU eviction policy to avoid memory overflow
+ * 
+ * @class SmartKeyCache
+ * @since 2025-11-17
+ */
 class SmartKeyCache {
+  /** Internal cache storage */
   private cache = new Map<string, CachedKeyEntry>();
+  /** Maximum cache size */
   private maxSize: number;
+  /** Maximum age for cache entries (milliseconds) */
   private maxAge: number;
+  /** Cache statistics */
   private stats: KeyCacheStats = {
     hits: 0,
     misses: 0,
@@ -171,11 +283,29 @@ class SmartKeyCache {
     size: 0,
   };
 
+  /**
+   * Creates a new SmartKeyCache instance
+   * 
+   * @constructor
+   * @param maxSize Maximum number of entries to store in cache (default: 500)
+   * @param maxAge Maximum age for cache entries in milliseconds (default: 1 hour)
+   * 
+   * @example
+   * ```typescript
+   * const keyCache = new SmartKeyCache(100, 30 * 60 * 1000); // 100 entries, 30 minutes max age
+   * ```
+   */
   constructor(maxSize = 500, maxAge = 60 * 60 * 1000) {
     this.maxSize = maxSize;
     this.maxAge = maxAge;
   }
 
+  /**
+   * Sets a key-value pair in the cache, evicting LRU entry if necessary
+   * 
+   * @param key Cache key
+   * @param value Cached key entry
+   */
   set(key: string, value: CachedKeyEntry): void {
     if (this.cache.size >= this.maxSize) {
       this.evictLRU();
@@ -185,6 +315,12 @@ class SmartKeyCache {
     this.stats.size = this.cache.size;
   }
 
+  /**
+   * Gets a cached entry by key, updating access statistics
+   * 
+   * @param key Cache key
+   * @returns Cached key entry if found, undefined otherwise
+   */
   get(key: string): CachedKeyEntry | undefined {
     const entry = this.cache.get(key);
     if (entry) {
@@ -197,15 +333,27 @@ class SmartKeyCache {
     return undefined;
   }
 
+  /**
+   * Checks if a key exists in the cache
+   * 
+   * @param key Cache key
+   * @returns True if key exists, false otherwise
+   */
   has(key: string): boolean {
     return this.cache.has(key);
   }
 
+  /**
+   * Clears all entries from the cache
+   */
   clear(): void {
     this.cache.clear();
     this.stats.size = 0;
   }
 
+  /**
+   * Cleans up expired entries from the cache
+   */
   cleanup(): void {
     const now = Date.now();
     for (const [key, entry] of this.cache.entries()) {
@@ -216,6 +364,9 @@ class SmartKeyCache {
     this.stats.size = this.cache.size;
   }
 
+  /**
+   * Evicts the least recently used entry from the cache
+   */
   private evictLRU(): void {
     let lruKey: string | undefined;
     let lruScore = Infinity;
@@ -234,14 +385,29 @@ class SmartKeyCache {
     }
   }
 
+  /**
+   * Gets the current cache size
+   * 
+   * @returns Current number of entries in the cache
+   */
   size(): number {
     return this.cache.size;
   }
 
+  /**
+   * Gets the current cache statistics
+   * 
+   * @returns Key cache statistics
+   */
   getStats(): KeyCacheStats {
     return { ...this.stats };
   }
 
+  /**
+   * Gets the current cache hit rate
+   * 
+   * @returns Cache hit rate as a decimal (0 to 1)
+   */
   getHitRate(): number {
     const total = this.stats.hits + this.stats.misses;
     return total > 0 ? this.stats.hits / total : 0;
@@ -329,17 +495,20 @@ if (!isTestEnvironment) {
 }
 
 /**
- * 从masterKey + salt派生AES + HMAC密钥（PBKDF2 + SHA512）
- * @param masterKey 主密钥
- * @param salt 盐值
- * @returns Promise<{ aesKey: CryptoES.lib.WordArray; hmacKey: CryptoES.lib.WordArray }> 派生的AES密钥和HMAC密钥
+ * Derives AES and HMAC keys from master key and salt using PBKDF2 with SHA512.
+ * 
+ * @param masterKey Master key for derivation
+ * @param salt Salt for key derivation
+ * @returns Promise<{ aesKey: Uint8Array; hmacKey: Uint8Array }> Derived AES and HMAC keys
+ * 
+ * @throws CryptoError If key derivation fails
  */
-const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey: any; hmacKey: any }> => {
+const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey: Uint8Array; hmacKey: Uint8Array }> => {
   try {
     const iterations = getIterations();
     
-    const saltStr = CryptoES.Base64.stringify(CryptoES.WordArray.create(salt));
-    const masterKeyHash = CryptoES.SHA256(masterKey).toString(CryptoES.Hex).substring(0, 16);
+    const masterKeyHash = bytesToHex(sha256(masterKey)).substring(0, 16);
+    const saltStr = bytesToBase64(salt);
     const cacheKey = `${masterKeyHash}_${saltStr}_${iterations}`;
 
     const cachedEntry = keyCache.get(cacheKey);
@@ -352,9 +521,10 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
 
     const startTime = Date.now();
     
-    const derived = CryptoES.PBKDF2(masterKey, CryptoES.WordArray.create(salt), {
-      keySize: KEY_SIZE * 2,
-      iterations: iterations,
+    // 使用@noble/hashes的pbkdf2实现，生成64字节密钥（32字节用于AES，32字节用于HMAC）
+    const derivedBytes = pbkdf2(sha512, masterKey, salt, {
+      c: iterations,
+      dkLen: 64, // 64字节 = 32字节AES密钥 + 32字节HMAC密钥
     });
 
     const duration = Date.now() - startTime;
@@ -362,9 +532,13 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
       logger.warn(`PBKDF2 key derivation took ${duration}ms (iterations=${iterations}), consider reducing iterations for better performance`);
     }
 
+    // 拆分派生密钥：前32字节用于AES，后32字节用于HMAC
+    const aesKey = derivedBytes.slice(0, 32);
+    const hmacKey = derivedBytes.slice(32, 64);
+
     const result = {
-      aesKey: derived,
-      hmacKey: derived,
+      aesKey,
+      hmacKey,
     };
 
     keyCache.set(cacheKey, {
@@ -386,37 +560,31 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
 };
 
 /**
- * 安全的随机数生成函数
- * 优先使用expo-crypto，回退到crypto-es，最后才使用Math.random（不安全）
+ * Generates secure random bytes using the most secure available method.
+ * Falls back to less secure methods if secure options are unavailable.
+ * 
+ * @param length Number of random bytes to generate
+ * @returns Uint8Array of secure random bytes
+ * 
+ * @description
+ * - Uses expo-crypto if available
+ * - Falls back to crypto.getRandomValues in browser environments
+ * - Uses Math.random as last resort (insecure, only for development)
  */
 const getSecureRandomBytes = (length: number): Uint8Array => {
   if (typeof Crypto !== 'undefined' && Crypto.getRandomBytes) {
     return Crypto.getRandomBytes(length);
+  } else if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    // 浏览器环境使用crypto.getRandomValues
+    return crypto.getRandomValues(new Uint8Array(length));
   } else {
-    logger.warn('Expo Crypto not available, using crypto-es for random generation');
-    try {
-      const bytes = new Uint8Array(length);
-      for (let i = 0; i < length; i++) {
-        bytes[i] = Math.floor(Math.random() * 256);
-      }
-      
-      const wordArray = (CryptoES as any).lib.WordArray.create(bytes);
-      const array = new Uint8Array(length);
-      const words = wordArray.words;
-      
-      for (let i = 0; i < length; i++) {
-        array[i] = (words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
-      }
-      
-      return array;
-    } catch (error) {
-      logger.error('crypto-es random generation failed, falling back to insecure Math.random:', error);
-      const bytes = new Uint8Array(length);
-      for (let i = 0; i < length; i++) {
-        bytes[i] = Math.floor(Math.random() * 256);
-      }
-      return bytes;
+    logger.warn('Secure random generation not available, falling back to insecure Math.random');
+    // 不安全的回退方案，仅用于非生产环境
+    const bytes = new Uint8Array(length);
+    for (let i = 0; i < length; i++) {
+      bytes[i] = Math.floor(Math.random() * 256);
     }
+    return bytes;
   }
 };
 
@@ -449,23 +617,33 @@ const selectHMACAlgorithm = (dataSize: number): 'SHA-256' | 'SHA-512' => {
 };
 
 /**
- * 计算HMAC
+ * Computes HMAC for the given data using the specified algorithm.
+ * 
+ * @param data Data to compute HMAC for
+ * @param hmacKey HMAC key to use
+ * @param algorithm HMAC algorithm to use (defaults to auto-selected)
+ * @returns Uint8Array of HMAC signature
  */
-const computeHMAC = (data: string, hmacKey: any, algorithm?: 'SHA-256' | 'SHA-512'): any => {
+const computeHMAC = (data: string, hmacKey: Uint8Array, algorithm?: 'SHA-256' | 'SHA-512'): Uint8Array => {
   const selectedAlgorithm = algorithm || selectHMACAlgorithm(data.length);
   
-  if (selectedAlgorithm === 'SHA-256') {
-    return CryptoES.HmacSHA256(data, hmacKey);
-  } else {
-    return CryptoES.HmacSHA512(data, hmacKey);
-  }
+  const hashFn = selectedAlgorithm === 'SHA-256' ? sha256 : sha512;
+  return hmac(hashFn, hmacKey, data);
 };
 
 /**
- * 加密文本
- * @param plainText 要加密的明文
- * @param masterKey 主密钥
- * @returns Promise<string> 加密后的文本（Base64编码）
+ * Encrypts text using AES-CTR with HMAC authentication.
+ * 
+ * @param plainText Plain text to encrypt
+ * @param masterKey Master key for encryption
+ * @returns Promise<string> Encrypted text in Base64 format
+ * 
+ * @throws CryptoError If encryption fails
+ * 
+ * @example
+ * ```typescript
+ * const encrypted = await encrypt('secret text', 'master password');
+ * ```
  */
 export const encrypt = async (plainText: string, masterKey: string): Promise<string> => {
   const startTime = Date.now();
@@ -479,24 +657,22 @@ export const encrypt = async (plainText: string, masterKey: string): Promise<str
     const saltStr = uint8ArrayToBase64(saltBytes);
     const ivStr = uint8ArrayToBase64(ivBytes);
 
-    // AES-CTR 加密
-    const encrypted = CryptoES.AES.encrypt(plainText, aesKey, {
-      // 修正：使用 base64ToUint8Array 安全转换 IV
-      iv: CryptoES.WordArray.create(base64ToUint8Array(ivStr)),
-    });
-
-    // 将密文转换为 Base64 字符串
-    const ciphertextBase64 = encrypted.ciphertext ? CryptoES.Base64.stringify(encrypted.ciphertext) : '';
+    // 使用@noble/ciphers的AES-CTR模式加密
+    const plainTextBytes = new TextEncoder().encode(plainText);
+    const cipher = ctr(aesKey, ivBytes);
+    const ciphertextBytes = cipher.encrypt(plainTextBytes);
+    const ciphertextBase64 = bytesToBase64(ciphertextBytes);
 
     // HMAC 校验（模拟 GCM tag）- 使用智能算法选择
-    const hmac = computeHMAC(ciphertextBase64, hmacKey);
+    const hmacBytes = computeHMAC(ciphertextBase64, hmacKey);
+    const hmacBase64 = bytesToBase64(hmacBytes);
 
     // 组装 payload（Base64 安全存储）
     const payload: EncryptedPayload = {
       salt: saltStr,
       iv: ivStr,
       ciphertext: ciphertextBase64,
-      hmac: CryptoES.Base64.stringify(hmac),
+      hmac: hmacBase64,
     };
 
     // 修正：使用 jsonToBase64 安全序列化和 Base64 编码
@@ -524,30 +700,44 @@ export const encrypt = async (plainText: string, masterKey: string): Promise<str
   }
 };
 
-// 解密
+/**
+ * Decrypts text using AES-CTR with HMAC authentication.
+ * 
+ * @param encryptedBase64 Encrypted text in Base64 format
+ * @param masterKey Master key for decryption
+ * @returns Promise<string> Decrypted plain text
+ * 
+ * @throws CryptoError If decryption fails or HMAC verification fails
+ * 
+ * @example
+ * ```typescript
+ * const decrypted = await decrypt(encryptedText, 'master password');
+ * ```
+ */
 export const decrypt = async (encryptedBase64: string, masterKey: string): Promise<string> => {
   const startTime = Date.now();
   try {
-    const wordArray = CryptoES.Base64.parse(encryptedBase64);
-    const payloadStr = CryptoES.Utf8.stringify(wordArray);
-    const payload: EncryptedPayload = JSON.parse(payloadStr);
+    // 使用新的base64ToJson函数解析payload
+    const payload: EncryptedPayload = base64ToJson(encryptedBase64);
 
     const saltUint8Array = base64ToUint8Array(payload.salt);
-    const iv = payload.iv;
+    const ivBytes = base64ToUint8Array(payload.iv);
 
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
 
-    const computedHmac = computeHMAC(payload.ciphertext, hmacKey);
+    // 计算HMAC并验证
+    const computedHmacBytes = computeHMAC(payload.ciphertext, hmacKey);
+    const computedHmacBase64 = bytesToBase64(computedHmacBytes);
 
-    if (CryptoES.Base64.stringify(computedHmac) !== payload.hmac) {
+    if (computedHmacBase64 !== payload.hmac) {
       throw new CryptoError('HMAC mismatch: data tampered or wrong key', 'HMAC_MISMATCH');
     }
 
-    const decrypted = CryptoES.AES.decrypt(payload.ciphertext, aesKey, {
-      iv: CryptoES.WordArray.create(base64ToUint8Array(iv)),
-    });
-
-    const result = CryptoES.Utf8.stringify(decrypted);
+    // 使用@noble/ciphers的AES-CTR模式解密
+    const ciphertextBytes = base64ToBytes(payload.ciphertext);
+    const cipher = ctr(aesKey, ivBytes);
+    const plainTextBytes = cipher.decrypt(ciphertextBytes);
+    const result = new TextDecoder().decode(plainTextBytes);
     
     performanceMonitor.record({
       operation: 'decrypt',
@@ -571,10 +761,18 @@ export const decrypt = async (encryptedBase64: string, masterKey: string): Promi
   }
 };
 
-// 获取主密钥
 /**
- * 获取主密钥
- * @param requireAuthOnAccess 是否每次访问都需要生物识别验证，默认为 false
+ * Gets the master key for encryption operations.
+ * 
+ * @param requireAuthOnAccess Whether biometric authentication is required for each access (defaults to false)
+ * @returns Promise<string> Master encryption key
+ * 
+ * @throws CryptoError If master key retrieval or generation fails
+ * 
+ * @description
+ * - Uses expo-secure-store if available
+ * - Falls back to in-memory storage if secure storage is unavailable
+ * - Supports biometric authentication when required
  */
 export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promise<string> => {
   let key;
@@ -714,12 +912,19 @@ export const generateSalt = async (rounds: number = 12): Promise<string> => {
 };
 
 /**
- * 批量加密接口
+ * Interface representing a single bulk encryption result
+ * 
+ * @interface BulkEncryptionResult
+ * @since 2025-11-17
  */
 interface BulkEncryptionResult {
+  /** Encrypted data in Base64 format */
   encryptedData: string;
+  /** Salt used for key derivation in Base64 format */
   salt: string;
+  /** Initialization vector in Base64 format */
   iv: string;
+  /** HMAC signature in Base64 format */
   hmac: string;
 }
 
@@ -744,20 +949,21 @@ export const encryptBulk = async (plainTexts: string[], masterKey: string): Prom
       const ivBytes = getSecureRandomBytes(16);
       const ivStr = uint8ArrayToBase64(ivBytes);
 
-      // AES-CTR 加密
-      const encrypted = CryptoES.AES.encrypt(plainText, aesKey, {
-        iv: CryptoES.WordArray.create(ivBytes),
-      });
+      // 使用@noble/ciphers的AES-CTR模式加密
+      const plainTextBytes = new TextEncoder().encode(plainText);
+      const cipher = ctr(aesKey, ivBytes);
+      const ciphertextBytes = cipher.encrypt(plainTextBytes);
+      const ciphertextBase64 = bytesToBase64(ciphertextBytes);
 
-      const ciphertextBase64 = encrypted.ciphertext ? CryptoES.Base64.stringify(encrypted.ciphertext) : '';
-
-      const hmac = computeHMAC(ciphertextBase64, hmacKey);
+      // 计算HMAC
+      const hmacBytes = computeHMAC(ciphertextBase64, hmacKey);
+      const hmacBase64 = bytesToBase64(hmacBytes);
 
       encryptedResults.push({
         encryptedData: ciphertextBase64,
         salt: saltStr,
         iv: ivStr,
-        hmac: CryptoES.Base64.stringify(hmac),
+        hmac: hmacBase64,
       });
     }
 
@@ -770,7 +976,6 @@ export const encryptBulk = async (plainTexts: string[], masterKey: string): Prom
         hmac: result.hmac,
       };
 
-      // 修正：使用 jsonToBase64
       return jsonToBase64(payload);
     });
   } catch (error) {
@@ -790,31 +995,28 @@ export const decryptBulk = async (encryptedTexts: string[], masterKey: string): 
   try {
     // 可以并行处理解密操作
     const decryptPromises = encryptedTexts.map(async encryptedText => {
-      // 修正：安全解析 payload
-      const wordArray = CryptoES.Base64.parse(encryptedText);
-      const payloadStr = CryptoES.Utf8.stringify(wordArray);
-      const payload: EncryptedPayload = JSON.parse(payloadStr);
+      // 使用新的base64ToJson函数安全解析payload
+      const payload: EncryptedPayload = base64ToJson(encryptedText);
 
-      // 修正：安全转换salt
+      // 安全转换salt和iv
       const saltUint8Array = base64ToUint8Array(payload.salt);
-      const iv = payload.iv;
+      const ivBytes = base64ToUint8Array(payload.iv);
 
       const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
 
-      const computedHmac = computeHMAC(payload.ciphertext, hmacKey);
+      // 计算HMAC并验证
+      const computedHmacBytes = computeHMAC(payload.ciphertext, hmacKey);
+      const computedHmacBase64 = bytesToBase64(computedHmacBytes);
 
-      if (CryptoES.Base64.stringify(computedHmac) !== payload.hmac) {
+      if (computedHmacBase64 !== payload.hmac) {
         throw new CryptoError('HMAC mismatch: data tampered or wrong key', 'HMAC_MISMATCH');
       }
 
-      // AES-CTR 解密
-      const decrypted = CryptoES.AES.decrypt(payload.ciphertext, aesKey, {
-        // 修正：使用 base64ToUint8Array
-        iv: CryptoES.WordArray.create(base64ToUint8Array(iv)),
-      });
-
-      // 修正：使用 CryptoES.Utf8.stringify 确保返回 UTF-8 字符串
-      return CryptoES.Utf8.stringify(decrypted);
+      // 使用@noble/ciphers的AES-CTR模式解密
+      const ciphertextBytes = base64ToBytes(payload.ciphertext);
+      const cipher = ctr(aesKey, ivBytes);
+      const plainTextBytes = cipher.decrypt(ciphertextBytes);
+      return new TextDecoder().decode(plainTextBytes);
     });
 
     // 并行执行所有解密操作
@@ -830,11 +1032,11 @@ export const decryptBulk = async (encryptedTexts: string[], masterKey: string): 
  * 生成数据哈希
  * @param data 要哈希的数据
  * @param algorithm 哈希算法（默认SHA-512）
- * @returns 哈希值
+ * @returns Promise<string> 哈希值（十六进制）
  */
 export const generateHash = async (data: string, algorithm: 'SHA-256' | 'SHA-512' = 'SHA-512'): Promise<string> => {
   try {
-    // 检查 Crypto 是否可用
+    // 检查 Crypto 是否可用（Expo 环境）
     if (typeof Crypto !== 'undefined' && Crypto.digestStringAsync) {
       switch (algorithm) {
         case 'SHA-256':
@@ -845,16 +1047,10 @@ export const generateHash = async (data: string, algorithm: 'SHA-256' | 'SHA-512
           throw new CryptoError(`Unsupported hash algorithm: ${algorithm}`, 'HASH_FAILED');
       }
     } else {
-      // 非 Expo 环境下的回退方案，使用 CryptoES
-      logger.warn('Expo Crypto not available, using CryptoES for hashing');
-      switch (algorithm) {
-        case 'SHA-256':
-          return CryptoES.SHA256(data).toString(CryptoES.Hex);
-        case 'SHA-512':
-          return CryptoES.SHA512(data).toString(CryptoES.Hex);
-        default:
-          throw new CryptoError(`Unsupported hash algorithm: ${algorithm}`, 'HASH_FAILED');
-      }
+      // 非 Expo 环境下的回退方案，使用 @noble/hashes
+      logger.warn('Expo Crypto not available, using @noble/hashes for hashing');
+      const hashFn = algorithm === 'SHA-256' ? sha256 : sha512;
+      return bytesToHex(hashFn(data));
     }
   } catch (error) {
     throw new CryptoError('Hash generation failed', 'HASH_FAILED', error);
@@ -862,17 +1058,24 @@ export const generateHash = async (data: string, algorithm: 'SHA-256' | 'SHA-512
 };
 
 /**
- * 字段级加密配置
+ * Interface representing field-level encryption configuration
+ * 
+ * @interface FieldEncryptionConfig
+ * @since 2025-11-17
  */
-
 interface FieldEncryptionConfig {
-  [x: string]: any;
-  fields: string[]; // 需要加密的字段列表
-  masterKey: string; // 主密钥（32字节）
+  /** List of fields to encrypt */
+  fields: string[];
+  /** Master key for encryption (32 bytes) */
+  masterKey: string;
+  /** Encryption configuration options */
   encryption?: {
+    /** HMAC algorithm to use (default: auto-select based on data size) */
     hmacAlgorithm?: 'SHA-256' | 'SHA-512';
+    /** Encryption algorithm to use (default: AES-CTR) */
     encryptionAlgorithm?: 'AES-CTR';
-    keySize?: 256; // 密钥大小（256位）
+    /** Key size in bits (default: 256) */
+    keySize?: 256;
   };
 }
 

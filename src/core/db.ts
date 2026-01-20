@@ -1,16 +1,18 @@
-// src/core/db.ts
-// 数据库实例初始化文件，负责创建和导出数据库实例
-// 根据环境配置决定是否使用加密存储
-// 创建于: 2025-11-23
-// 最后修改: 2025-12-16
+/**
+ * Database Instance Management
+ * Responsible for creating and exporting database instances with configurable encryption.
+ * 
+ * @module db
+ * @since 2025-11-23
+ * @version 1.0.0
+ */
 
 import storage from './adapter/FileSystemStorageAdapter';
 import { EncryptedStorageAdapter } from './EncryptedStorageAdapter';
 import type { IStorageAdapter } from '../types/storageAdapterInfc';
 
 /**
- * 数据库实例管理器
- * 允许动态切换加密模式
+ * Database instance manager that allows dynamic switching between encrypted and non-encrypted modes.
  */
 export class DbInstanceManager {
   private static instance: DbInstanceManager;
@@ -20,19 +22,20 @@ export class DbInstanceManager {
   private constructor() {}
 
   /**
-   * 获取单例实例
+   * Gets the singleton instance of the DbInstanceManager.
+   * 
+   * @returns DbInstanceManager Singleton instance
    */
   public static getInstance(): DbInstanceManager {
-    if (!DbInstanceManager.instance) {
-      DbInstanceManager.instance = new DbInstanceManager();
-    }
-    return DbInstanceManager.instance;
+    return DbInstanceManager.instance ?? (DbInstanceManager.instance = new DbInstanceManager());
   }
 
   /**
-   * 获取存储实例
-   * @param encrypted 是否启用加密存储
-   * @param requireAuthOnAccess 是否需要生物识别验证
+   * Gets the storage instance based on encryption requirements.
+   * 
+   * @param encrypted Whether to enable encrypted storage (defaults to false)
+   * @param requireAuthOnAccess Whether biometric authentication is required (defaults to false)
+   * @returns IStorageAdapter Storage instance matching the specified requirements
    */
   public getDbInstance(encrypted: boolean = false, requireAuthOnAccess: boolean = false): IStorageAdapter {
     if (!encrypted) {
@@ -49,23 +52,27 @@ export class DbInstanceManager {
   }
 
   /**
-   * 获取当前数据库实例（兼容旧API）
+   * Gets the default database instance (for backward compatibility).
+   * 
+   * @returns IStorageAdapter Default non-encrypted storage instance
    */
   public getDefaultInstance(): IStorageAdapter {
     return this.defaultInstance;
   }
 }
 
-// 创建单例实例
+/**
+ * Database instance manager singleton.
+ */
 export const dbManager = DbInstanceManager.getInstance();
 
 /**
- * 默认数据库实例（初始为非加密存储）
+ * Default database instance (initially non-encrypted).
  */
 export const db = dbManager.getDbInstance();
 
 /**
- * 明文存储实例（用于调试）
- * 开发时可以直接查看明文数据，便于调试
+ * Plain storage instance (for debugging purposes).
+ * Allows direct viewing of plaintext data during development.
  */
 export const plainStorage = storage;

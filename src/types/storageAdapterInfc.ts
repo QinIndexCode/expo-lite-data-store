@@ -1,6 +1,11 @@
-//src/core/storageAdapter.ts
-// storage adapter interface / 存储适配器接口
-// storage error class / 存储错误类
+/**
+ * Storage Adapter Interface Definition
+ * Defines the contract for storage operations in the data store.
+ * 
+ * @module storageAdapterInfc
+ * @since 2025-11-19
+ * @version 1.0.0
+ */
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from './storageTypes';
 
 //———————————— Storage Adapter Interface / 存储适配器接口 ————————————
