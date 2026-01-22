@@ -1,6 +1,16 @@
 
 <!-- Update Log -->
 
+### 📅 2026-01-22 `v2.0.0-beta.2`  Encryption Dependency Upgrade and Architecture Optimization
+
+> Encryption Upgrade: Migrated from crypto-es to @noble/ciphers and @noble/hashes for improved security and performance
+> Dependency Handling: Simplified package management, using only a single package.json, removed automatic generation scripts
+> Documentation Update: Updated architecture design documents, added detailed description of encryption utility module
+> Encryption Optimization: Implemented AES-256-CTR + HMAC-SHA512 encryption scheme, emulating GCM mode
+> Key Management: Optimized PBKDF2 key derivation with dynamic iteration adjustment
+> Performance Improvement: Added smart key cache with LRU cleanup strategy
+> Cross-Platform Compatibility: Ensured compatibility with React Native, Expo, and Web environments
+
 ### 📅 2025-12-24 `v2.0.0-beta.2`  Security Fixes and Documentation Updates
 
 > Security Fix: Fixed prototype pollution vulnerability in ConfigManager.ts by adding key name validation to prevent malicious key names from modifying Object.prototype

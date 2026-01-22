@@ -1,7 +1,7 @@
 # Expo LiteDBStore Architecture Design Document
 
 // Created on: 2025-11-28
-// Last Modified: 2025-12-24
+// Last Modified: 2026-01-22
 
 ## 1. System Overview
 
@@ -217,7 +217,21 @@ Expo Lite Data Store adopts a layered architecture design, mainly divided into t
 
 ### 3.4 Encryption Layer Modules
 
-#### 3.4.1 KeyManager
+#### 3.4.1 Encryption Utility Module
+
+**Responsibility**: Provides data encryption and decryption functionality, implemented based on @noble/ciphers and @noble/hashes.
+
+**Main Functions**:
+
+- **Encryption Algorithm**: Uses AES-256-CTR + HMAC-SHA512 algorithm (emulating GCM mode)
+- **Key Management**: Supports PBKDF2 key derivation with dynamic iteration adjustment
+- **Smart Key Cache**: Key cache with LRU cleanup strategy for improved performance
+- **Bulk Encryption/Decryption**: Supports batch processing for improved efficiency
+- **Field-Level Encryption**: Supports selective field encryption
+- **Expo Environment Compatible**: Uses expo-crypto for random number generation
+- **Multi-Platform Support**: Compatible with React Native, Expo, and Web environments
+
+#### 3.4.2 KeyManager
 
 **Responsibility**: Manages encryption keys to ensure secure storage and usage.
 
@@ -225,8 +239,9 @@ Expo Lite Data Store adopts a layered architecture design, mainly divided into t
 
 - Key generation and management
 - Key encryption and decryption
-- Support for multiple key storage methods
+- Support for multiple key storage methods (expo-secure-store or memory)
 - Key rotation and update
+- Biometric authentication support
 
 ### 3.5 Storage Layer Modules
 
