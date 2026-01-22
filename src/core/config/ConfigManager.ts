@@ -177,7 +177,7 @@ export class ConfigManager {
               logger.debug('Constants.default keys:', Object.keys(Constants));
             }
             
-            let expoConfig = null;
+            let expoConfig: null | { extra?: { liteStore?: any } } = null;
             
             // 尝试多种方式获取配置
             logger.debug('Checking Constants.manifest:', Constants.manifest ? 'exists' : 'not exists');

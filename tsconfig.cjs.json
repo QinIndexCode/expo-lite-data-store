@@ -1,13 +1,12 @@
-// tsconfig.js.json
 {
   "compilerOptions": {
     "strict": true,
     "declaration": true,
     "declarationDir": "dist/types",
-    "outDir": "dist/js",
+    "outDir": "dist/cjs",
     "rootDir": "./src",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "CommonJS",
+    "moduleResolution": "node",
     "target": "es2015",
     "downlevelIteration": true,
     "esModuleInterop": true,
@@ -21,7 +20,7 @@
       "@defaultConfig": ["./defaultConfig"]
     },
     "forceConsistentCasingInFileNames": true,
-    "noImplicitAny": false,
+    "noImplicitAny": true,
     "noImplicitReturns": true,
     "noImplicitThis": true,
     "noUnusedLocals": true,
@@ -37,7 +36,7 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "incremental": true,
-    "tsBuildInfoFile": "./.tsbuildinfo.esm"
+    "tsBuildInfoFile": "./.tsbuildinfo.cjs"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["src/__tests__/**", "src/**/*.test.ts", "src/**/*.test.tsx"]

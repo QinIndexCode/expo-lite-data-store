@@ -12,15 +12,17 @@
  *   - 2026-01-20: Migrated from crypto-es to @noble/ciphers and @noble/hashes
  */
 import bcrypt from 'bcryptjs';
+import logger from './logger';
+import { performanceMonitor } from '../core/monitor/PerformanceMonitor';
+import { configManager } from '../core/config/ConfigManager';
+
+// 使用正常的ES模块导入
 import { ctr } from '@noble/ciphers/aes';
 import { hmac } from '@noble/hashes/hmac';
 import { sha256 } from '@noble/hashes/sha256';
 import { sha512 } from '@noble/hashes/sha512';
 import { pbkdf2 } from '@noble/hashes/pbkdf2';
 import { bytesToHex } from '@noble/hashes/utils';
-import logger from './logger';
-import { performanceMonitor } from '../core/monitor/PerformanceMonitor';
-import { configManager } from '../core/config/ConfigManager';
 
 /**
  * Converts Uint8Array to Base64 string using Buffer.
