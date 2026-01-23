@@ -230,6 +230,7 @@ export interface IStorageAdapter {
    * ————————
    * @param tableName table name / 表名
    * @param operations array of operations / 操作数组，使用联合类型确保类型安全
+   * @param options Operation options, including common options
    * @returns Promise<WriteResult>
    */
   bulkWrite(
@@ -248,7 +249,8 @@ export interface IStorageAdapter {
           type: 'delete';
           where: Record<string, any>;
         }
-    >
+    >,
+    options?: any
   ): Promise<WriteResult>;
 
   /**

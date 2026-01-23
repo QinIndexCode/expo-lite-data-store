@@ -183,10 +183,11 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   /**
    * 删除表
    * @param tableName 表名
+   * @param _options Operation options, including common options
    * @throws {Error} 当表名无效时抛出
    * @returns Promise<void>
    */
-  async deleteTable(tableName: string): Promise<void> {
+  async deleteTable(tableName: string, _options?: any): Promise<void> {
     // 输入验证：表名不能为空且必须是字符串
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
       throw new Error('Invalid table name: must be a non-empty string');
@@ -201,17 +202,19 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   /**
    * 检查表是否存在
    * @param tableName 表名
+   * @param _options Operation options, including common options
    * @returns Promise<boolean> 表是否存在
    */
-  async hasTable(tableName: string): Promise<boolean> {
+  async hasTable(tableName: string, _options?: any): Promise<boolean> {
     return this.dataWriter.hasTable(tableName);
   }
 
   /**
    * 列出所有表
+   * @param _options Operation options, including common options
    * @returns Promise<string[]> 表名数组
    */
-  async listTables(): Promise<string[]> {
+  async listTables(_options?: any): Promise<string[]> {
     return this.metadataManager.allTables();
   }
 

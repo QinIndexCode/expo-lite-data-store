@@ -1,6 +1,8 @@
-// src/__tests__/config/ConfigManager.test.ts
-import { ConfigManager } from '../../core/config/ConfigManager';
-import defaultConfig from '../../defaultConfig';
+// src/core/config/__tests__/ConfigManager.test.ts
+// 配置管理器测试
+
+import { ConfigManager } from '../ConfigManager';
+import defaultConfig from '../../../defaultConfig';
 
 describe('ConfigManager', () => {
   let configManager: ConfigManager;

@@ -6,25 +6,7 @@
 import { CACHE } from '../constants';
 import { configManager } from '../config/ConfigManager';
 
-/**
- * Compression utility functions
- */
-const CompressionUtils = {
-  /**
-   * Simple compression algorithm for cache data
-   * Uses JSON.stringify without modifying the output (since modifying JSON format would break parsing)
-   */
-  compress(data: any): string {
-    return JSON.stringify(data);
-  },
 
-  /**
-   * Decompress data
-   */
-  decompress(compressed: string): any {
-    return JSON.parse(compressed);
-  },
-};
 
 /**
  * 缓存策略枚举
@@ -622,22 +604,7 @@ export class CacheManager {
       this.updateLFU(key);
     }
 
-    // Decompress data if it's compressed
-    if (item.compressed) {
-      try {
-        item.data = CompressionUtils.decompress(item.data);
-        item.compressed = false;
-      } catch (error) {
-        // If decompression fails, delete the invalid cache item
-        this.cache.delete(key);
-        // 从LRU或LFU中移除
-        if (this.config.strategy === CacheStrategy.LRU) {
-          this.removeFromLRU(key);
-        }
-        this.updateStats();
-        return undefined;
-      }
-    }
+
 
     return item;
   }
@@ -682,26 +649,11 @@ export class CacheManager {
       }
     }
 
-    // Apply compression if enabled in config
-    let processedData = data;
-    let compressed = false;
+    const processedData = data;
+    const compressed = false;
 
-    if (this.config.enableCompression) {
-      try {
-        // Compress the data if it's an object or array
-        if (typeof data === 'object' && data !== null) {
-          processedData = CompressionUtils.compress(data);
-          compressed = true;
-        }
-      } catch (error) {
-        // If compression fails, fall back to uncompressed data
-        processedData = data;
-        compressed = false;
-      }
-    }
-
-    // Calculate the final data size (compressed if applicable)
-    const finalDataSize = compressed ? this.calculateDataSize(processedData) : originalDataSize;
+    // Calculate the final data size
+    const finalDataSize = originalDataSize;
 
     const cacheItem: CacheItem = {
       data: processedData,

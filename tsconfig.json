@@ -37,7 +37,7 @@
     "incremental": true,
     "tsBuildInfoFile": ".tsbuildinfo"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts", "src/core/config/__tests__/ConfigManager.test.ts"],
   "exclude": [
     "**/__tests__/**",
     "**/*.test.ts",
