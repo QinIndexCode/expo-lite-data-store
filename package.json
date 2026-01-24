@@ -75,7 +75,7 @@
     "publish:force": "npm publish --ignore-scripts"
   },
   "dependencies": {
-    "@noble/ciphers": "^0.5.3",
+    "@noble/ciphers": "^0.6.0",
     "@noble/hashes": "^1.8.0",
     "bcryptjs": "^2.4.3",
     "expo-constants": "~18.0.12",
