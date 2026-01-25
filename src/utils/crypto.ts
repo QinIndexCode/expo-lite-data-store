@@ -662,36 +662,24 @@ const computeHMAC = (data: string, hmacKey: Uint8Array, algorithm?: 'SHA-256' | 
  * ```
  */
 export const encrypt = async (plainText: string, masterKey: string): Promise<string> => {
-  console.log('[DEBUG] encrypt() - plainText:', plainText);
-  console.log('[DEBUG] encrypt() - masterKey length:', masterKey.length);
   const startTime = Date.now();
   try {
-    console.log('[DEBUG] encrypt() - Starting encryption process');
     const saltBytes = getSecureRandomBytes(16);
-    console.log('[DEBUG] encrypt() - saltBytes generated');
     const ivBytes = getSecureRandomBytes(16);
-    console.log('[DEBUG] encrypt() - ivBytes generated');
 
-    console.log('[DEBUG] encrypt() - Calling deriveKey');
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltBytes);
-    console.log('[DEBUG] encrypt() - deriveKey completed');
 
     // 将 Uint8Array 转换为 Base64 字符串
     const saltStr = uint8ArrayToBase64(saltBytes);
     const ivStr = uint8ArrayToBase64(ivBytes);
 
     // 使用@noble/ciphers的AES-CTR模式加密
-    console.log('[DEBUG] encrypt() - Encoding plainText');
     const plainTextBytes = new TextEncoder().encode(plainText);
-    console.log('[DEBUG] encrypt() - Creating cipher');
     const cipher = ctr(aesKey, ivBytes);
-    console.log('[DEBUG] encrypt() - Encrypting data');
     const ciphertextBytes = cipher.encrypt(plainTextBytes);
-    console.log('[DEBUG] encrypt() - Converting to Base64');
     const ciphertextBase64 = bytesToBase64(ciphertextBytes);
 
     // HMAC 校验（模拟 GCM tag）- 使用智能算法选择
-    console.log('[DEBUG] encrypt() - Computing HMAC');
     const hmacBytes = computeHMAC(ciphertextBase64, hmacKey);
     const hmacBase64 = bytesToBase64(hmacBytes);
 
@@ -704,9 +692,7 @@ export const encrypt = async (plainText: string, masterKey: string): Promise<str
     };
 
     // 修正：使用 jsonToBase64 安全序列化和 Base64 编码
-    console.log('[DEBUG] encrypt() - Converting to Base64');
     const result = jsonToBase64(payload);
-    console.log('[DEBUG] encrypt() - Encryption completed, result length:', result.length);
     
     performanceMonitor.record({
       operation: 'encrypt',
@@ -718,9 +704,6 @@ export const encrypt = async (plainText: string, masterKey: string): Promise<str
     
     return result;
   } catch (error) {
-    console.log('[DEBUG] encrypt() - Error occurred:', error);
-    console.log('[DEBUG] encrypt() - Error message:', error instanceof Error ? error.message : String(error));
-    console.log('[DEBUG] encrypt() - Error stack:', error instanceof Error ? error.stack : 'No stack');
     performanceMonitor.record({
       operation: 'encrypt',
       duration: Date.now() - startTime,
@@ -1122,15 +1105,10 @@ export const encryptFields = async (
   data: Record<string, any>,
   fieldConfig: FieldEncryptionConfig
 ): Promise<Record<string, any>> => {
-  console.log('[DEBUG] encryptFields() - data:', data);
-  console.log('[DEBUG] encryptFields() - fieldConfig.fields:', fieldConfig.fields);
-  
   const result = { ...data };
 
   const promises = fieldConfig.fields.map(async field => {
-    console.log('[DEBUG] encryptFields() - processing field:', field, 'value:', result[field]);
     if (result[field] === undefined || result[field] === null) {
-      console.log('[DEBUG] encryptFields() - field is undefined or null, skipping');
       return;
     }
 
@@ -1139,13 +1117,10 @@ export const encryptFields = async (
         ? result[field] // 字符串直接加密（不加引号）
         : JSON.stringify(result[field]); // 对象、数字等才序列化
 
-    console.log('[DEBUG] encryptFields() - valueToEncrypt:', valueToEncrypt);
     result[field] = await encrypt(valueToEncrypt, fieldConfig.masterKey);
-    console.log('[DEBUG] encryptFields() - encrypted value:', result[field]);
   });
 
   await Promise.all(promises);
-  console.log('[DEBUG] encryptFields() - result:', result);
   return result;
 };
 /**
