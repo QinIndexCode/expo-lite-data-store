@@ -430,7 +430,10 @@ class SmartKeyCache {
   }
 }
 
-const keyCache = new SmartKeyCache(50, 30 * 60 * 1000);
+const keyCache = new SmartKeyCache(
+  configManager.getConfig().encryption.maxCacheSize || 100,
+  configManager.getConfig().encryption.cacheTimeout || 30 * 60 * 1000
+);
 
 /**
  * 获取密钥缓存统计信息
