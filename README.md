@@ -1,6 +1,9 @@
 # Expo Lite Data Store 🍃
 ----
-
+遇到了一些问题，在Expo Go中使用时，对于高密集型的计算任务（如迭代密钥派生），会导致应用响应缓慢甚至崩溃。
+如果使用 quick-crypto 库，则违背了项目的设计目标，即保持轻量、易配置、纯 TypeScript 编写。
+这个问题可能会导致本项目下一个版本的发布，因为当前版本的加密功能依赖于 PBKDF2 密钥派生，而 PBKDF2 是一个计算密集型操作。
+----
 [![npm version](https://img.shields.io/npm/v/expo-lite-data-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-data-store)
 [![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-lite-data-store)](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/LICENSE.txt)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)

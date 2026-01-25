@@ -33,7 +33,7 @@ export default {
     algorithm: 'AES-CTR' as const,
     keySize: 256,
     hmacAlgorithm: 'SHA-512' as const,
-    keyIterations: 5000,
+    keyIterations: 10000,
     encryptedFields: ['password', 'email', 'phone'],
     cacheTimeout: 30000,
     maxCacheSize: 50,
