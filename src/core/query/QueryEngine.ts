@@ -88,22 +88,22 @@ export class QueryEngine {
                 }
                 break;
               case '$gt':
-                if (typeof itemValue === 'number' && typeof opValue === 'number' && itemValue <= opValue) {
+                if (!(typeof itemValue === 'number' && typeof opValue === 'number') || itemValue <= opValue) {
                   matches = false;
                 }
                 break;
               case '$gte':
-                if (typeof itemValue === 'number' && typeof opValue === 'number' && itemValue < opValue) {
+                if (!(typeof itemValue === 'number' && typeof opValue === 'number') || itemValue < opValue) {
                   matches = false;
                 }
                 break;
               case '$lt':
-                if (typeof itemValue === 'number' && typeof opValue === 'number' && itemValue >= opValue) {
+                if (!(typeof itemValue === 'number' && typeof opValue === 'number') || itemValue >= opValue) {
                   matches = false;
                 }
                 break;
               case '$lte':
-                if (typeof itemValue === 'number' && typeof opValue === 'number' && itemValue > opValue) {
+                if (!(typeof itemValue === 'number' && typeof opValue === 'number') || itemValue > opValue) {
                   matches = false;
                 }
                 break;

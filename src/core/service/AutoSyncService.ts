@@ -127,18 +127,13 @@ export class AutoSyncService {
    * @param storageAdapter 存储适配器实例
    */
   private constructor(cacheService: CacheService, storageAdapter: FileSystemStorageAdapter) {
-    console.log('[DEBUG] AutoSyncService constructor called');
     this.cacheService = cacheService;
     this.storageAdapter = storageAdapter;
 
     // 初始化配置
-    console.log('[DEBUG] Calling _updateConfigFromGlobalConfig()');
     this._updateConfigFromGlobalConfig();
-    console.log('[DEBUG] Config after _updateConfigFromGlobalConfig:', this.config);
     // 验证初始配置
-    console.log('[DEBUG] Calling _validateConfig()');
     this._validateConfig(this.config);
-    console.log('[DEBUG] AutoSyncService constructor completed');
   }
 
   /**

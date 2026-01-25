@@ -75,6 +75,8 @@ export type CreateTableOptions = CommonOptions & {
   mode?: 'single' | 'chunked';
   /** List of fields that require encryption */
   encryptedFields?: string[];
+  /** Whether to use full-table encryption */
+  encryptFullTable?: boolean;
 };
 
 /**

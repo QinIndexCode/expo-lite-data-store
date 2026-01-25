@@ -7,7 +7,7 @@ import { configManager } from './config/ConfigManager';
 import storage from './adapter/FileSystemStorageAdapter';
 import { ErrorHandler } from '../utils/errorHandler';
 import { QueryEngine } from './query/QueryEngine';
-
+import logger from '../utils/logger';
 export class EncryptedStorageAdapter implements IStorageAdapter {
   private keyPromise: Promise<string> | null = null;
   private cachedData: Map<string, { data: Record<string, any>[]; timestamp: number }> = new Map();
@@ -292,12 +292,27 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         // 决定使用哪种加密策略
         // 优化：优先使用字段级加密，性能更好，默认情况下即使没有配置encryptedFields也使用字段级加密
         // 只有明确指定encryptFullTable为true时，才使用整表加密
+        // 优先考虑表元数据中的加密配置
+        const tableEncryptFullTable = tableMeta?.encryptFullTable || false;
+        const tableEncrypted = tableMeta?.encrypted || options?.encrypted || false;
+        
+        // DEBUG: 输出加密策略信息
+        logger.debug('[DEBUG] write() - tableName:', tableName);
+        logger.debug('[DEBUG] write() - tableMeta:', tableMeta);
+        logger.debug('[DEBUG] write() - options:', options);
+        logger.debug('[DEBUG] write() - tableEncrypted:', tableEncrypted);
+        logger.debug('[DEBUG] write() - tableEncryptFullTable:', tableEncryptFullTable);  
+        logger.debug('[DEBUG] write() - finalData length:', finalData.length);
+        
         const useFieldLevelEncryption = 
-          options?.encryptFullTable !== true && // 只有明确指定整表加密时，才不使用字段级加密
-          (options?.encryptFullTable !== false || // 或者没有明确禁用字段级加密
+          (options?.encryptFullTable !== true && !tableEncryptFullTable) && // 只有明确指定整表加密时，才不使用字段级加密
+          (tableEncrypted || // 如果表是加密的，默认使用字段级加密
+           options?.encryptFullTable !== false || // 或者没有明确禁用字段级加密
            tableMeta?.encryptedFields?.length > 0 || // 或者表配置了加密字段
            config.encryption.encryptedFields && config.encryption.encryptedFields.length > 0 || // 或者全局配置了加密字段
            !tableMeta?.encryptedFields); // 或者表没有配置加密字段（默认使用字段级加密）
+        
+        logger.debug('[DEBUG] write() - useFieldLevelEncryption:', useFieldLevelEncryption);
         
         if (useFieldLevelEncryption) {
           // 字段级加密模式 - 性能更好，支持增量写入
@@ -306,18 +321,22 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
             ? tableMeta.encryptedFields 
             : (config.encryption.encryptedFields || []);
           
+          logger.debug('[DEBUG] write() - encryptedFields:', encryptedFields);
+          
           // 如果没有指定加密字段，仍然使用字段级加密（加密所有字段）
           // 这样可以获得更好的性能，同时保持数据安全
           if (encryptedFields.length > 0) {
             // 有明确指定加密字段，只加密指定字段
             if (config.encryption.useBulkOperations && finalData.length > 1) {
               // 批量字段级加密 - 只加密新增数据
+              logger.debug('[DEBUG] write() - Using bulk field-level encryption');
               encryptedData = await encryptFieldsBulk(finalData, { 
                 fields: encryptedFields, 
                 masterKey: key,
               });
             } else {
               // 单次字段级加密 - 只加密新增数据
+              logger.debug('[DEBUG] write() - Using single field-level encryption');
               const encryptionPromises = finalData.map(item =>
                 encryptFields(item, {
                   fields: encryptedFields,
@@ -332,12 +351,14 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
             // 这样可以获得比整表加密更好的性能
             if (config.encryption.useBulkOperations && finalData.length > 1) {
               // 批量加密所有字段
+              logger.debug('[DEBUG] write() - Using bulk encryption for all fields');
               encryptedData = await encryptFieldsBulk(finalData, { 
                 fields: Object.keys(finalData[0] || {}), // 加密所有字段
                 masterKey: key,
               });
             } else {
               // 单次加密所有字段
+              logger.debug('[DEBUG] write() - Using single encryption for all fields');
               const encryptionPromises = finalData.map(item =>
                 encryptFields(item, {
                   fields: Object.keys(item), // 加密所有字段
@@ -348,11 +369,16 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
             }
           }
           
+          logger.debug('[DEBUG] write() - encryptedData length:', encryptedData.length);
+          
           // 字段级加密支持直接append，不需要重新加密整个表
-          return storage.write(tableName, encryptedData, { ...options });
+          // 移除encrypted选项，因为数据已经被加密了，避免重复加密
+          const { encrypted, requireAuthOnAccess, ...writeOptions } = options || {};
+          logger.debug('[DEBUG] write() - Calling storage.write with writeOptions:', writeOptions);
+          return storage.write(tableName, encryptedData, writeOptions);
         } else {
           // 整表加密模式 - 仅在明确要求时使用
-          const shouldEncryptFullTable = options?.encryptFullTable === true;
+          const shouldEncryptFullTable = options?.encryptFullTable === true || tableMeta?.encryptFullTable || false;
           if (shouldEncryptFullTable) {
             // 检查写入模式
             if (options?.mode === 'append') {
@@ -405,10 +431,42 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
               const cacheKey = `__enc_full_table_${tableName}`;
               (this.cachedData as any).delete(cacheKey);
             }
+          } else {
+            // 未明确要求整表加密，检查表是否需要加密
+            if (tableEncrypted || options?.encrypted) {
+              // 表是加密的，使用字段级加密（默认行为）
+              if (config.encryption.useBulkOperations && finalData.length > 1) {
+                // 批量字段级加密 - 只加密新增数据
+                encryptedData = await encryptFieldsBulk(finalData, { 
+                  fields: Object.keys(finalData[0] || {}), // 加密所有字段
+                  masterKey: key,
+                });
+              } else {
+                // 单次字段级加密 - 只加密新增数据
+                const encryptionPromises = finalData.map(item =>
+                  encryptFields(item, {
+                    fields: Object.keys(item), // 加密所有字段
+                    masterKey: key,
+                  })
+                );
+                encryptedData = await Promise.all(encryptionPromises);
+              }
+            }
           }
         }
 
-        return storage.write(tableName, encryptedData, { ...options, mode: options?.mode || 'overwrite' });
+        // 如果encryptedData为空且表是加密的，说明加密逻辑没有被正确执行
+        // 这不应该发生，如果发生应该抛出错误
+        if (encryptedData.length === 0) {
+          if (tableEncrypted || options?.encrypted) {
+            throw new Error('Encryption logic was not executed for encrypted table');
+          }
+          encryptedData = finalData;
+        }
+
+        // 移除encrypted和requireAuthOnAccess选项，因为数据已经被加密了，避免重复加密
+        const { encrypted: encOpt, requireAuthOnAccess: reqAuth, ...finalWriteOptions } = options || {};
+        return storage.write(tableName, encryptedData, { ...finalWriteOptions, mode: options?.mode });
       },
       cause =>
         ErrorHandler.createGeneralError(

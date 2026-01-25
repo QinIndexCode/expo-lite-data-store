@@ -46,9 +46,16 @@ export const createTable = async (
   tableName: string,
   options: CreateTableOptions = {}
 ): Promise<void> => {
-  const { encrypted = false, requireAuthOnAccess = false, ...tableOptions } = options ?? {};
+  const { encrypted = false, requireAuthOnAccess = false, encryptedFields = [], encryptFullTable = false, ...tableOptions } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.createTable(tableName, tableOptions);
+  // 将加密配置传递给适配器，确保它们被保存到表元数据中
+  return adapter.createTable(tableName, { 
+    ...tableOptions, 
+    encrypted, 
+    requireAuthOnAccess, 
+    encryptedFields, 
+    encryptFullTable 
+  });
 };
 
 /**
@@ -156,21 +163,22 @@ export const overwrite = async (
 };
 
 /**
- * Read data (alias for findMany)
+ * Read all data from table
  * 
- * 功能定位：findMany的别名，保持向后兼容
+ * 功能定位：直接从表中读取所有数据，不处理查询条件、排序和分页
  * 
  * 使用场景：
- *   - 向后兼容的代码迁移
- *   - 简单查询场景
+ *   - 需要获取表中所有数据的场景
+ *   - 简单的数据读取操作
+ *   - 作为底层API被其他查询方法调用
+ *   - 对性能要求较高的场景
  * 
  * 与findMany的区别：
- *   - read：向后兼容别名，参数名为filter
- *   - findMany：推荐使用的接口，参数名为where
- *   - 两者功能完全相同
+ *   - read：直接调用底层存储读取数据，性能更高，不支持查询条件、排序和分页
+ *   - findMany：先读取所有数据，然后在内存中处理查询条件、排序和分页，功能更全面但性能相对较低
  * 
  * @param tableName Table name
- * @param options Read options, including filter (alias for where), skip, limit, sortBy, order, sortAlgorithm, and common options
+ * @param options Read options, including common options
  * @returns Promise<Record<string, any>[]> Array of records
  */
 export const read = async (
@@ -178,14 +186,18 @@ export const read = async (
   options: ReadOptions = {}
 ): Promise<Record<string, any>[]> => {
   // 如果requireAuthOnAccess为true，则默认encrypted为true
-  const { requireAuthOnAccess = false, encrypted = requireAuthOnAccess || false } = options ?? {};
+  const { requireAuthOnAccess = false, encrypted = requireAuthOnAccess || false, ...readOptions } = options ?? {};
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   
-  // 将filter参数转换为where参数，以兼容findMany的参数命名
-  const { filter, ...otherOptions } = options ?? {};
-  const finalReadOptions = { where: filter, ...otherOptions } as any;
+  // 移除查询相关参数，只传递读取相关选项
+  delete readOptions.filter;
+  delete readOptions.skip;
+  delete readOptions.limit;
+  delete readOptions.sortBy;
+  delete readOptions.order;
+  delete readOptions.sortAlgorithm;
   
-  return adapter.read(tableName, finalReadOptions);
+  return adapter.read(tableName, readOptions);
 };
 
 /**

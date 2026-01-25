@@ -4,16 +4,9 @@
 
 import defaultConfig from '../../defaultConfig';
 import { LiteStoreConfig, DeepPartial } from '../../types/config';  
-
+import logger from '../../utils/logger';
 // 内联基本logger功能，避免Metro bundler导入问题
-const logger = {
-  debug: (message: string, ...args: any[]) => console.debug(`DEBUG ${message}`, ...args),
-  info: (message: string, ...args: any[]) => console.log(`INFO ${message}`, ...args),
-  warn: (message: string, ...args: any[]) => console.warn(`WARN ${message}`, ...args),
-  error: (message: string, ...args: any[]) => console.error(`ERROR ${message}`, ...args),
-  success: (message: string, ...args: any[]) => console.log(`SUCCESS ${message}`, ...args),
-  highlight: (message: string, ...args: any[]) => console.log(`HIGHLIGHT ${message}`, ...args)
-};
+
 
 /**
  * 配置管理器类
@@ -141,21 +134,17 @@ export class ConfigManager {
         // React Native/Expo环境：
         // 1. 首先尝试从app.json读取配置（推荐方式）
         try {
-          logger.debug('Trying to load configuration from app.json...');
-          
           // 在Expo环境中，我们可以直接从global.__expoConfig获取配置
           // 这是一个更可靠的方式，因为它直接访问Expo的内部配置
           if (typeof global !== 'undefined') {
             const globalAny = global as any;
             
             if (globalAny.__expoConfig) {
-              logger.debug('Using global.__expoConfig for configuration');
               const expoConfig = globalAny.__expoConfig;
-              logger.debug('global.__expoConfig:', expoConfig);
               
               if (expoConfig.extra?.liteStore && typeof expoConfig.extra.liteStore === 'object') {
                 const liteStoreConfig = expoConfig.extra.liteStore;
-                logger.info('✅ Configuration loaded from global.__expoConfig');
+                logger.info('✅ Configuration loaded from app.json via expo-constants');
                 return this.mergeConfig(baseConfig, liteStoreConfig);
               }
             }
@@ -164,91 +153,62 @@ export class ConfigManager {
           // 2. 尝试使用expo-constants获取配置
           try {
             let Constants = require('expo-constants');
-            logger.debug('Successfully imported expo-constants');
-            
-            // 检查Constants的实际结构
-            logger.debug('Constants type:', typeof Constants);
-            logger.debug('Constants keys:', Constants ? Object.keys(Constants) : []);
             
             // 如果Constants是一个模块对象，尝试获取其默认导出
             if (typeof Constants === 'object' && Constants && 'default' in Constants && typeof Constants.default === 'object') {
-              logger.debug('Using Constants.default as the actual constants object');
               Constants = Constants.default;
-              logger.debug('Constants.default keys:', Object.keys(Constants));
             }
             
             let expoConfig: null | { extra?: { liteStore?: any } } = null;
             
-            // 尝试多种方式获取配置
-            logger.debug('Checking Constants.manifest:', Constants.manifest ? 'exists' : 'not exists');
-            logger.debug('Checking Constants.expoConfig:', Constants.expoConfig ? 'exists' : 'not exists');
-            logger.debug('Checking typeof Constants.getConfig:', typeof Constants.getConfig);
-            
             // 方式1: 使用getConfig()方法（最可靠的方式）
             if (typeof Constants.getConfig === 'function') {
-              logger.debug('Using Constants.getConfig() method');
               try {
                 expoConfig = Constants.getConfig();
-                logger.debug('Result from getConfig():', expoConfig);
               } catch (getConfigError) {
-                logger.debug('getConfig() failed:', getConfigError);
+                // 忽略getConfig()错误
               }
             }
             
             // 方式2: 直接使用Constants的属性
             if (!expoConfig && Constants.expoConfig) {
               // Expo SDK 49及以上
-              logger.debug('Using Constants.expoConfig property');
               expoConfig = Constants.expoConfig;
             } else if (!expoConfig && Constants.manifest) {
               // Expo SDK 48及以下
-              logger.debug('Using Constants.manifest property');
               expoConfig = Constants.manifest;
             }
             
             // 方式3: 尝试访问extra属性直接从Constants获取
             if (!expoConfig && Constants.extra) {
-              logger.debug('Using Constants.extra directly');
               // 直接从Constants.extra获取liteStore配置
               const liteStoreConfig = Constants.extra?.liteStore;
-              logger.debug('LiteStore config from Constants.extra:', liteStoreConfig);
               if (liteStoreConfig && typeof liteStoreConfig === 'object') {
-                logger.info('✅ Configuration loaded from Constants.extra');
+                logger.info('✅ Configuration loaded from app.json via expo-constants');
                 return this.mergeConfig(baseConfig, liteStoreConfig);
               }
             }
             
             if (expoConfig) {
-              logger.debug('Expo config found, checking extra.liteStore');
-              logger.debug('Full expoConfig:', expoConfig);
               // 从app.json的extra字段中读取配置
               const liteStoreConfig = expoConfig.extra?.liteStore;
-              logger.debug('LiteStore config from app.json:', liteStoreConfig);
               if (liteStoreConfig && typeof liteStoreConfig === 'object') {
                 logger.info('✅ Configuration loaded from app.json via expo-constants');
                 return this.mergeConfig(baseConfig, liteStoreConfig);
-              } else {
-                logger.debug('No liteStore config found in app.json extra');
               }
-            } else {
-              logger.debug('No expo config found through expo-constants');
             }
           } catch (expoConstantsError) {
-            logger.debug('expo-constants failed:', expoConstantsError);
+            // 忽略expo-constants加载错误
           }
           
           // 3. 尝试直接从global对象获取配置（备选方案）
           if (typeof global !== 'undefined') {
             const globalAny = global as any;
             
-            logger.debug('Checking global.expo:', globalAny.expo ? 'exists' : 'not exists');
-            logger.debug('Checking global.liteStoreConfig:', globalAny.liteStoreConfig ? 'exists' : 'not exists');
-            
             if (globalAny.expo && globalAny.expo.extra?.liteStore) {
-              logger.debug('Found expo config in global.expo');
               const liteStoreConfig = globalAny.expo.extra?.liteStore;
               if (liteStoreConfig && typeof liteStoreConfig === 'object') {
-                logger.info('✅ Configuration loaded from global.expo.extra');
+                logger.info('✅ Configuration loaded from app.json via expo-constants');
                 return this.mergeConfig(baseConfig, liteStoreConfig);
               }
             }
@@ -263,12 +223,11 @@ export class ConfigManager {
             }
           }
         } catch (error) {
-          logger.error('Failed to load configuration from app.json:', error);
+          // 忽略配置加载错误，使用默认配置
         }
       }
     } catch (error) {
       // 忽略所有配置文件加载错误，使用默认配置
-      logger.debug('No custom config file found, using default config');
     }
 
     return baseConfig;

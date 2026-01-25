@@ -222,6 +222,8 @@ export class DataWriter {
             isHighRisk: options.isHighRisk || false,
             highRiskFields: options.highRiskFields || [],
             encryptedFields: options.encryptedFields || [],
+            encrypted: options.encrypted || false,
+            encryptFullTable: options.encryptFullTable || false,
           });
         } finally {
           // 释放锁，允许后续操作执行

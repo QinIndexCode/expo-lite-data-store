@@ -47,6 +47,8 @@ export interface TableSchema {
   highRiskFields?: string[]; // 高风险字段列表
 
   encryptedFields?: string[]; // 需要加密的字段列表
+  encrypted?: boolean; // 是否为加密表
+  encryptFullTable?: boolean; // 是否使用整表加密
 }
 
 /**

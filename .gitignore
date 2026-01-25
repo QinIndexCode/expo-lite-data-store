@@ -45,3 +45,5 @@ app-example
 /coverage
 
 package-lock.json
+.trae
+.vscode
