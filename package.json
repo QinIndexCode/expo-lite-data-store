@@ -81,7 +81,8 @@
     "expo-constants": "~18.0.12",
     "expo-crypto": "~15.0.8",
     "expo-file-system": "~18.1.11",
-    "expo-secure-store": "~15.0.8"
+    "expo-secure-store": "~15.0.8",
+    "react-native-quick-crypto": "^1.0.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

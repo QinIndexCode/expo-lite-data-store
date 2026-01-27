@@ -1,8 +1,7 @@
 # Expo Lite Data Store 🍃
 
 
-***遇到了一些问题，在Expo Go中使用时，对于高密集型的计算任务（如迭代密钥派生），会导致应用响应缓慢甚至崩溃。***
-***如果使用 quick-crypto 库，则违背了项目的设计目标，即保持轻量、易配置、纯 TypeScript 编写。***
+在独立打包（APK/IPA）中自动启用 react-native-quick-crypto 原生加速以提升 KDF 性能；在 Expo Go 开发环境中自动回退到 JavaScript 实现，并在首次调用时打印一次开发提示信息。
 
 ----
 [![npm version](https://img.shields.io/npm/v/expo-lite-data-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-data-store)
@@ -19,9 +18,9 @@
 
 **Lightweight, easy-to-configure, pure TypeScript Expo local database**
 
-专为 React Native + Expo 项目设计，无需任何原生依赖。提供完整的 CRUD 操作、事务支持、索引优化和智能排序功能。
+专为 React Native + Expo 项目设计，默认纯 TypeScript 无原生依赖；在打包后的独立应用中自动启用 react-native-quick-crypto 原生加速（Expo Go 中自动回退到 JavaScript 实现）。提供完整的 CRUD 操作、事务支持、索引优化和智能排序功能。
 
-Designed specifically for React Native + Expo projects, with no native dependencies. Provides complete CRUD operations, transaction support, index optimization, and intelligent sorting features.
+Designed specifically for React Native + Expo projects: TypeScript-only by default; enables native acceleration via react-native-quick-crypto in standalone builds (falls back to JavaScript in Expo Go). Provides complete CRUD operations, transaction support, index optimization, and intelligent sorting features.
 
 ## 📃 文档导航 / Documentation Navigation
 

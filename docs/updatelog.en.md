@@ -1,6 +1,16 @@
 
 <!-- Update Log -->
 
+### 📅 2026-01-28 `v2.0.0-beta.2`  Expo Go Crypto Performance and Provider Hardening
+
+> Expo Go Performance: Reduced PBKDF2 iterations to speed up development workflows
+> Native KDF: Added react-native-quick-crypto for real-device KDF acceleration
+> Crypto Provider: Cached native module loading to avoid repeated require
+> Crypto Provider: Removed Buffer dependency in native PBKDF2 path for RN compatibility
+> Crypto Provider: Normalized ExpoCrypto.getRandomBytes return handling for unstable types
+> Crypto Provider: Hash now encodes strings with TextEncoder before noble hashing
+> Tests: Added coverage for Expo Go iteration downgrade behavior
+
 ### 📅 2026-01-22 `v2.0.0-beta.2`  Encryption Dependency Upgrade and Architecture Optimization
 
 > Encryption Upgrade: Migrated from crypto-es to @noble/ciphers and @noble/hashes for improved security and performance

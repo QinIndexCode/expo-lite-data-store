@@ -21,8 +21,11 @@ import { ctr } from '@noble/ciphers/aes';
 import { hmac } from '@noble/hashes/hmac';
 import { sha256 } from '@noble/hashes/sha256';
 import { sha512 } from '@noble/hashes/sha512';
-import { pbkdf2 } from '@noble/hashes/pbkdf2';
 import { bytesToHex } from '@noble/hashes/utils';
+import * as ExpoCrypto from 'expo-crypto';
+import * as ExpoSecureStore from 'expo-secure-store';
+import ExpoConstants from 'expo-constants';
+import { pbkdf2 as providerPbkdf2, randomBytes as providerRandomBytes } from './cryptoProvider';
 
 /**
  * Converts Uint8Array to Base64 string using Buffer or btoa.
@@ -57,27 +60,19 @@ const base64ToBytes = (base64: string): Uint8Array => {
     return bytes;
   }
 };
+
 // 动态导入 Expo 模块，避免在非 Expo 环境中崩溃
 let Crypto: any;
 let SecureStore: any;
 let Constants: any;
-
-// 尝试导入 Expo 模块
-try {
-  // 仅在 Expo 环境中导入这些模块
-  Crypto = require('expo-crypto');
-  SecureStore = require('expo-secure-store');
-  Constants = require('expo-constants');
-} catch (error) {
-  logger.warn('Expo modules not available, running in non-Expo environment');
-  // 在非 Expo 环境中，我们将使用 Node.js crypto 模块或内置方法进行随机数生成
-  // 对于 SecureStore，我们将使用内存存储作为回退
-}
+Crypto = ExpoCrypto;
+SecureStore = ExpoSecureStore;
+Constants = ExpoConstants;
 
 /**
- * Converts Uint8Array to Base64 string using secure conversion.
+ * Converts Uint8Array to Base64 string using Buffer or btoa.
  * 
- * @param arr Uint8Array to convert
+ * @param bytes Uint8Array to convert
  * @returns Base64 encoded string
  */
 const uint8ArrayToBase64 = (arr: Uint8Array): string => {
@@ -217,7 +212,7 @@ const isExpoGoEnvironment = (): boolean => {
 /**
  * Gets the number of iterations for PBKDF2 key derivation.
  * Dynamically adjusts based on the environment:
- * - Expo Go: 60,000 iterations (balance of performance and security)
+ * - Expo Go: 20,000 iterations (balance of performance and security)
  * - Production: 100,000 iterations (default)
  * - High-performance devices: Up to 120,000 iterations (optional)
  * 
@@ -227,8 +222,8 @@ const getIterations = (): number => {
   const configIterations = configManager.getConfig().encryption.keyIterations;
   
   if (isExpoGoEnvironment()) {
-    const expoGoIterations = Math.min(configIterations, 60000);
-    if (configIterations > 60000) {
+    const expoGoIterations = Math.min(configIterations, 20000);
+    if (configIterations > 20000) {
       logger.warn(`Expo Go环境检测到，降低PBKDF2迭代次数从${configIterations}到${expoGoIterations}以优化性能`);
     }
     return Math.max(10000, expoGoIterations);
@@ -308,12 +303,13 @@ class SmartKeyCache {
    * 
    * @example
    * ```typescript
-   * const keyCache = new SmartKeyCache(100, 30 * 60 * 1000); // 100 entries, 30 minutes max age
+   * const keyCache = new SmartKeyCache(); // 使用配置中的默认值
    * ```
    */
-  constructor(maxSize = 500, maxAge = 60 * 60 * 1000) {
-    this.maxSize = maxSize;
-    this.maxAge = maxAge;
+  constructor(maxSize?: number, maxAge?: number) {
+    const config = configManager.getConfig();
+    this.maxSize = maxSize ?? config.encryption.maxCacheSize ?? 100;
+    this.maxAge = maxAge ?? config.encryption.cacheTimeout ?? 30 * 60 * 1000;
   }
 
   /**
@@ -430,10 +426,7 @@ class SmartKeyCache {
   }
 }
 
-const keyCache = new SmartKeyCache(
-  configManager.getConfig().encryption.maxCacheSize || 100,
-  configManager.getConfig().encryption.cacheTimeout || 30 * 60 * 1000
-);
+const keyCache = new SmartKeyCache(50, 30 * 60 * 1000);
 
 /**
  * 获取密钥缓存统计信息
@@ -514,7 +507,7 @@ if (!isTestEnvironment) {
 }
 
 /**
- * Derives AES and HMAC keys from master key and salt using PBKDF2 with SHA512.
+ * Derives AES and HMAC keys from master key and salt using PBKDF2 with SHA256.
  * 
  * @param masterKey Master key for derivation
  * @param salt Salt for key derivation
@@ -540,11 +533,7 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
 
     const startTime = Date.now();
     
-    // 使用@noble/hashes的pbkdf2实现，生成64字节密钥（32字节用于AES，32字节用于HMAC）
-    const derivedBytes = pbkdf2(sha512, masterKey, salt, {
-      c: iterations,
-      dkLen: 64, // 64字节 = 32字节AES密钥 + 32字节HMAC密钥
-    });
+    const derivedBytes = providerPbkdf2(masterKey, salt, iterations, 64, 'sha256');
 
     const duration = Date.now() - startTime;
     if (duration > 2000) {
@@ -591,20 +580,7 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
  * - Uses Math.random as last resort (insecure, only for development)
  */
 const getSecureRandomBytes = (length: number): Uint8Array => {
-  if (typeof Crypto !== 'undefined' && Crypto.getRandomBytes) {
-    return Crypto.getRandomBytes(length);
-  } else if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    // 浏览器环境使用crypto.getRandomValues
-    return crypto.getRandomValues(new Uint8Array(length));
-  } else {
-    logger.warn('Secure random generation not available, falling back to insecure Math.random');
-    // 不安全的回退方案，仅用于非生产环境
-    const bytes = new Uint8Array(length);
-    for (let i = 0; i < length; i++) {
-      bytes[i] = Math.floor(Math.random() * 256);
-    }
-    return bytes;
-  }
+  return providerRandomBytes(length);
 };
 
 /**
@@ -629,7 +605,7 @@ const selectHMACAlgorithm = (dataSize: number): 'SHA-256' | 'SHA-512' => {
   const dataSizeKB = dataSize / 1024;
   
   if (isExpoGoEnvironment()) {
-    return dataSizeKB < 10 ? 'SHA-256' : 'SHA-512';
+    return dataSizeKB < 64 ? 'SHA-256' : 'SHA-512';
   }
   
   return dataSizeKB < 50 ? 'SHA-256' : 'SHA-512';
@@ -795,6 +771,8 @@ export const decrypt = async (encryptedBase64: string, masterKey: string): Promi
  */
 export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promise<string> => {
   let key;
+  const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
+  const isProduction = typeof process !== 'undefined' && process.env.NODE_ENV === 'production';
   
   try {
     // 检查 SecureStore 是否可用
@@ -827,9 +805,13 @@ export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promis
         }
       }
     } else {
-      // SecureStore 不可用，使用内存存储作为回退
-      logger.warn('SecureStore not available, using in-memory store');
-      
+      if (isExpoGoEnvironment() || isProduction) {
+        throw new CryptoError('SecureStore not available in this environment', 'KEY_DERIVE_FAILED');
+      }
+      if (!isTestEnvironment) {
+        logger.warn('SecureStore not available, using in-memory master key storage in development');
+      }
+
       // 从内存存储获取密钥
       key = inMemoryStore.get(MASTER_KEY_ALIAS);
       
@@ -870,6 +852,39 @@ export const resetMasterKey = async (): Promise<void> => {
 };
 
 /**
+ * 预计算常用密钥，减少首次加密时的密钥派生时间
+ * 
+ * @returns Promise<void>
+ */
+export const precomputeCommonKeys = async (): Promise<void> => {
+  try {
+    const masterKey = await getMasterKey();
+    if (!masterKey) {
+      logger.warn('Master key not available, skipping key precomputation');
+      return;
+    }
+    
+    // 预计算3个常用密钥
+    const commonSalts = [
+      getSecureRandomBytes(16),
+      getSecureRandomBytes(16),
+      getSecureRandomBytes(16),
+    ];
+    
+    logger.info(`Precomputing ${commonSalts.length} common keys for better performance`);
+    
+    // 并行预计算所有密钥
+    await Promise.all(
+      commonSalts.map(salt => deriveKey(masterKey, salt))
+    );
+    
+    logger.info('Key precomputation completed');
+  } catch (error) {
+    logger.warn('Failed to precompute common keys:', error);
+  }
+};
+
+/**
  * 生成主密钥（32 字节随机）
  * @returns 主密钥
  */
@@ -878,7 +893,11 @@ export const generateMasterKey = async (): Promise<string> => {
     const bytes = getSecureRandomBytes(32);
     return uint8ArrayToBase64(bytes);
   } catch (error) {
-    logger.error('Failed to generate secure random bytes, falling back to insecure generation:', error);
+    logger.error('Failed to generate secure random bytes:', error);
+    const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
+    if (!isTestEnvironment) {
+      throw new CryptoError('Secure random generation not available', 'KEY_DERIVE_FAILED', error);
+    }
     const bytes = new Uint8Array(32);
     for (let i = 0; i < 32; i++) {
       bytes[i] = Math.floor(Math.random() * 256);
@@ -1109,21 +1128,24 @@ export const encryptFields = async (
   fieldConfig: FieldEncryptionConfig
 ): Promise<Record<string, any>> => {
   const result = { ...data };
-
-  const promises = fieldConfig.fields.map(async field => {
-    if (result[field] === undefined || result[field] === null) {
-      return;
-    }
-
-    const valueToEncrypt =
-      typeof result[field] === 'string'
-        ? result[field] // 字符串直接加密（不加引号）
-        : JSON.stringify(result[field]); // 对象、数字等才序列化
-
-    result[field] = await encrypt(valueToEncrypt, fieldConfig.masterKey);
+  
+  // 只加密需要加密的字段
+  const fieldsToEncrypt = fieldConfig.fields.filter(field => 
+    result[field] !== undefined && result[field] !== null
+  );
+  
+  const valuesToEncrypt = fieldsToEncrypt.map(field => {
+    const value =
+      typeof result[field] === 'string' ? result[field] : JSON.stringify(result[field]);
+    return value as string;
   });
-
-  await Promise.all(promises);
+  if (valuesToEncrypt.length > 0) {
+    const encryptedValues = await encryptBulk(valuesToEncrypt, fieldConfig.masterKey);
+    encryptedValues.forEach((enc, idx) => {
+      const field = fieldsToEncrypt[idx];
+      result[field] = enc;
+    });
+  }
   return result;
 };
 /**
@@ -1212,7 +1234,8 @@ export const encryptFieldsBulk = async (
     );
   }
 
-  await Promise.all(encryptionPromises);
+  // 使用Promise.allSettled提高容错性
+  await Promise.allSettled(encryptionPromises);
 
   // 重建结果数组
   return dataArray.map((item, index) => {

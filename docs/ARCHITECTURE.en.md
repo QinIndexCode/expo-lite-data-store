@@ -219,7 +219,7 @@ Expo Lite Data Store adopts a layered architecture design, mainly divided into t
 
 #### 3.4.1 Encryption Utility Module
 
-**Responsibility**: Provides data encryption and decryption functionality, implemented based on @noble/ciphers and @noble/hashes.
+**Responsibility**: Provides data encryption and decryption functionality based on @noble/ciphers / @noble/hashes, and automatically enables react-native-quick-crypto native acceleration in standalone builds.
 
 **Main Functions**:
 
@@ -228,7 +228,8 @@ Expo Lite Data Store adopts a layered architecture design, mainly divided into t
 - **Smart Key Cache**: Key cache with LRU cleanup strategy for improved performance
 - **Bulk Encryption/Decryption**: Supports batch processing for improved efficiency
 - **Field-Level Encryption**: Supports selective field encryption
-- **Expo Environment Compatible**: Uses expo-crypto for random number generation
+- **Expo Environment Compatible**: Falls back to JavaScript in Expo Go and uses expo-crypto for random number generation
+- **Native Acceleration**: Automatically enables react-native-quick-crypto for PBKDF2, random bytes, and hashing in standalone APK/IPA
 - **Multi-Platform Support**: Compatible with React Native, Expo, and Web environments
 
 #### 3.4.2 KeyManager

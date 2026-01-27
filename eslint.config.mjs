@@ -14,6 +14,7 @@ export default tseslint.config(
       'jest.*.js',
       'liteStore.config.ts',
       'test-install/**',
+      'NexSyncNew/**',
     ],
   },
 

@@ -17,7 +17,7 @@ English: [English Document](https://github.com/QinIndexCode/expo-lite-data-store
 
 **轻量、易配置、纯 TypeScript 编写的 Expo 本地数据库**
 
-专为 React Native + Expo 项目设计，无需任何 native 依赖。提供完整的 CRUD 操作、事务支持、索引优化和智能排序功能。
+专为 React Native + Expo 项目设计，默认纯 TypeScript 无需任何 native 依赖；在打包后的独立应用中自动启用 react-native-quick-crypto 原生加速以提升 KDF 等重计算性能（Expo Go 中自动回退到 JavaScript 实现，并在开发模式下打印一次提示信息）。提供完整的 CRUD 操作、事务支持、索引优化和智能排序功能。
 
 ## ✨ 核心特性
 

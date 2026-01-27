@@ -219,7 +219,7 @@ Expo Lite Data Store 采用分层架构设计，主要分为以下几层：
 
 #### 3.4.1 加密工具模块
 
-**职责**：提供数据加密和解密功能，基于 @noble/ciphers 和 @noble/hashes 实现。
+**职责**：提供数据加密和解密功能，基于 @noble/ciphers / @noble/hashes，并在独立打包环境下自动接入 react-native-quick-crypto 原生加速。
 
 **主要功能**：
 
@@ -228,7 +228,8 @@ Expo Lite Data Store 采用分层架构设计，主要分为以下几层：
 - **智能密钥缓存**：带 LRU 清理策略的密钥缓存，提高性能
 - **批量加密解密**：支持批量处理，提高效率
 - **字段级加密**：支持选择性字段加密
-- **Expo 环境兼容**：使用 expo-crypto 进行随机数生成
+- **Expo 环境兼容**：Expo Go 中回退到 JavaScript 实现并使用 expo-crypto 随机数生成
+- **原生加速**：独立 APK/IPA 中自动启用 react-native-quick-crypto 的 PBKDF2、随机数与哈希
 - **多平台支持**：兼容 React Native、Expo 和 Web 环境
 
 #### 3.4.2 KeyManager

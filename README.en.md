@@ -17,7 +17,7 @@ English: [English Document](./README.en.md)
 
 **Lightweight, easy-configuration, pure TypeScript Expo local database**
 
-Designed specifically for React Native + Expo projects, with no native dependencies. Provides complete CRUD operations, transaction support, index optimization, and intelligent sorting features.
+Designed specifically for React Native + Expo projects: TypeScript-only by default; in standalone APK/IPA builds it automatically enables native acceleration via react-native-quick-crypto to boost KDF and hashing performance (falls back to JavaScript in Expo Go and prints a one-time developer notice). Provides complete CRUD operations, transaction support, index optimization, and intelligent sorting features.
 
 ## ✨ Core Features
 
