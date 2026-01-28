@@ -15,35 +15,19 @@ Expo Lite Data Store adopts a layered architecture design, mainly divided into t
 
 | Layer             | Responsibility                                             | Main Components                                                 |
 | ----------------- | ---------------------------------------------------------- | --------------------------------------------------------------- |
-| API Layer         | Provides API routing and request handling                  | ApiRouter, ApiWrapper, ErrorHandler, RateLimiter, RestController, ValidationWrapper |
 | Interface Layer   | Provides unified API interface externally                  | FileSystemStorageAdapter, EncryptedStorageAdapter, StorageAdapterFactory |
 | Data Access Layer | Handles data read/write operations                         | DataReader, DataWriter, QueryEngine                             |
-| Cache Layer       | Provides caching mechanism to improve query performance    | CacheManager, CacheController, CacheService, CacheCoordinator   |
+| Cache Layer       | Provides caching mechanism to improve query performance    | CacheManager                                                    |
 | Index Layer       | Provides indexing functionality to accelerate data queries | IndexManager                                                    |
-| Encryption Layer  | Provides data encryption and key management                | KeyManager, EncryptedStorageAdapter                             |
-| Storage Layer     | Handles physical storage of data                           | FileHandlerFactory, ChunkedFileHandler, SingleFileHandler, FileHandlerBase, FileInfoCache |
+| Encryption Layer  | Provides data encryption and key management                | EncryptedStorageAdapter                                         |
+| Storage Layer     | Handles physical storage of data                           | ChunkedFileHandler, SingleFileHandler                           |
 | Metadata Layer    | Manages database metadata                                  | MetadataManager                                                 |
-| Transaction Layer | Provides transaction support to ensure data consistency    | TransactionService                                              |
-| Task Queue Layer  | Asynchronously processes batch operations                  | StorageTaskProcessor, taskQueue                                 |
-| Sync Layer        | Automatically syncs dirty data in cache to disk            | AutoSyncService                                                 |
-| Monitor Layer     | Monitors system performance and cache status               | CacheMonitor, PerformanceMonitor                                |
-| Utility Layer     | Provides common utility functions                          | FileOperationManager, PermissionChecker, StorageStrategy        |
+| Monitor Layer     | Monitors system performance and cache status               | PerformanceMonitor                                              |
+| Utility Layer     | Provides common utility functions                          | FileOperationManager                                            |
 
 ### 2.2 Core Module Relationships
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                             API Layer                                   │
-├─────────────────┬─────────────────┬─────────────────┬───────────────────┤
-│    ApiRouter    │   ApiWrapper    │  ErrorHandler   │    RateLimiter    │
-└─────────────────┴─────────────────┴─────────────────┴───────────────────┘
-                  │                    │                    │
-                  ▼                    ▼                    ▼
-┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
-│  ValidationWrapper      │  │    RestController       │  │   StorageAdapterFactory │
-└─────────────────────────┴──┴─────────────────────────┴──┴─────────────────────────┘
-                                                  │
-                                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                       Interface Layer                                   │
 ├─────────────────────────────────┬───────────────────────────────────────┤
@@ -52,95 +36,29 @@ Expo Lite Data Store adopts a layered architecture design, mainly divided into t
                     │                    │                    │
                     ▼                    ▼                    ▼
 ┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
-│       DataReader        │  │       DataWriter        │  │   TransactionService    │
+│       DataReader        │  │       DataWriter        │  │   StorageAdapterFactory │
 └─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
                     │                    │                    │
                     ▼                    ▼                    ▼
 ┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
-│      QueryEngine        │  │       KeyManager        │  │     CacheCoordinator    │
+│      QueryEngine        │  │      IndexManager       │  │    MetadataManager      │
+└─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
+                    │                    │                    │
+                    ▼                    ▼                    ▼
+┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
+│       CacheManager      │  │  FileOperationManager   │  │   PerformanceMonitor    │
 └─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
                     │                    │                    │
                     └────────────────────┼────────────────────┘
                                          ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           StorageTaskProcessor                          │
-└─────────────────────────────────────────────────────────────────────────┘
-                    │                    │                    │
-                    ▼                    ▼                    ▼
-┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
-│       taskQueue         │  │      IndexManager       │  │    MetadataManager      │
-└─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
-                    │                    │                    │
-                    ▼                    ▼                    ▼
-┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
-│       CacheManager      │  │  FileOperationManager   │  │     CacheService        │
-└─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
-                    │                    │                    │
-                    ▼                    ▼                    ▼
-┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐
-│     CacheMonitor        │  │   FileHandlerFactory    │  │     AutoSyncService     │
-└─────────────────────────┘  └─────────────────────────┘  └─────────────────────────┘
-                                │                    │
-                                ▼                    ▼
-┌─────────────────────────┐  ┌─────────────────────────┐
-│  ChunkedFileHandler     │  │   SingleFileHandler     │
-└─────────────────────────┘  └─────────────────────────┘
+│                          Storage Layer                                  │
+├─────────────────────────────────┬───────────────────────────────────────┤
+│  ChunkedFileHandler             │    SingleFileHandler                  │
+└─────────────────────────────────┴───────────────────────────────────────┘
 ```
 
 ## 3. Core Module Design
-
-### 3.1 API Layer Modules
-
-#### 3.1.1 ApiRouter
-
-**Responsibility**: Manages API routes and handles requests for different API versions.
-
-**Main Functions**:
-
-- Support multi-version API management
-- Route requests to corresponding handler functions
-- Support API version checking
-- Provide default API version configuration
-
-#### 3.1.2 ApiWrapper
-
-**Responsibility**: Wraps API calls and handles request/response wrapping.
-
-**Main Functions**:
-
-- Wrap API requests and responses
-- Handle API call context
-- Support API call logging
-
-#### 3.1.3 RestController
-
-**Responsibility**: Handles RESTful API requests and provides standard RESTful interfaces.
-
-**Main Functions**:
-
-- Provide RESTful API interfaces
-- Handle HTTP methods (GET, POST, PUT, DELETE)
-- Support request parameter validation
-
-#### 3.1.4 RateLimiter
-
-**Responsibility**: Limits API request rates to prevent malicious requests and overload.
-
-**Main Functions**:
-
-- Support IP-based rate limiting
-- Configurable rate limiting rules
-- Support multiple rate limiting algorithms
-
-#### 3.1.5 ValidationWrapper
-
-**Responsibility**: Validates API request parameters to ensure data validity.
-
-**Main Functions**:
-
-- Validate request parameter types and formats
-- Handle validation errors
-- Support custom validation rules
 
 ### 3.2 Interface Layer Modules
 
@@ -335,72 +253,33 @@ Expo Lite Data Store adopts a layered architecture design, mainly divided into t
 
 ### 3.8 Cache Layer Modules
 
-#### 3.8.1 CacheCoordinator
-
-**Responsibility**: Coordinates cache usage to ensure cache consistency and performance.
-
-**Main Functions**:
-
-- Manage multiple cache instances
-- Coordinate cache read/write operations
-- Ensure cache consistency
-- Optimize cache usage efficiency
-
-### 3.9 Original Core Modules
-
-#### 3.9.1 CacheManager
+#### 3.8.1 CacheManager
 
 **Responsibility**: Manages cache data, implements different caching strategies and protective measures.
 
 **Main Functions**:
 
-- Support LRU/LFU caching strategies
-- Implement cache penetration, breakdown, and avalanche protection
+- Support LRU caching strategy
 - Provide cache statistics
 - Support thread-safe cache operations
 - Support cache consistency maintenance
 
-#### 3.9.2 CacheController
+### 3.9 Index Layer Modules
 
-**Responsibility**: Manages cache consistency, ensuring consistency between cache and stored data.
-
-**Main Functions**:
-
-- Clear cache related to specific tables
-- Clear cache for specific queries
-- Record cache keys
-- Provide cache event system
-
-#### 3.9.3 CacheService
-
-**Responsibility**: Provides unified cache operation interface, encapsulates CacheManager functionality, and manages data cache.
-
-**Main Functions**:
-
-- Set cache
-- Get cache
-- Delete cache
-- Clear cache
-- Mark cache items as dirty
-- Batch mark cache items as clean
-- Get all dirty data
-- Record table-related cache keys
-- Clear all cache related to specific tables
-
-#### 3.9.4 IndexManager
+#### 3.9.1 IndexManager
 
 **Responsibility**: Manages index creation, querying, and updating.
 
 **Main Functions**:
 
-- Create normal and unique indexes
-- Delete indexes
 - Add indexes for data
 - Delete data from indexes
 - Update indexes
 - Use indexes for data querying
 
-#### 3.9.5 MetadataManager
+### 3.10 Metadata Layer Modules
+
+#### 3.10.1 MetadataManager
 
 **Responsibility**: Manages database metadata, including table structure, index information, etc.
 
@@ -413,30 +292,9 @@ Expo Lite Data Store adopts a layered architecture design, mainly divided into t
 - Get all table names
 - Get table record count
 
-#### 3.9.6 TransactionService
+### 3.11 Storage Layer Modules
 
-**Responsibility**: Provides transaction support to ensure data consistency.
-
-**Main Functions**:
-
-- Begin transactions
-- Commit transactions
-- Rollback transactions
-- Save data snapshots
-- Manage transaction operation queues
-
-#### 3.9.7 StorageTaskProcessor
-
-**Responsibility**: Processes asynchronous tasks, including batch operations, schema migration, etc.
-
-**Main Functions**:
-
-- Process batch write operations
-- Process schema migration operations
-- Execute tasks asynchronously
-- Provide task callbacks
-
-#### 3.9.8 ChunkedFileHandler
+#### 3.11.1 ChunkedFileHandler
 
 **Responsibility**: Handles file operations in sharded storage mode.
 
@@ -445,9 +303,8 @@ Expo Lite Data Store adopts a layered architecture design, mainly divided into t
 - Write data to sharded files
 - Read data from sharded files
 - Clear sharded files
-- Support parallel reading of sharded files
 
-#### 3.9.9 SingleFileHandler
+#### 3.11.2 SingleFileHandler
 
 **Responsibility**: Handles file operations in single-file storage mode.
 
@@ -457,28 +314,12 @@ Expo Lite Data Store adopts a layered architecture design, mainly divided into t
 - Read data from single files
 - Delete single files
 
-#### 3.9.10 AutoSyncService
-
-**Responsibility**: Regularly syncs dirty data in cache to disk, ensuring data persistence.
-
-**Main Functions**:
-
-- Automatically sync dirty data to disk
-- Support configuring sync interval and batch size
-- Provide retry mechanism to ensure successful data writing
-- Support event listening to notify sync status
-- Provide sync statistics
-- Support manual triggering of sync
-- Support stopping and starting sync service
-
 ## 4. Data Flow
 
 ### 4.1 Data Write Flow
 
-1. Client calls `write` method to write data
-2. `FileSystemStorageAdapter` checks if in transaction
-   - If in transaction, add operation to transaction queue
-   - If not in transaction, directly execute write operation
+1. Client calls `write`, `insert` or `overwrite` method to write data
+2. `FileSystemStorageAdapter` directly executes write operation
 3. `DataWriter` validates the validity of written data
 4. `DataWriter` automatically creates table (if it doesn't exist)
 5. `DataWriter` executes write operation according to storage mode
@@ -486,12 +327,11 @@ Expo Lite Data Store adopts a layered architecture design, mainly divided into t
    - Sharded mode: write to sharded files
 6. `DataWriter` updates indexes
 7. `DataWriter` updates metadata
-8. `DataWriter` clears related cache
-9. Return write result
+8. Return write result
 
 ### 4.2 Data Read Flow
 
-1. Client calls `read` method to read data
+1. Client calls `read`, `findOne` or `findMany` method to read data
 2. `FileSystemStorageAdapter` calls `DataReader` to read data
 3. `DataReader` checks if cache needs to be bypassed
    - If cache doesn't need to be bypassed, try to get data from cache
@@ -499,72 +339,48 @@ Expo Lite Data Store adopts a layered architecture design, mainly divided into t
 4. `DataReader` checks if index can be used
    - If index can be used, use index to query data
    - If index can't be used, read all data and apply filtering conditions
-5. `DataReader` applies pagination
+5. `DataReader` applies sorting and pagination
 6. `DataReader` stores result in cache (if not high-risk data)
 7. Return read result
 
 ### 4.3 Transaction Processing Flow
 
 1. Client calls `beginTransaction` method to start transaction
-2. `TransactionService` starts transaction
-3. Client executes a series of data operations (write, delete, etc.)
-   - These operations are added to transaction queue instead of being executed immediately
-4. Client calls `commit` method to commit transaction
-   - `TransactionService` executes all operations in transaction queue
-   - If all operations succeed, transaction is committed
-   - If any operation fails, transaction is rolled back
-5. Or client calls `rollback` method to rollback transaction
-   - `TransactionService` restores data snapshots
-
-### 4.4 Auto Sync Flow
-
-1. `AutoSyncService` periodically checks for dirty data in cache
-2. When the number of dirty data reaches threshold or specified time interval is reached, trigger sync
-3. `AutoSyncService` gets all dirty data
-4. Group dirty data by table name
-5. Process dirty data according to configured batch size
-6. For each batch, perform the following operations:
-   - Acquire table write lock
-   - Execute batch write operation
-   - Update indexes
-   - Update metadata
-   - Batch mark dirty data as clean
-   - Release table write lock
-7. Update sync statistics
-8. Trigger sync completion event
+2. Client executes a series of data operations (write, delete, etc.)
+3. Client calls `commit` method to commit transaction
+4. Or client calls `rollback` method to rollback transaction
 
 ## 5. Performance Optimization
 
 ### 5.1 Caching Mechanism
 
-- Use LRU/LFU caching strategies to improve query performance
-- Implement cache penetration, breakdown, and avalanche protection
+- Use LRU caching strategy to improve query performance
 - Support cache statistics for monitoring cache performance
 
 ### 5.2 Index Optimization
 
-- Support normal and unique indexes
-- Automatically select appropriate indexes for queries
-- Support multi-field indexes
+- Add indexes for data to accelerate queries
+- Use indexes for data querying to reduce full table scans
 
 ### 5.3 Sharded Storage
 
 - Support sharded storage mode to reduce memory usage
-- Implement parallel reading of sharded files to improve reading efficiency
-- Support on-demand reading of shards to reduce unnecessary I/O operations
+- Automatically handle >5MB files to avoid RN FS limitations
 
-### 5.4 Asynchronous Operations
+### 5.4 Concurrent Control
 
-- Use task queue to asynchronously process batch operations
-- Asynchronously execute transaction commit and rollback
-- Asynchronously load metadata without blocking startup
+- Support maximum concurrent operations limit, adjusted based on device performance
+- Implement operation queue to manage concurrent operations
 
 ## 6. Security Design
 
 ### 6.1 Data Encryption
 
-- Support data encryption to protect sensitive data
+- Support AES-CTR encryption to protect sensitive data
 - High-risk data is directly written to storage without passing through cache
+- Use PBKDF2 key derivation with default 120,000 iterations (mobile optimized)
+- Support field-level encryption and full-table encryption
+- Support optional biometric authentication
 
 ### 6.2 Data Validation
 

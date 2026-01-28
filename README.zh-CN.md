@@ -1,8 +1,5 @@
 # expo-lite-data-store
 
-English: [English Document](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/README.en.md)
-中文版: [中文文档](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/README.zh-CN.md)
-
 ---
 
 **注意** 当前项目测试覆盖范围有限，可能存在未发现的问题。在生产环境中使用前，请务必进行充分测试。
@@ -24,7 +21,7 @@ English: [English Document](https://github.com/QinIndexCode/expo-lite-data-store
 | 特性                       | 描述                                           |
 | -------------------------- | ---------------------------------------------- |
 | 🚀 **易配置使用**          | 仅依赖 React Native FS，无需 Metro 配置        |
-| 🔒 **可选加密**            | AES-CTR 加密，支持可选生物识别认证，密钥由系统自动生成和管理，默认 50,000 次 PBKDF2 迭代（移动设备优化）         |
+| 🔒 **可选加密**            | AES-CTR 加密，支持可选生物识别认证，密钥由系统自动生成和管理，默认 120,000 次 PBKDF2 迭代（移动设备优化）         |
 | 📦 **智能分块**            | 自动处理 >5MB 文件，规避 RN FS 限制            |
 | 🔄 **事务支持**            | 事务保证，数据一致性有保障                    |
 | 📝 **TypeScript 原生支持** | 完整的类型定义，开箱即用                       |
@@ -32,6 +29,8 @@ English: [English Document](https://github.com/QinIndexCode/expo-lite-data-store
 | 📱 **完全离线**            | 无需网络，数据 100% 存储在设备本地             |
 | 🎯 **智能排序**            | 5种排序算法，根据数据量自动选择合适算法        |
 | ⏰ **自动同步**            | 定期将缓存中的脏数据同步到磁盘，确保数据持久化 |
+| 🛡️ **数据一致性验证**     | 提供 verifyCountTable 工具，验证并修复元数据与实际数据的一致性 |
+| 📊 **批量操作**            | 支持批量插入、更新、删除操作，提高处理效率    |
 
 ## 📦 安装
 
@@ -395,7 +394,7 @@ LiteStore 支持从以下来源读取配置，优先级从高到低：
 | `encryption.algorithm`       | `string`   | `'AES-CTR'`      | 加密算法，支持 `AES-CTR`                     |
 | `encryption.keySize`         | `number`   | `256`            | 加密密钥长度，支持 `128`, `192`, `256`       |
 | `encryption.hmacAlgorithm`   | `string`   | `'SHA-512'`      | HMAC 完整性保护算法                          |
-| `encryption.keyIterations`   | `number`   | `50000`         | 密钥派生迭代次数，值越高安全性越强但性能越低。Expo Go 环境自动降低到 60,000 次，移动设备推荐 50,000 次 |
+| `encryption.keyIterations`   | `number`   | `120000`         | 密钥派生迭代次数，值越高安全性越强但性能越低。Expo Go 环境自动调整，移动设备推荐 120,000 次 |
 | `encryption.encryptedFields` | `string[]` | `['password', 'email', 'phone']` | 默认加密的字段列表       |
 | `encryption.cacheTimeout`    | `number`   | `30000` (30秒)   | 内存中 masterKey 的缓存超时时间              |
 | `encryption.maxCacheSize`    | `number`   | `50`             | LRU 缓存最多保留的派生密钥数量               |

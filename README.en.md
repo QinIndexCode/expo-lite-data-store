@@ -1,8 +1,5 @@
 # expo-lite-data-store
 
-English: [English Document](./README.en.md)
-中文版: [中文文档](./README.zh-CN.md)
-
 ---
 
 **Notice**: The current project test coverage is limited, and may contain undiscovered issues. Before using in a production environment, please conduct thorough testing.
@@ -24,7 +21,7 @@ Designed specifically for React Native + Expo projects: TypeScript-only by defau
 | Feature                          | Description                                                                     |
 | -------------------------------- | ------------------------------------------------------------------------------- |
 | 🚀 **Easy configuration**        | Only depends on React Native FS, no Metro configuration                         |
-| 🔒 **Optional encryption**       | AES-CTR encryption with optional biometric authentication, keys automatically generated and managed by system, default 50,000 PBKDF2 iterations (mobile optimized)      |
+| 🔒 **Optional encryption**       | AES-CTR encryption with optional biometric authentication, keys automatically generated and managed by system, default 120,000 PBKDF2 iterations (mobile optimized)      |
 | 📦 **Intelligent chunking**      | Automatically handles >5MB files, avoiding RN FS limits                         |
 | 🔄 **Transaction support**       | Transaction support, data consistency ensured                                   |
 | 📝 **TypeScript native support** | Complete type definitions, ready to use                                         |
@@ -32,6 +29,8 @@ Designed specifically for React Native + Expo projects: TypeScript-only by defau
 | 📱 **Fully offline**             | No network required, 100% local data storage                                    |
 | 🎯 **Intelligent sorting**       | 5 sorting algorithms, automatically selects appropriate algorithm based on data size |
 | ⏰ **Auto-sync**                 | Periodically syncs dirty data from cache to disk, ensuring data persistence      |
+| 🛡️ **Data consistency validation** | Provides verifyCountTable tool to validate and fix consistency between metadata and actual data |
+| 📊 **Batch operations**          | Supports batch insert, update, delete operations for improved efficiency        |
 
 ## 📦 Installation
 
@@ -127,7 +126,7 @@ await createTable('users', {
 });
 ```
 
-**Detailed Encryption Documentation**: Please refer to the encryption section in [WIKI_EN.md](./WIKI_EN.md) for complete encryption configuration and best practices.
+**Detailed Encryption Documentation**: Please refer to the encryption section in the Chinese README for complete encryption configuration and best practices.
 
 ## 📚 Basic API Reference
 
@@ -135,15 +134,15 @@ await createTable('users', {
 
 The library provides complete CRUD operations, transaction support, and advanced query features, categorized as follows:
 
-- **Table Management**: `createTable`, `deleteTable`, `hasTable`, `listTables`, `countTable`, `clearTable`
+- **Table Management**: `createTable`, `deleteTable`, `hasTable`, `listTables`, `countTable`, `clearTable`, `verifyCountTable`
 - **Data Operations**: `insert`, `write`, `read`, `findOne`, `findMany`, `update`, `remove`, `bulkWrite`
 - **Transaction Management**: `beginTransaction`, `commit`, `rollback`
 
-**Detailed API Documentation**: Please refer to the API reference section in [WIKI_EN.md](./WIKI_EN.md) for complete API signatures and parameter descriptions.
+**Detailed API Documentation**: Please refer to the API reference section in the Chinese README for complete API signatures and parameter descriptions.
 
 ## 📖 Detailed Documentation
 
-For complete detailed documentation, please check the local [WIKI_EN.md](WIKI_EN.md) file, including:
+For complete detailed documentation, please check the Chinese README file, including:
 
 - 🎯 **Advanced Queries**: Complex conditional queries, operators, compound queries
 - 🎯 **Smart Sorting**: Multi-field sorting, algorithm selection, performance optimization
@@ -227,7 +226,7 @@ All configuration should be done in your app.json file under the `expo.extra.lit
           "algorithm": "AES-CTR", // Encryption algorithm
           "keySize": 256, // Key size
           "hmacAlgorithm": "SHA-512", // HMAC algorithm
-          "keyIterations": 50000, // Key iteration count (50,000 for mobile optimization)
+          "keyIterations": 120000, // Key iteration count (120,000 for mobile optimization)
           "encryptedFields": ["password", "email", "phone"], // Fields to encrypt
           "cacheTimeout": 30000, // Cache timeout (30 seconds)
           "maxCacheSize": 50, // Maximum number of cached keys
@@ -307,7 +306,7 @@ A: Encryption operations do increase certain performance overhead, here are some
 1. **Use field-level encryption instead of full-table encryption**: Only encrypt sensitive fields instead of entire table, which can improve query performance
 2. **Increase key cache timeout**: Increase the value of `encryption.cacheTimeout` in configuration to reduce the number of key derivations
 3. **Enable batch operations**: Ensure `encryption.useBulkOperations` is `true`, which can reduce the number of encryption/decryption operations
-4. **Reduce key iteration count**: Appropriately reduce the value of `encryption.keyIterations` (not less than 50000) to speed up key derivation. The default is 50,000 iterations for mobile optimization
+4. **Reduce key iteration count**: Appropriately reduce the value of `encryption.keyIterations` (not less than 100000) to speed up key derivation. The default is 120,000 iterations for mobile optimization
 5. **Reasonably set `maxConcurrentOperations`**: Adjust the number of concurrent operations according to device performance, recommended range: 3-10
 
 ## 📞 Support and Feedback
