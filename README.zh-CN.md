@@ -363,10 +363,12 @@ LiteStore 提供丰富的配置选项，允许您根据项目需求调整性能�
 
 LiteStore 支持从以下来源读取配置，优先级从高到低：
 
-1. **app.json 中的 extra.liteStore 配置**（推荐）
-2. **默认配置**：内置的默认配置，用于所有未明确指定的配置项
+1. **程序化配置（高级用法）**：通过 `ConfigManager.setConfig / updateConfig` 设置（非公开 API）
+2. **app.json 中的 extra.liteStore 配置**（推荐）
+3. **环境变量**：如 `LITE_STORE_CHUNK_SIZE`、`LITE_STORE_AUTO_SYNC_INTERVAL`（适用于 Node/测试环境）
+4. **默认配置**：内置的默认配置，用于所有未明确指定的配置项
 
-**无运行时配置 API**：该库不提供运行时配置 API。所有配置更改必须通过在 app.json 中配置来完成。这种方法确保了在不同环境中一致的配置加载，并防止了异步加载的问题。
+**说明**：公开 API 不提供运行时配置入口。如果需要在初始化前注入配置，可使用 app.json、环境变量，或设置 `global.liteStoreConfig` 作为兜底方案。
 
 #### 基础配置
 
@@ -397,7 +399,7 @@ LiteStore 支持从以下来源读取配置，优先级从高到低：
 | `encryption.keyIterations`   | `number`   | `120000`         | 密钥派生迭代次数，值越高安全性越强但性能越低。Expo Go 环境自动调整，移动设备推荐 120,000 次 |
 | `encryption.encryptedFields` | `string[]` | `['password', 'email', 'phone']` | 默认加密的字段列表       |
 | `encryption.cacheTimeout`    | `number`   | `30000` (30秒)   | 内存中 masterKey 的缓存超时时间              |
-| `encryption.maxCacheSize`    | `number`   | `50`             | LRU 缓存最多保留的派生密钥数量               |
+| `encryption.maxCacheSize`    | `number`  | `100`            | LRU 缓存最多保留的派生密钥数量              |
 | `encryption.useBulkOperations` | `boolean`  | `true` | 是否启用批量操作优化                   |
 | `encryption.autoSelectHMAC` | `boolean`  | `true` | 是否根据数据大小自动选择 HMAC 算法（小数据用 SHA-256，大数据用 SHA-512） |
 

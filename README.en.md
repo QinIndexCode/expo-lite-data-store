@@ -157,7 +157,8 @@ For complete detailed documentation, please check the Chinese README file, inclu
 
 The library supports reading configuration from multiple sources with the following priority (highest to lowest):
 
-1. **app.json extra.liteStore configuration** (Recommended):
+1. **Programmatic configuration (advanced)**: via `ConfigManager.setConfig / updateConfig` (not part of the public API)
+2. **app.json extra.liteStore configuration** (Recommended):
    ```json
    {
      "expo": {
@@ -176,7 +177,8 @@ The library supports reading configuration from multiple sources with the follow
    }
    ```
 
-2. **Default configuration**:
+3. **Environment variables**: e.g. `LITE_STORE_CHUNK_SIZE`, `LITE_STORE_AUTO_SYNC_INTERVAL` (useful in Node/tests)
+4. **Default configuration**:
    Built-in default configuration for all unspecified options
 
 ### Encryption Recommendation Mode
@@ -195,7 +197,7 @@ The library supports reading configuration from multiple sources with the follow
 
 ### Configuration Options
 
-All configuration should be done in your app.json file under the `expo.extra.liteStore` section. Here are the main configuration options you can customize:
+Recommended configuration is via app.json under `expo.extra.liteStore`, but you can also inject config via environment variables or `global.liteStoreConfig` before initialization. Here are the main configuration options you can customize:
 
 ```json
 {
@@ -229,7 +231,7 @@ All configuration should be done in your app.json file under the `expo.extra.lit
           "keyIterations": 120000, // Key iteration count (120,000 for mobile optimization)
           "encryptedFields": ["password", "email", "phone"], // Fields to encrypt
           "cacheTimeout": 30000, // Cache timeout (30 seconds)
-          "maxCacheSize": 50, // Maximum number of cached keys
+          "maxCacheSize": 100, // Maximum number of cached keys
           "useBulkOperations": true, // Enable bulk operations
           "autoSelectHMAC": true // Auto-select HMAC algorithm based on data size
         },
