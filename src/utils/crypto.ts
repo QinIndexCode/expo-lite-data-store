@@ -224,7 +224,7 @@ const getIterations = (): number => {
   if (isExpoGoEnvironment()) {
     const expoGoIterations = Math.min(configIterations, 20000);
     if (configIterations > 20000) {
-      logger.warn(`Expo Go环境检测到，降低PBKDF2迭代次数从${configIterations}到${expoGoIterations}以优化性能`);
+      logger.warn(`Expo Go detected. Reducing PBKDF2 iterations from ${configIterations} to ${expoGoIterations} for performance.`);
     }
     return Math.max(10000, expoGoIterations);
   }
@@ -793,7 +793,7 @@ export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promis
           });
         }
       } catch (error) {
-        logger.warn('生物识别验证失败，尝试不使用生物识别:', error);
+        logger.warn('Biometric authentication failed, retrying without biometrics:', error);
         // 生物识别失败，回退到不使用生物识别的方式
         // 不使用生物识别获取密钥
         key = await SecureStore.getItemAsync(MASTER_KEY_ALIAS);
@@ -822,7 +822,7 @@ export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promis
       }
     }
   } catch (error) {
-    logger.error('获取加密密钥失败:', error);
+    logger.error('Failed to retrieve encryption key:', error);
     throw new CryptoError(
       '无法获取或生成加密密钥',
       'KEY_DERIVE_FAILED',
@@ -1192,7 +1192,7 @@ export const decryptFields = async (
         }
       }
     } catch (error) {
-      logger.warn(`字段 ${field} 解密失败:`, error);
+      logger.warn(`Failed to decrypt field ${field}:`, error);
       // 保留原始加密值，不抛出错误
     }
   });

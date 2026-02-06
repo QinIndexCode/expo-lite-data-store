@@ -56,7 +56,7 @@ export class ConfigManager {
 
     // 更新当前配置
     this.currentConfig = mergedConfig;
-    logger.success('✅ Configuration loaded successfully');
+    logger.success('Configuration loaded successfully');
   }
 
   /**
@@ -144,7 +144,7 @@ export class ConfigManager {
               
               if (expoConfig.extra?.liteStore && typeof expoConfig.extra.liteStore === 'object') {
                 const liteStoreConfig = expoConfig.extra.liteStore;
-                logger.info('✅ Configuration loaded from app.json via expo-constants');
+                logger.info('Configuration loaded from app.json via expo-constants');
                 return this.mergeConfig(baseConfig, liteStoreConfig);
               }
             }
@@ -184,7 +184,7 @@ export class ConfigManager {
               // 直接从Constants.extra获取liteStore配置
               const liteStoreConfig = Constants.extra?.liteStore;
               if (liteStoreConfig && typeof liteStoreConfig === 'object') {
-                logger.info('✅ Configuration loaded from app.json via expo-constants');
+                logger.info('Configuration loaded from app.json via expo-constants');
                 return this.mergeConfig(baseConfig, liteStoreConfig);
               }
             }
@@ -193,7 +193,7 @@ export class ConfigManager {
               // 从app.json的extra字段中读取配置
               const liteStoreConfig = expoConfig.extra?.liteStore;
               if (liteStoreConfig && typeof liteStoreConfig === 'object') {
-                logger.info('✅ Configuration loaded from app.json via expo-constants');
+                logger.info('Configuration loaded from app.json via expo-constants');
                 return this.mergeConfig(baseConfig, liteStoreConfig);
               }
             }
@@ -208,7 +208,7 @@ export class ConfigManager {
             if (globalAny.expo && globalAny.expo.extra?.liteStore) {
               const liteStoreConfig = globalAny.expo.extra?.liteStore;
               if (liteStoreConfig && typeof liteStoreConfig === 'object') {
-                logger.info('✅ Configuration loaded from app.json via expo-constants');
+                logger.info('Configuration loaded from app.json via expo-constants');
                 return this.mergeConfig(baseConfig, liteStoreConfig);
               }
             }
@@ -217,7 +217,7 @@ export class ConfigManager {
             if (globalAny.liteStoreConfig) {
               const customConfig = globalAny.liteStoreConfig;
               if (customConfig && typeof customConfig === 'object') {
-                logger.info('✅ Configuration loaded from global.liteStoreConfig');
+                logger.info('Configuration loaded from global.liteStoreConfig');
                 return this.mergeConfig(baseConfig, customConfig);
               }
             }

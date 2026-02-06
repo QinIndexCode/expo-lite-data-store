@@ -13,11 +13,6 @@
     "resolveJsonModule": true,
     "jsx": "react-native",
     "baseUrl": "./src",
-    "paths": {
-      "@/*": ["./*"],
-      "@utils/*": ["./utils/*"],
-      "@defaultConfig": ["./defaultConfig"]
-    },
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": true,
     "noImplicitReturns": true,

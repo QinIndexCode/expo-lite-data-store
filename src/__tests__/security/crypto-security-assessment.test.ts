@@ -15,7 +15,6 @@
 
 import { encrypt, decrypt, getMasterKey } from '../../utils/crypto';
 import { configManager } from '../../core/config/ConfigManager';
-import logger from '../../utils/logger';
 
 // ==================== 测试套件 ===================
 describe('🔐 Expo LiteStore 加密机制安全性评估', () => {
@@ -85,29 +84,4 @@ describe('🔐 Expo LiteStore 加密机制安全性评估', () => {
     });
   });
 
-  // ==================== 最终报告 ===================
-  afterAll(() => {
-    logger.info('\n');
-    logger.info('='.repeat(60));
-    logger.info('     Expo LiteStore 加密机制安全性评估报告');
-    logger.info('='.repeat(60));
-    logger.info('');
-
-    logger.info('  安全性结论：      优秀（98/100）');
-    logger.info('');
-
-    logger.info('  核心优势：');
-    logger.info('   • AES-256-CTR + HMAC-SHA512 认证加密');
-    logger.info('   • 密钥存储于系统安全硬件（Keychain/Keystore）');
-    logger.info('   • 支持生物识别 + LRU 缓存防泄露');
-
-    if (results.vulnerabilities.length > 0) {
-      logger.info('\n  优化建议：');
-      results.vulnerabilities.forEach(v => logger.info(`   ${v}`));
-    }
-
-    logger.info('\n  总体评价：');
-    logger.info('   系统加密机制完全满足生产级要求，可用于存储高敏感数据');
-    logger.info('='.repeat(60));
-  });
 });

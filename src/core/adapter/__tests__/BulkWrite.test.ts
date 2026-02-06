@@ -1,7 +1,6 @@
 // src/core/adapter/__tests__/BulkWrite.test.ts
 import { MetadataManager } from '../../meta/MetadataManager';
 import { FileSystemStorageAdapter } from '../FileSystemStorageAdapter';
-import logger from '../../../utils/logger';
 
 describe('FileSystemStorageAdapter - BulkWrite', () => {
   let adapter: FileSystemStorageAdapter;
@@ -15,7 +14,6 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
   });
 
   afterEach(async () => {
-    logger.info('[BulkWrite.test] afterEach: 开始清理');
     try {
       await adapter.deleteTable(tableName);
     } catch (e) {
@@ -23,14 +21,11 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
     }
     // 清理资源，防止测试挂起
     if (adapter && typeof (adapter as any).cleanup === 'function') {
-      logger.info('[BulkWrite.test] afterEach: 清理 FileSystemStorageAdapter');
       (adapter as any).cleanup();
     }
     if (metadataManager) {
-      logger.info('[BulkWrite.test] afterEach: 清理 MetadataManager');
       metadataManager.cleanup();
     }
-    logger.info('[BulkWrite.test] afterEach: 清理完成');
   });
 
   describe('批量插入操作', () => {

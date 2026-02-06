@@ -4,62 +4,8 @@
 // 设置测试环境变量
 process.env.NODE_ENV = 'test';
 
-// 创建一个简单的logger模拟，避免ES模块和CommonJS模块的兼容性问题
-// 定义 ANSI 颜色码
-const green = '\x1b[32m';
-const red = '\x1b[31m';
-const yellow = '\x1b[33m';
-const blue = '\x1b[34m';
-const cyan = '\x1b[36m';
-const magenta = '\x1b[35m';
-const reset = '\x1b[0m';
-
-class Logger {
-  /**
-   * 成功消息（绿色）
-   */
-  success(message, ...args) {
-    console.log(green + message + reset, ...args);
-  }
-
-  /**
-   * 错误消息（红色）
-   */
-  error(message, ...args) {
-    console.error(red + message + reset, ...args);
-  }
-
-  /**
-   * 警告消息（黄色）
-   */
-  warn(message, ...args) {
-    console.warn(yellow + message + reset, ...args);
-  }
-
-  /**
-   * 信息消息（蓝色）
-   */
-  info(message, ...args) {
-    console.log(blue + message + reset, ...args);
-  }
-
-  /**
-   * 调试消息（青色）
-   */
-  debug(message, ...args) {
-    console.debug(cyan + message + reset, ...args);
-  }
-
-  /**
-   * 强调消息（洋红色）
-   */
-  highlight(message, ...args) {
-    console.log(magenta + message + reset, ...args);
-  }
-}
-
-// 创建单例实例
-const logger = new Logger();
+const loggerModule = require('./src/utils/logger');
+const logger = loggerModule?.default ?? loggerModule;
 
 logger.info('[jest.setup] Test environment initialized, NODE_ENV =', process.env.NODE_ENV);
 
@@ -84,7 +30,7 @@ global.testMonitor = {
 
     // 设置60秒超时 - 使用真实定时器确保在fake timers环境中也能工作
     this.timeoutId = setTimeout(() => {
-      logger.error(`[TestMonitor] ❌ Test timeout! Test has been running for more than 60 seconds`);
+      logger.error(`[TestMonitor] Test timeout! Test has been running for more than 60 seconds`);
       logger.error(`[TestMonitor] Current test: ${this.currentTest ? this.currentTest.name : 'unknown'}`);
       logger.error(`[TestMonitor] Test file: ${this.currentTest ? this.currentTest.path : 'unknown'}`);
       logger.error(`[TestMonitor] Start time: ${new Date(this.testStartTime).toISOString()}`);
@@ -109,7 +55,7 @@ global.testMonitor = {
 
     if (this.currentTest && this.testStartTime) {
       const duration = Date.now() - this.testStartTime;
-      logger.info(`[TestMonitor] ✅ Test completed: ${testName} (${duration}ms)`);
+      logger.info(`[TestMonitor] Test completed: ${testName} (${duration}ms)`);
     }
 
     this.currentTest = null;
@@ -117,7 +63,7 @@ global.testMonitor = {
   },
 
   reportPotentialBlockage() {
-    logger.error(`[TestMonitor] 🔍 Analyzing potential blockage causes:`);
+    logger.error(`[TestMonitor] Analyzing potential blockage causes:`);
 
     // 检查是否有未完成的异步操作
     if (typeof jest !== 'undefined') {
@@ -132,7 +78,7 @@ global.testMonitor = {
     logger.error(`[TestMonitor] - Platform: ${process.platform}`);
 
     // 建议解决方案
-    logger.error(`[TestMonitor] 💡 Potential solutions:`);
+    logger.error(`[TestMonitor] Potential solutions:`);
     logger.error(`[TestMonitor] 1. Check for uncleaned setTimeout/setInterval`);
     logger.error(`[TestMonitor] 2. Check for unresolved Promises`);
     logger.error(`[TestMonitor] 3. Check for circular references or memory leaks`);
@@ -179,7 +125,7 @@ if (typeof afterAll !== 'undefined') {
       logger.info('[jest.setup] afterAll: Cleaning up key cache cleanup timer');
       stopKeyCacheCleanup();
     } catch (e) {
-      logger.warn('[jest.setup] afterAll: 清理密钥缓存清理定时器失败', e);
+      logger.warn('[jest.setup] afterAll: Failed to clean up key cache cleanup timer', e);
     }
 
     try {
@@ -190,7 +136,7 @@ if (typeof afterAll !== 'undefined') {
         taskQueue.cleanup();
       }
     } catch (e) {
-      logger.warn('[jest.setup] afterAll: 清理 taskQueue 失败', e);
+      logger.warn('[jest.setup] afterAll: Failed to clean up taskQueue', e);
     }
 
     try {
@@ -205,7 +151,7 @@ if (typeof afterAll !== 'undefined') {
         plainStorage.cleanup();
       }
     } catch (e) {
-      logger.warn('[jest.setup] afterAll: 清理全局数据库实例失败', e);
+      logger.warn('[jest.setup] afterAll: Failed to clean up global database instances', e);
     }
     
     try {
@@ -216,7 +162,7 @@ if (typeof afterAll !== 'undefined') {
         await AutoSyncService.cleanupInstance();
       }
     } catch (e) {
-      logger.warn('[jest.setup] afterAll: 清理自动同步服务实例失败', e);
+      logger.warn('[jest.setup] afterAll: Failed to clean up AutoSyncService instance', e);
     }
 
     // 清理所有可能存在的定时器
@@ -228,7 +174,7 @@ if (typeof afterAll !== 'undefined') {
       // 清理所有定时器
       jest.clearAllTimers();
     } catch (e) {
-      logger.warn('[jest.setup] afterAll: 清理 jest 定时器失败', e);
+      logger.warn('[jest.setup] afterAll: Failed to clean up Jest timers', e);
     }
 
 

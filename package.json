@@ -1,6 +1,6 @@
 {
   "name": "expo-lite-data-store",
-  "version": "2.0.0-beta.3",
+  "version": "2.0.0-beta.4",
   "main": "dist/cjs/index.js",
   "types": "dist/types/index.d.ts",
   "author": "QinIndexCode",
@@ -75,14 +75,14 @@
     "publish:force": "npm publish --ignore-scripts"
   },
   "dependencies": {
-    "@noble/ciphers": "^0.6.0",
-    "@noble/hashes": "^1.8.0",
-    "bcryptjs": "^2.4.3",
+    "@noble/ciphers": "~0.6.0",
+    "@noble/hashes": "~1.8.0",
+    "bcryptjs": "~2.4.3",
     "expo-constants": "~18.0.12",
     "expo-crypto": "~15.0.8",
     "expo-file-system": "~18.1.11",
     "expo-secure-store": "~15.0.8",
-    "react-native-quick-crypto": "^1.0.7"
+    "react-native-quick-crypto": "~1.0.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

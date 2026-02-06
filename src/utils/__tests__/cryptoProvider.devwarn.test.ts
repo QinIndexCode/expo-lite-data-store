@@ -11,14 +11,16 @@ describe('cryptoProvider dev warning in Expo Go', () => {
   test('logs once in dev when called multiple times', () => {
     const originalDev = (global as any).__DEV__
     ;(global as any).__DEV__ = true
-    const spy = jest.spyOn(console, 'log').mockImplementation(() => {})
+    const loggerModule = require('../../utils/logger')
+    const logger = loggerModule?.default ?? loggerModule
+    const spy = jest.spyOn(logger, 'warn').mockImplementation(() => {})
     const { randomBytes, __resetDevWarnForTest } = require('../../utils/cryptoProvider')
     __resetDevWarnForTest()
     randomBytes(8)
     randomBytes(8)
     expect(spy).toHaveBeenCalledTimes(1)
     expect(spy.mock.calls[0][0]).toBe(
-      'Running in Expo Go. Using fallback JavaScript crypto implementation. For native performance, build a standalone APK/IPA.'
+      'Expo Go detected. Using JavaScript crypto fallback. Build a standalone APK/IPA for native performance.'
     )
     spy.mockRestore()
     ;(global as any).__DEV__ = originalDev

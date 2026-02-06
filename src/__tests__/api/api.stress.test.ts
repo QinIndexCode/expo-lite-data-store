@@ -130,23 +130,12 @@ describe('API压力测试', () => {
       let attempt = 0;
       let lastSuccessfulConcurrency = 0;
       
-      console.log('开始逐步提升压力测试...');
-      console.log('配置信息：');
-      console.log(`- 初始并发数：${STRESS_CONFIG.INITIAL_CONCURRENCY}`);
-      console.log(`- 并发增量：${STRESS_CONFIG.CONCURRENCY_STEP}`);
-      console.log(`- 初始数据量：${STRESS_CONFIG.INITIAL_DATA_SIZE_PER_REQUEST}`);
-      console.log(`- 数据量增量：${STRESS_CONFIG.DATA_SIZE_STEP}`);
-      console.log(`- 最大尝试次数：${STRESS_CONFIG.MAX_ATTEMPTS}`);
-      
       // 测试直到达到最大尝试次数、最大并发数或最大数据量
       while (
         attempt < STRESS_CONFIG.MAX_ATTEMPTS && 
         currentConcurrency <= STRESS_CONFIG.MAX_CONCURRENCY &&
         currentDataSize <= STRESS_CONFIG.MAX_DATA_SIZE_PER_REQUEST
       ) {
-        console.log(`\n=== 尝试 ${attempt + 1} ===`);
-        console.log(`并发数：${currentConcurrency}，单次请求数据量：${currentDataSize}`);
-        
         // 清空表，确保测试环境干净
         await remove(TEST_TABLE, { where: {} });
         
@@ -231,7 +220,6 @@ describe('API压力测试', () => {
                   failedOperations++;
                   const endTime = Date.now();
                   responseTimes.push(endTime - startTime);
-                  console.error(`操作失败 (${operationType}):`, error instanceof Error ? error.message : String(error));
                 }
               }
             };
@@ -265,18 +253,6 @@ describe('API压力测试', () => {
           const finalRecordCount = await countTable(TEST_TABLE);
           expect(finalRecordCount).toBeGreaterThanOrEqual(0);
           
-          console.log(`✅ 成功：`);
-          console.log(`   总操作数：${metrics.totalOperations}`);
-          console.log(`   成功操作：${metrics.successfulOperations} (${Math.round(successRate * 100)}%)`);
-          console.log(`   失败操作：${metrics.failedOperations}`);
-          console.log(`   总耗时：${metrics.totalDuration} ms`);
-          console.log(`   平均响应：${metrics.averageResponseTime} ms`);
-          console.log(`   95%响应：${metrics.p95ResponseTime} ms`);
-          console.log(`   99%响应：${metrics.p99ResponseTime} ms`);
-          console.log(`   TPS：${metrics.tps}`);
-          console.log(`   内存峰值：${metrics.memoryPeak} MB`);
-          console.log(`   最终记录数：${finalRecordCount}`);
-          
           // 更新极限压力数据
           lastSuccessfulConcurrency = currentConcurrency;
           stressLimit.maxConcurrency = currentConcurrency;
@@ -290,8 +266,7 @@ describe('API压力测试', () => {
           
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
-          console.log(`❌ 失败：${errorMessage}`);
-          
+
           // 记录错误详情和崩溃时的压力
           stressLimit.errorDetails = errorMessage;
           stressLimit.crashConcurrency = currentConcurrency;
@@ -303,14 +278,11 @@ describe('API压力测试', () => {
       }
       
       // 批量写入压力测试
-      console.log('\n=== 批量写入压力测试 ===');
       let currentBatchSize = 1000;
       let lastSuccessfulBatchSize = 0;
       attempt = 0;
       
       while (attempt < STRESS_CONFIG.MAX_ATTEMPTS) {
-        console.log(`尝试批量写入 ${currentBatchSize} 条记录...`);
-        
         // 清空表，确保测试环境干净
         await remove(TEST_TABLE, { where: {} });
         
@@ -349,8 +321,6 @@ describe('API压力测试', () => {
           // 计算每秒操作数
           const operationsPerSecond = Math.round(currentBatchSize / (duration / 1000));
           
-          console.log(`✅ 成功：批量写入 ${currentBatchSize} 条记录，耗时 ${duration} ms，TPS = ${operationsPerSecond}`);
-          
           // 更新极限压力数据
           lastSuccessfulBatchSize = currentBatchSize;
           stressLimit.maxBatchSize = currentBatchSize;
@@ -359,8 +329,6 @@ describe('API压力测试', () => {
           currentBatchSize = Math.floor(currentBatchSize * 1.5);
           
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.log(`❌ 失败：${errorMessage}`);
           break;
         }
         
@@ -368,33 +336,6 @@ describe('API压力测试', () => {
       }
       
       // 输出极限压力数据总结
-      console.log('\n' + '='.repeat(60));
-      console.log('📊 极限压力数据总结');
-      console.log('='.repeat(60));
-      console.log(`🏆 最大并发数：${stressLimit.maxConcurrency || lastSuccessfulConcurrency}`);
-      console.log(`📈 最大数据量：${stressLimit.maxDataSize} 条记录`);
-      console.log(`📦 最大批量大小：${stressLimit.maxBatchSize || lastSuccessfulBatchSize}`);
-      console.log(`⚡ 最大TPS：${stressLimit.maxOperationsPerSecond} 操作/秒`);
-      
-      if (stressLimit.lastSuccessfulMetrics) {
-        console.log('\n📋 最后一次成功测试性能指标：');
-        console.log(`   总操作数：${stressLimit.lastSuccessfulMetrics.totalOperations}`);
-        console.log(`   成功操作：${stressLimit.lastSuccessfulMetrics.successfulOperations}`);
-        console.log(`   平均响应：${stressLimit.lastSuccessfulMetrics.averageResponseTime} ms`);
-        console.log(`   95%响应：${stressLimit.lastSuccessfulMetrics.p95ResponseTime} ms`);
-        console.log(`   99%响应：${stressLimit.lastSuccessfulMetrics.p99ResponseTime} ms`);
-        console.log(`   内存峰值：${stressLimit.lastSuccessfulMetrics.memoryPeak} MB`);
-      }
-      
-      if (stressLimit.errorDetails) {
-        console.log('\n💥 崩溃信息：');
-        console.log(`   崩溃时并发数：${stressLimit.crashConcurrency}`);
-        console.log(`   崩溃时数据量：${stressLimit.crashDataSize}`);
-        console.log(`   崩溃原因：${stressLimit.errorDetails}`);
-      }
-      
-      console.log('\n' + '='.repeat(60));
-      
       // 确保至少完成一次成功的测试
       expect(lastSuccessfulConcurrency).toBeGreaterThan(0);
     }, 600000); // 增加超时时间，确保测试能完成
@@ -467,7 +408,6 @@ describe('API压力测试', () => {
       const finalData = await findMany(TEST_TABLE, {});
       expect(finalData.every(item => item.category === 'A')).toBe(true);
       
-      console.log('✅ 精确校验测试通过');
     });
   });
 });

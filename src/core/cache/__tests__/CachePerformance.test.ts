@@ -2,7 +2,6 @@
 // CacheManager 性能测试
 
 import { CacheManager, CacheStrategy } from '../CacheManager';
-import logger from '../../../utils/logger';
 
 describe('CacheManager Performance', () => {
   let cacheManager: CacheManager;
@@ -21,14 +20,11 @@ describe('CacheManager Performance', () => {
 
   afterEach(done => {
     // 清理定时器，防止测试挂起
-    logger.info('[CachePerformance.test] afterEach: 开始清理');
     if (cacheManager) {
-      logger.info('[CachePerformance.test] afterEach: 清理主 CacheManager');
       cacheManager.cleanup();
     }
     // 使用 process.nextTick 而不是 setTimeout，避免阻塞
     process.nextTick(() => {
-      logger.info('[CachePerformance.test] afterEach: 清理完成');
       done();
     });
   });
@@ -43,7 +39,6 @@ describe('CacheManager Performance', () => {
     }
 
     const setTime = Date.now() - startTime;
-    logger.info(`Setting ${itemCount} cache items took: ${setTime}ms`);
     expect(setTime).toBeLessThan(1000); // Complete within 1 second
 
     // Get large number of cache items
@@ -53,7 +48,6 @@ describe('CacheManager Performance', () => {
     }
 
     const getTime = Date.now() - getStartTime;
-    logger.info(`Getting ${itemCount} cache items took: ${getTime}ms`);
     expect(getTime).toBeLessThan(500); // Complete within 500ms
 
     // Check cache size
@@ -70,7 +64,6 @@ describe('CacheManager Performance', () => {
     }
 
     const setTime = Date.now() - startTime;
-    logger.info(`Setting ${itemCount} cache items (with eviction) took: ${setTime}ms`);
     expect(setTime).toBeLessThan(5000); // Complete within 5 seconds
 
     // Check cache size
@@ -100,7 +93,6 @@ describe('CacheManager Performance', () => {
 
     const totalTime = Date.now() - startTime;
     const operationsPerSecond = (concurrentCount * iterations * 2) / (totalTime / 1000);
-    logger.info(`Concurrent access performance: ${operationsPerSecond.toFixed(0)} operations/second`);
     expect(operationsPerSecond).toBeGreaterThan(1000); // At least 1000 operations/second
   });
 
@@ -117,7 +109,6 @@ describe('CacheManager Performance', () => {
       lruCache.set(`lru-key-${i}`, `lru-value-${i}`);
     }
     const lruTime = Date.now() - lruStartTime;
-    logger.info(`LRU strategy setting 10000 cache items took: ${lruTime}ms`);
 
     // Test LFU strategy performance
     const lfuCache = new CacheManager({
@@ -131,14 +122,12 @@ describe('CacheManager Performance', () => {
       lfuCache.set(`lfu-key-${i}`, `lfu-value-${i}`);
     }
     const lfuTime = Date.now() - lfuStartTime;
-    logger.info(`LFU strategy setting 10000 cache items took: ${lfuTime}ms`);
 
     // Both strategies should complete within reasonable time
     expect(lruTime).toBeLessThan(1500);
     expect(lfuTime).toBeLessThan(1500);
 
     // 清理临时创建的 CacheManager 实例
-    logger.info('[CachePerformance.test] 清理临时 CacheManager 实例');
     lruCache.cleanup();
     lfuCache.cleanup();
   });

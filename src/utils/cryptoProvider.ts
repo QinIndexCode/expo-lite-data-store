@@ -4,6 +4,7 @@ import { pbkdf2 as noblePbkdf2 } from '@noble/hashes/pbkdf2'
 import { sha256 } from '@noble/hashes/sha256'
 import { sha512 } from '@noble/hashes/sha512'
 import { bytesToHex } from '@noble/hashes/utils'
+import logger from './logger'
 
 let nativePBKDF2Sync: any
 let nativeRandomBytes: any
@@ -24,7 +25,7 @@ const devWarnOnce = () => {
   const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : true
   if (isDev && isExpoGo() && !warned) {
     warned = true
-    console.log('Running in Expo Go. Using fallback JavaScript crypto implementation. For native performance, build a standalone APK/IPA.')
+    logger.warn('Expo Go detected. Using JavaScript crypto fallback. Build a standalone APK/IPA for native performance.')
   }
 }
 

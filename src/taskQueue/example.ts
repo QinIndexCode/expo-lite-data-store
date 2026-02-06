@@ -10,10 +10,10 @@ import logger from '../utils/logger';
  * 任务队列使用示例
  */
 async function taskQueueExample() {
-  logger.info('=== 任务队列使用示例 ===');
+  logger.info('=== Task Queue Usage Example ===');
 
   // 创建测试表
-  logger.info('1. 创建测试表...');
+  logger.info('1. Create test table...');
   await storage.createTable('test_table', {
     columns: {
       id: 'number',
@@ -27,7 +27,7 @@ async function taskQueueExample() {
   });
 
   // 示例1：使用任务队列执行批量写入
-  logger.info('\n2. 使用任务队列执行批量写入...');
+  logger.info('\n2. Run bulk write via task queue...');
   const bulkWriteResult = await new Promise((resolve, reject) => {
     taskQueue.addTask(
       StorageTaskType.BULK_WRITE,
@@ -65,10 +65,10 @@ async function taskQueueExample() {
       }
     );
   });
-  logger.info('批量写入结果:', bulkWriteResult);
+  logger.info('Bulk write result:', bulkWriteResult);
 
   // 示例2：使用任务队列执行模式迁移
-  logger.info('\n3. 使用任务队列执行模式迁移...');
+  logger.info('\n3. Run mode migration via task queue...');
   await new Promise((resolve, reject) => {
     taskQueue.addTask(
       StorageTaskType.MIGRATE_TO_CHUNKED,
@@ -89,7 +89,7 @@ async function taskQueueExample() {
   });
 
   // 示例3：使用任务队列执行读取操作
-  logger.info('\n4. 使用任务队列执行读取操作...');
+  logger.info('\n4. Run read operation via task queue...');
   const readResult = await new Promise((resolve, reject) => {
     taskQueue.addTask(
       StorageTaskType.READ,
@@ -111,18 +111,18 @@ async function taskQueueExample() {
       }
     );
   });
-  logger.info('读取结果:', readResult);
+  logger.info('Read result:', readResult);
 
   // 示例4：获取队列状态
-  logger.info('\n5. 获取队列状态...');
+  logger.info('\n5. Get queue status...');
   const status = taskQueue.getStatus();
-  logger.info('队列状态:', status);
+  logger.info('Queue status:', status);
 
   // 清理测试表
-  logger.info('\n6. 清理测试表...');
+  logger.info('\n6. Clean up test table...');
   await storage.deleteTable('test_table');
 
-  logger.info('\n=== 任务队列使用示例完成 ===');
+  logger.info('\n=== Task Queue Usage Example Completed ===');
 }
 
 // 运行示例
