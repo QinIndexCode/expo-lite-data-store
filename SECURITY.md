@@ -18,7 +18,7 @@ Use this section to tell people how to report a vulnerability.
 
 ### How to Report
 
-To report a security vulnerability, please email the maintainers at [qinindexcode@example.com](mailto:qinindexcode@example.com) with the following information:
+To report a security vulnerability, please email the maintainers at [qinindexcode@example.com](mailto:qinindexcode@gmail.com) with the following information:
 
 - Description of the vulnerability
 - Steps to reproduce the issue
