@@ -15,48 +15,46 @@ import { processUpdateOperators } from '../../utils/specialOperators';
 import { QUERY } from '../constants';
 import logger from '../../utils/logger';
 
-/**
- * 查询引擎类
- * 负责数据过滤、排序、分页和聚合操作
- * 支持多种查询操作符和智能排序算法选择
- */
+const MAX_FILTER_DEPTH = 10;
+
 export class QueryEngine {
-  /**
-   * 过滤数据，支持多种查询操作符
-   */
-  static filter<T extends Record<string, any>>(data: T[], condition?: FilterCondition): T[] {
+  private static filterWithDepth<T extends Record<string, any>>(
+    data: T[],
+    condition: FilterCondition | undefined,
+    depth: number
+  ): T[] {
     if (!condition) return data;
 
-    // 函数条件
+    if (depth > MAX_FILTER_DEPTH) {
+      logger.error(`QueryEngine: Maximum filter depth (${MAX_FILTER_DEPTH}) exceeded. This may indicate a circular reference or overly complex query.`);
+      throw new Error(`Maximum filter depth (${MAX_FILTER_DEPTH}) exceeded`);
+    }
+
     if (typeof condition === 'function') {
       return data.filter(condition as (value: T, index: number, array: T[]) => unknown);
     }
 
-    // 检查condition是否为对象，如果不是，返回空数组
     if (typeof condition !== 'object' || condition === null) {
       return [];
     }
 
-    // 复合 AND 条件
     if ('$and' in condition) {
       let result = [...data];
       for (const subCondition of condition.$and!) {
-        result = this.filter(result, subCondition);
+        result = this.filterWithDepth(result, subCondition, depth + 1);
       }
       return result;
     }
 
-    // 复合 OR 条件
     if ('$or' in condition) {
       const results = new Set<T>();
       for (const subCondition of condition.$or!) {
-        const filtered = this.filter(data, subCondition);
+        const filtered = this.filterWithDepth(data, subCondition, depth + 1);
         filtered.forEach(item => results.add(item));
       }
       return Array.from(results);
     }
 
-    // 简单条件
     return data.filter(item => {
       let matches = true;
 
@@ -196,9 +194,10 @@ export class QueryEngine {
     });
   }
 
-  /**
-   * 处理更新操作符，如 $inc
-   */
+  static filter<T extends Record<string, any>>(data: T[], condition?: FilterCondition): T[] {
+    return this.filterWithDepth(data, condition, 0);
+  }
+
   static update<T extends Record<string, any>>(originalData: T, updateData: Record<string, any>): T {
     // 使用集中化的更新操作符处理函数
     return processUpdateOperators(originalData, updateData);

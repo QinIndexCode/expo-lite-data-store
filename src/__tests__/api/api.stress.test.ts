@@ -324,6 +324,10 @@ describe('API压力测试', () => {
           // 更新极限压力数据
           lastSuccessfulBatchSize = currentBatchSize;
           stressLimit.maxBatchSize = currentBatchSize;
+          stressLimit.maxOperationsPerSecond = operationsPerSecond;
+          
+          // 输出性能指标
+          console.log(`[Stress Test] Batch size: ${currentBatchSize}, Duration: ${duration}ms, OPS: ${operationsPerSecond}`);
           
           // 增加批量大小（指数增长）
           currentBatchSize = Math.floor(currentBatchSize * 1.5);
@@ -338,6 +342,9 @@ describe('API压力测试', () => {
       // 输出极限压力数据总结
       // 确保至少完成一次成功的测试
       expect(lastSuccessfulConcurrency).toBeGreaterThan(0);
+      // 确保批量写入测试至少完成一次
+      expect(lastSuccessfulBatchSize).toBeGreaterThan(0);
+      console.log(`[Stress Test Summary] Max concurrency: ${lastSuccessfulConcurrency}, Max batch size: ${lastSuccessfulBatchSize}`);
     }, 600000); // 增加超时时间，确保测试能完成
   });
   

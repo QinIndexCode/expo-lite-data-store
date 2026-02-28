@@ -203,7 +203,7 @@ const isExpoGoEnvironment = (): boolean => {
     if (typeof Constants !== 'undefined' && Constants.appOwnership === 'expo') {
       return true;
     }
-  } catch (error) {
+  } catch {
     return false;
   }
   return false;

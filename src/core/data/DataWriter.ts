@@ -24,6 +24,10 @@ export class DataWriter {
   private countValidationCache = new Map<string, { lastCheckTime: number; isAccurate: boolean }>();
   // 校验间隔：5分钟内不重复校验同一个表（可根据业务调整）
   private readonly VALIDATION_INTERVAL = 5 * 60 * 1000;
+  // 缓存最大条目数，防止内存泄漏
+  private readonly MAX_VALIDATION_CACHE_SIZE = 100;
+  // 锁超时时间：30秒，防止死锁
+  private readonly LOCK_TIMEOUT = 30 * 1000;
   // 并发控制：互斥锁，防止并发操作导致的数据不一致
   private operationLocks = new Map<string, Promise<void>>();
   private lockPromises = new Map<string, () => void>();
@@ -111,6 +115,7 @@ export class DataWriter {
   /**
    * 获取操作锁，确保同一表的并发操作串行执行
    * 优化：添加智能并发控制，限制最大并发数
+   * 优化：添加锁超时机制，防止死锁
    */
   private async acquireLock(tableName: string): Promise<void> {
     // 智能并发控制：如果并发数达到上限，将操作加入队列
@@ -120,8 +125,22 @@ export class DataWriter {
       });
     }
 
-    // 如果已经有锁，等待它释放
+    // 如果已经有锁，等待它释放（带超时机制）
+    const startTime = Date.now();
     while (this.operationLocks.has(tableName)) {
+      // 检查是否超时
+      if (Date.now() - startTime > this.LOCK_TIMEOUT) {
+        // 清理可能残留的锁
+        this.operationLocks.delete(tableName);
+        this.lockPromises.delete(tableName);
+        throw ErrorHandler.createGeneralError(
+          `Lock acquisition timeout for table: ${tableName}`,
+          'LOCK_TIMEOUT',
+          undefined,
+          `Failed to acquire lock within ${this.LOCK_TIMEOUT / 1000} seconds`,
+          'This may indicate a deadlock or long-running operation. Please try again.'
+        );
+      }
       await this.operationLocks.get(tableName);
     }
 
@@ -619,6 +638,9 @@ export class DataWriter {
         isAccurate: actualCount === metadataCount,
       });
 
+      // 清理过大的缓存
+      this.cleanupValidationCache();
+
       // 如果计数不一致，自动修复元数据
       if (actualCount !== metadataCount) {
         logger.warn(
@@ -633,6 +655,21 @@ export class DataWriter {
     } catch (error) {
       // 校验失败时记录日志但不抛错（避免影响业务）
       logger.error(`[DataWriter] Failed to validate count for table '${tableName}':`, error);
+    }
+  }
+
+  /**
+   * 清理过大的校验缓存
+   * 移除最旧的条目，保持缓存大小在限制内
+   */
+  private cleanupValidationCache(): void {
+    if (this.countValidationCache.size > this.MAX_VALIDATION_CACHE_SIZE) {
+      const entries = Array.from(this.countValidationCache.entries());
+      entries.sort((a, b) => a[1].lastCheckTime - b[1].lastCheckTime);
+      const toRemove = entries.slice(0, this.countValidationCache.size - this.MAX_VALIDATION_CACHE_SIZE + 1);
+      toRemove.forEach(([key]) => {
+        this.countValidationCache.delete(key);
+      });
     }
   }
 

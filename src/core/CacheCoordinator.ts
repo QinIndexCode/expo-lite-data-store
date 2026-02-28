@@ -26,12 +26,37 @@ export class CacheCoordinator {
 
   /**
    * 生成缓存键
+   * 使用稳定的键生成策略，确保相同内容产生相同的键
    * @param tableName 表名
    * @param options 读取选项
    * @returns 生成的缓存键
    */
   generateCacheKey(tableName: string, options?: any): string {
-    return `${tableName}_${JSON.stringify(options)}`;
+    return `${tableName}_${this.stableStringify(options)}`;
+  }
+
+  /**
+   * 稳定的对象序列化
+   * 对对象属性进行排序，确保相同内容产生相同的字符串
+   * @param obj 要序列化的对象
+   * @returns 稳定的JSON字符串
+   */
+  private stableStringify(obj: any): string {
+    if (obj === undefined) {
+      return 'undefined';
+    }
+    if (obj === null) {
+      return 'null';
+    }
+    if (typeof obj !== 'object') {
+      return JSON.stringify(obj);
+    }
+    if (Array.isArray(obj)) {
+      return '[' + obj.map(item => this.stableStringify(item)).join(',') + ']';
+    }
+    const keys = Object.keys(obj).sort();
+    const pairs = keys.map(key => `"${key}":${this.stableStringify(obj[key])}`);
+    return '{' + pairs.join(',') + '}';
   }
 
   /**

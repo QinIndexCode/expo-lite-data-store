@@ -100,6 +100,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
   /**
    * 管理缓存大小，防止内存溢出
+   * 同时清理对应的查询索引缓存
    */
   private manageCacheSize(): void {
     if (this.cachedData.size > this.maxCacheSize) {
@@ -111,6 +112,8 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       const toRemove = entries.slice(0, this.cachedData.size - this.maxCacheSize + 1);
       toRemove.forEach(([tableName]) => {
         this.cachedData.delete(tableName);
+        // 同时清理对应的查询索引
+        this.queryIndexes.delete(tableName);
       });
     }
   }

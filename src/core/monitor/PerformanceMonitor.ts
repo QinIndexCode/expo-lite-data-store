@@ -154,6 +154,11 @@ export class PerformanceMonitor {
   private sampleRate: number;
 
   /**
+   * 清理定时器引用
+   */
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
    * 构造函数
    */
   constructor() {
@@ -293,9 +298,27 @@ export class PerformanceMonitor {
    */
   private startMetricsCleanupTimer(): void {
     const cleanupInterval = 60000; // 每分钟清理一次
-    setInterval(() => {
+    this.cleanupTimer = setInterval(() => {
       this.cleanupOldMetrics();
     }, cleanupInterval);
+  }
+
+  /**
+   * 停止清理定时器
+   */
+  stopMetricsCleanupTimer(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+  }
+
+  /**
+   * 销毁监控器，释放资源
+   */
+  destroy(): void {
+    this.stopMetricsCleanupTimer();
+    this.clear();
   }
 
   /**

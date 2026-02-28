@@ -174,7 +174,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   ): Promise<void> {
     // 输入验证：表名不能为空且必须是字符串
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
-      throw new Error('Invalid table name: must be a non-empty string');
+      throw new StorageError('Invalid table name: must be a non-empty string', 'TABLE_NAME_INVALID', {
+        suggestion: 'Provide a valid non-empty string for tableName',
+      });
     }
 
     return this.dataWriter.createTable(tableName, options);
@@ -190,7 +192,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   async deleteTable(tableName: string, _options?: any): Promise<void> {
     // 输入验证：表名不能为空且必须是字符串
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
-      throw new Error('Invalid table name: must be a non-empty string');
+      throw new StorageError('Invalid table name: must be a non-empty string', 'TABLE_NAME_INVALID', {
+        suggestion: 'Provide a valid non-empty string for tableName',
+      });
     }
 
     const result = await this.dataWriter.deleteTable(tableName);
@@ -243,25 +247,33 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       async () => {
         // 输入验证：表名不能为空且必须是字符串
         if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
-          throw new Error('Invalid table name: must be a non-empty string');
+          throw new StorageError('Invalid table name: must be a non-empty string', 'TABLE_NAME_INVALID', {
+            suggestion: 'Provide a valid non-empty string for tableName',
+          });
         }
 
         // 输入验证：数据不能为空且必须是对象或对象数组
         if (data === undefined || data === null) {
-          throw new Error('Invalid data: must be an object or array of objects');
+          throw new StorageError('Invalid data: must be an object or array of objects', 'FILE_CONTENT_INVALID', {
+            suggestion: 'Provide a valid object or array of objects',
+          });
         }
 
         // 验证数组中的每个元素都是对象
         if (Array.isArray(data)) {
           for (const item of data) {
             if (typeof item !== 'object' || item === null || Array.isArray(item)) {
-              throw new Error('Invalid data: all items in the array must be objects');
+              throw new StorageError('Invalid data: all items in the array must be objects', 'FILE_CONTENT_INVALID', {
+                suggestion: 'Ensure all items in the array are valid objects',
+              });
             }
           }
         }
         // 验证单个数据是对象
         else if (typeof data !== 'object' || Array.isArray(data)) {
-          throw new Error('Invalid data: must be an object or array of objects');
+          throw new StorageError('Invalid data: must be an object or array of objects', 'FILE_CONTENT_INVALID', {
+            suggestion: 'Provide a valid object or array of objects',
+          });
         }
 
         const startTime = Date.now();
@@ -325,25 +337,33 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       async () => {
         // 输入验证：表名不能为空且必须是字符串
         if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
-          throw new Error('Invalid table name: must be a non-empty string');
+          throw new StorageError('Invalid table name: must be a non-empty string', 'TABLE_NAME_INVALID', {
+            suggestion: 'Provide a valid non-empty string for tableName',
+          });
         }
 
         // 输入验证：数据不能为空且必须是对象或对象数组
         if (data === undefined || data === null) {
-          throw new Error('Invalid data: must be an object or array of objects');
+          throw new StorageError('Invalid data: must be an object or array of objects', 'FILE_CONTENT_INVALID', {
+            suggestion: 'Provide a valid object or array of objects',
+          });
         }
 
         // 验证数组中的每个元素都是对象
         if (Array.isArray(data)) {
           for (const item of data) {
             if (typeof item !== 'object' || item === null || Array.isArray(item)) {
-              throw new Error('Invalid data: all items in the array must be objects');
+              throw new StorageError('Invalid data: all items in the array must be objects', 'FILE_CONTENT_INVALID', {
+                suggestion: 'Ensure all items in the array are valid objects',
+              });
             }
           }
         }
         // 验证单个数据是对象
         else if (typeof data !== 'object' || Array.isArray(data)) {
-          throw new Error('Invalid data: must be an object or array of objects');
+          throw new StorageError('Invalid data: must be an object or array of objects', 'FILE_CONTENT_INVALID', {
+            suggestion: 'Provide a valid object or array of objects',
+          });
         }
 
         const startTime = Date.now();
@@ -423,7 +443,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   async read(tableName: string, options?: ReadOptions & { bypassCache?: boolean }): Promise<Record<string, any>[]> {
     // 输入验证：表名不能为空且必须是字符串
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
-      throw new Error('Invalid table name: must be a non-empty string');
+      throw new StorageError('Invalid table name: must be a non-empty string', 'TABLE_NAME_INVALID', {
+        suggestion: 'Provide a valid non-empty string for tableName',
+      });
     }
 
     // 事务中特殊处理：如果在事务中，获取包含未提交操作的最新数据
@@ -453,7 +475,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   async verifyCount(tableName: string): Promise<{ metadata: number; actual: number; match: boolean }> {
     // 输入验证：表名不能为空且必须是字符串
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
-      throw new Error('Invalid table name: must be a non-empty string');
+      throw new StorageError('Invalid table name: must be a non-empty string', 'TABLE_NAME_INVALID', {
+        suggestion: 'Provide a valid non-empty string for tableName',
+      });
     }
 
     return this.dataWriter.verifyCount(tableName);
@@ -480,7 +504,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   async findOne(tableName: string, filter: Record<string, any>, _options?: any): Promise<Record<string, any> | null> {
     // 输入验证：表名不能为空且必须是字符串
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
-      throw new Error('Invalid table name: must be a non-empty string');
+      throw new StorageError('Invalid table name: must be a non-empty string', 'TABLE_NAME_INVALID', {
+        suggestion: 'Provide a valid non-empty string for tableName',
+      });
     }
     return this.dataReader.findOne(tableName, filter);
   }
@@ -520,7 +546,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   async delete(tableName: string, where: Record<string, any>, options?: { directWrite?: boolean }): Promise<number> {
     // 输入验证：表名不能为空且必须是字符串
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
-      throw new Error('Invalid table name: must be a non-empty string');
+      throw new StorageError('Invalid table name: must be a non-empty string', 'TABLE_NAME_INVALID', {
+        suggestion: 'Provide a valid non-empty string for tableName',
+      });
     }
 
     // 事务处理逻辑
@@ -586,7 +614,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    */
   async update(tableName: string, data: Record<string, any>, where: Record<string, any>, options?: { directWrite?: boolean }): Promise<number> {
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
-      throw new Error('Invalid table name: must be a non-empty string');
+      throw new StorageError('Invalid table name: must be a non-empty string', 'TABLE_NAME_INVALID', {
+        suggestion: 'Provide a valid non-empty string for tableName',
+      });
     }
 
     // 获取当前表数据
@@ -651,7 +681,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   async clearTable(tableName: string): Promise<void> {
     // 输入验证：表名不能为空且必须是字符串
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
-      throw new Error('Invalid table name: must be a non-empty string');
+      throw new StorageError('Invalid table name: must be a non-empty string', 'TABLE_NAME_INVALID', {
+        suggestion: 'Provide a valid non-empty string for tableName',
+      });
     }
 
     // 直接写入空数组来清空表，覆盖模式

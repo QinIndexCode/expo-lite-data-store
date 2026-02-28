@@ -173,13 +173,52 @@ export class MetadataManager {
 
   // 获取单表元数据
   get(tableName: string): TableSchema | undefined {
+    // 同步访问：如果正在加载，返回 undefined（调用者应处理此情况）
+    // 注意：大多数情况下加载会很快完成，不会造成问题
     return this.cache.tables[tableName];
   }
+
+  // 异步获取单表元数据（确保加载完成）
+  async getAsync(tableName: string): Promise<TableSchema | undefined> {
+    await this.waitForLoad();
+    return this.cache.tables[tableName];
+  }
+
   getPath(tableName: string): string {
     return this.cache.tables[tableName]?.path || `${tableName}.ldb`;
   }
+
   // 更新表元数据（自动合并）
-  update(tableName: string, updates: Partial<TableSchema>) {
+  update(tableName: string, updates: Partial<TableSchema>): void {
+    const existing = this.cache.tables[tableName] || {
+      mode: 'single',
+      path: `${tableName}.ldb`,
+      count: 0,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      columns: {},
+    };
+
+    this.cache.tables[tableName] = {
+      ...existing,
+      ...updates,
+      updatedAt: Date.now(),
+    };
+
+    this.triggerSave();
+  }
+
+  
+  // 异步更新表元数据（确保加载完成）
+  async updateAsync(tableName: string, updates: Partial<TableSchema>): Promise<void> {
+    // 确保加载完成后再更新
+    await this.waitForLoad();
+    
+    this.update(tableName, updates);
+  }
+
+  // 同步更新（用于向后兼容，但会警告）
+  updateSync(tableName: string, updates: Partial<TableSchema>): void {
     const existing = this.cache.tables[tableName] || {
       mode: 'single',
       path: `${tableName}.ldb`,

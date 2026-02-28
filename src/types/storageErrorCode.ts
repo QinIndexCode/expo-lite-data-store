@@ -25,7 +25,6 @@ export type StorageErrorCode =
   | 'TABLE_INDEX_TYPE_INVALID' //表索引类型无效
   | 'TABLE_INDEX_UNIQUE_INVALID' //表索引唯一性无效
   | 'TABLE_INDEX_NOT_UNIQUE' //表索引不唯一
-  | 'TABLE_INDEX_NOT_UNIQUE' //表索引不唯一
   // file part error codes
   | 'FILE_NOT_FOUND' //文件不存在
   | 'FILE_ALREADY_EXISTS' //文件已存在
@@ -66,4 +65,6 @@ export type StorageErrorCode =
   | 'TRANSACTION_IN_PROGRESS' //事务已在进行中
   | 'NO_TRANSACTION_IN_PROGRESS' //没有事务在进行中
   | 'TRANSACTION_COMMIT_FAILED' //事务提交失败
-  | 'TRANSACTION_ROLLBACK_FAILED'; //事务回滚失败
+  | 'TRANSACTION_ROLLBACK_FAILED' //事务回滚失败
+  // concurrency part error codes
+  | 'LOCK_TIMEOUT'; //锁获取超时

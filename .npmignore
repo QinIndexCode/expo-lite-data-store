@@ -84,3 +84,7 @@ test-*.*
 # 测试脚本目录
 test-scripts/
 jest.*
+
+#构建产物
+dist/
+expo-lite-data-store-*.tgz

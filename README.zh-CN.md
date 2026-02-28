@@ -9,7 +9,7 @@
 [![npm version](https://img.shields.io/npm/v/expo-lite-data-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-data-store)
 [![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-lite-data-store)](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/LICENSE.txt)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)
-[![React Native](https://img.shields.io/badge/React%20Native-0.72+-blue.svg)](https://reactnative.dev/)
+[![React Native](https://img.shields.io/badge/React%20Native-0.73+-blue.svg)](https://reactnative.dev/)
 [![Expo](https://img.shields.io/badge/Expo-50.0+-blue.svg)](https://expo.dev/)
 
 **轻量、易配置、纯 TypeScript 编写的 Expo 本地数据库**
@@ -216,9 +216,11 @@ await insert('sensitive_data', { id: 1, password: 'secure_password' }, {
 
 该库提供完整的 CRUD 操作、事务支持和高级查询功能，API 分为以下几类：
 
-- **表管理**：`createTable`、`deleteTable`、`hasTable`、`listTables`、`countTable`、`clearTable`、`verifyCountTable`
+- **表管理**：`createTable`、`deleteTable`、`hasTable`、`listTables`、`countTable`、`clearTable`、`verifyCountTable`、`migrateToChunked`
 - **数据操作**：`insert`、`overwrite`、`read`、`findOne`、`findMany`、`update`、`remove`、`bulkWrite`
 - **事务管理**：`beginTransaction`、`commit`、`rollback`
+- **工具类与实例**：`plainStorage`、`configManager`、`ConfigManager`、`performanceMonitor`、`CryptoService`、`getKeyCacheStats`、`getKeyCacheHitRate`
+- **类型定义**：`CreateTableOptions`、`ReadOptions`、`WriteOptions`、`WriteResult`、`CommonOptions`、`TableOptions`、`FindOptions`、`FilterCondition`、`PerformanceStats`、`HealthCheckResult`、`KeyCacheStats`
 
 ### 核心 API 签名
 
@@ -229,8 +231,9 @@ await insert('sensitive_data', { id: 1, password: 'secure_password' }, {
 - `hasTable(tableName: string, options?: TableOptions): Promise<boolean>` - 检查表是否存在
 - `listTables(options?: TableOptions): Promise<string[]>` - 获取所有表名
 - `countTable(tableName: string, options?: TableOptions): Promise<number>` - 获取表记录数
-- `verifyCountTable(tableName: string, options?: TableOptions): Promise<{ metadata: number; actual: number; match: boolean }>` - 验证并修复表计数准确性
-- `clearTable(tableName: string, options?: TableOptions): Promise<void>` - 清空表数据
+- `verifyCountTable(tableName: string, options?: TableOptions): Promise&lt;{ metadata: number; actual: number; match: boolean }&gt;` - 验证并修复表计数准确性
+- `clearTable(tableName: string, options?: TableOptions): Promise&lt;void&gt;` - 清空表数据
+- `migrateToChunked(tableName: string, options?: TableOptions): Promise&lt;void&gt;` - 将表迁移到分块模式
 
 #### 数据操作 API
 
@@ -245,9 +248,19 @@ await insert('sensitive_data', { id: 1, password: 'secure_password' }, {
 
 #### 事务管理 API
 
-- `beginTransaction(options?: TableOptions): Promise<void>` - 开始一个新事务
-- `commit(options?: TableOptions): Promise<void>` - 提交当前事务
-- `rollback(options?: TableOptions): Promise<void>` - 回滚当前事务
+- `beginTransaction(options?: TableOptions): Promise&lt;void&gt;` - 开始一个新事务
+- `commit(options?: TableOptions): Promise&lt;void&gt;` - 提交当前事务
+- `rollback(options?: TableOptions): Promise&lt;void&gt;` - 回滚当前事务
+
+#### 工具类与实例 API
+
+- `plainStorage` - 普通存储实例（无加密支持）
+- `configManager` - 配置管理器实例
+- `ConfigManager` - 配置管理器类
+- `performanceMonitor` - 性能监控器实例
+- `CryptoService` - 加密服务模块
+- `getKeyCacheStats(): KeyCacheStats` - 获取密钥缓存统计信息
+- `getKeyCacheHitRate(): number` - 获取密钥缓存命中率
 
 ## 📖 详细功能说明
 
@@ -328,7 +341,7 @@ async function transferMoney(fromUserId: number, toUserId: number, amount: numbe
 
 ### 性能优化
 
-- **索引优化**：自动为 `id`、`name`、`email`、`type`、`status` 等字段创建索引
+- **索引优化**：支持为常用字段手动创建索引，加速数据查询
 - **批量操作优化**：使用 `bulkWrite` 进行高效的批量操作
 - **分页查询优化**：对大数据集使用分页避免一次性加载过多数据
 - **缓存优化**：可配置的缓存策略，减少重复操作
@@ -561,9 +574,9 @@ A: 支持 `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$like`, `$
 
 ## 📞 支持与反馈
 
-- 📧 **邮箱**: [qinIndexCode@gmail.com](gmail:qinIndexCode@gmail.com)
-- 💬 **Issues**: [GitHub Issues](https://github.com/QinIndexCode/expo-liteDataStore/issues)
-- 📖 **文档**: [完整文档](https://github.com/QinIndexCode/expo-liteDataStore/wiki)
+- 📧 **邮箱**: [qinIndexCode@gmail.com](mailto:qinIndexCode@gmail.com)
+- 💬 **Issues**: [GitHub Issues](https://github.com/QinIndexCode/expo-lite-data-store/issues)
+- 📖 **文档**: [完整文档](https://github.com/QinIndexCode/expo-lite-data-store/wiki)
 
 ## 许可证
 

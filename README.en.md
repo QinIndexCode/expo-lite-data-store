@@ -9,7 +9,7 @@
 [![npm version](https://img.shields.io/npm/v/expo-lite-data-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-data-store)
 [![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-lite-data-store)](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/LICENSE.txt)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)
-[![React Native](https://img.shields.io/badge/React%20Native-0.72+-blue.svg)](https://reactnative.dev/)
+[![React Native](https://img.shields.io/badge/React%20Native-0.73+-blue.svg)](https://reactnative.dev/)
 [![Expo](https://img.shields.io/badge/Expo-50.0+-blue.svg)](https://expo.dev/)
 
 **Lightweight, easy-configuration, pure TypeScript Expo local database**
@@ -134,9 +134,11 @@ await createTable('users', {
 
 The library provides complete CRUD operations, transaction support, and advanced query features, categorized as follows:
 
-- **Table Management**: `createTable`, `deleteTable`, `hasTable`, `listTables`, `countTable`, `clearTable`, `verifyCountTable`
-- **Data Operations**: `insert`, `write`, `read`, `findOne`, `findMany`, `update`, `remove`, `bulkWrite`
+- **Table Management**: `createTable`, `deleteTable`, `hasTable`, `listTables`, `countTable`, `clearTable`, `verifyCountTable`, `migrateToChunked`
+- **Data Operations**: `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `bulkWrite`
 - **Transaction Management**: `beginTransaction`, `commit`, `rollback`
+- **Utilities &amp; Instances**: `plainStorage`, `configManager`, `ConfigManager`, `performanceMonitor`, `CryptoService`, `getKeyCacheStats`, `getKeyCacheHitRate`
+- **Type Definitions**: `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FilterCondition`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats`
 
 **Detailed API Documentation**: Please refer to the API reference section in the Chinese README for complete API signatures and parameter descriptions.
 
