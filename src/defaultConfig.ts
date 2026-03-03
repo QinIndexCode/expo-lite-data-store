@@ -9,7 +9,7 @@ export default {
   /**
    * Basic Configuration
    */
-  chunkSize: 10 * 1024 * 1024, // 10MB per chunk
+  chunkSize: 5 * 1024 * 1024, // 5MB per chunk
   storageFolder: 'lite-data-store',
   sortMethods: 'default' as const,
   timeout: 10000,

@@ -12,7 +12,7 @@ module.exports = {
     '^.+\.(js|jsx)$': 'babel-jest',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(expo-file-system|expo-constants|expo-crypto|expo-secure-store|@expo|expo-*)/)',
+    'node_modules/(?!(expo-file-system|expo-constants|expo-crypto|expo-secure-store|@expo|expo-.*|expo-modules-core)/)',
   ],
   testMatch: ['**/__tests__/**/*.(js|ts|tsx)', '**/?(*.)+(spec|test).(js|ts|tsx)'],
   testPathIgnorePatterns: ['<rootDir>/node_modules/', '<rootDir>/test.ts'],

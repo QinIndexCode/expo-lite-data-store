@@ -52,6 +52,10 @@ const tryLoadNative = () => {
     nativeEnabled = true
     return true
   } catch {
+    if (!warned) {
+      warned = true
+      logger.warn('Native crypto module not found. Using JavaScript fallback. Install react-native-quick-crypto for better performance.')
+    }
     nativeChecked = true
     nativeEnabled = false
     return false

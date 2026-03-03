@@ -4,7 +4,7 @@
 // Last Modified: 2025-12-11
 
 import * as SecureStore from 'expo-secure-store';
-import { generateMasterKey } from '../../utils/crypto.js';
+import { generateMasterKey } from '../../utils/crypto';
 import logger from '../../utils/logger';
 
 /**
