@@ -1,7 +1,9 @@
-// src/core/api/ApiRouter.ts
-// API路由器，负责API版本管理和路由分发
-// 创建于: 2025-12-03
-// 最后修改: 2025-12-11
+/**
+ * @module ApiRouter
+ * @description API router for version management and request routing
+ * @since 2025-12-03
+ * @version 1.0.0
+ */
 
 /**
  * API路由器类
@@ -45,7 +47,7 @@ export class ApiRouter {
       return requestedVersion;
     }
 
-    // 如果请求的版本不支持，返回默认版本
+    // If requested version unsupported, return default
     return this.defaultVersion;
   }
 

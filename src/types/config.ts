@@ -1,23 +1,30 @@
 /**
- * 深度Partial类型，使所有嵌套属性都变为可选
+ * @module config
+ * @description Configuration type definitions for LiteStore
+ * @since 2025-11-19
+ * @version 1.0.0
+ */
+
+/**
+ * Deep partial type that makes all nested properties optional
  */
 export type DeepPartial<T> = {
   [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
 };
 
 /**
- * LiteStore配置类型定义
+ * LiteStore configuration interface
  */
 export interface LiteStoreConfig {
-  /** 基础配置 */
+  /** Basic configuration */
   chunkSize: number;
   storageFolder: string;
   sortMethods: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
   timeout: number;
 
-  /** 加密配置 */
+  /** Encryption configuration */
   encryption: {
-    algorithm: 'AES-CTR';
+    algorithm: 'AES-CTR' | 'AES-GCM' | 'auto';
     keySize: 256;
     hmacAlgorithm: 'SHA-256' | 'SHA-512';
     keyIterations: number;
@@ -28,15 +35,15 @@ export interface LiteStoreConfig {
     autoSelectHMAC?: boolean;
   };
 
-  /** 性能配置 */
+  /** Performance configuration */
   performance: {
     enableQueryOptimization: boolean;
-    maxConcurrentOperations: number; // 推荐范围：3-10，根据设备性能调整
+    maxConcurrentOperations: number;
     enableBatchOptimization: boolean;
     memoryWarningThreshold: number;
   };
 
-  /** 缓存配置 */
+  /** Cache configuration */
   cache: {
     maxSize: number;
     defaultExpiry: number;
@@ -44,22 +51,22 @@ export interface LiteStoreConfig {
     memoryWarningThreshold: number;
   };
 
-  /** 监控配置 */
+  /** Monitoring configuration */
   monitoring: {
-    enablePerformanceTracking: boolean; // 暂未完全支持
-    enableHealthChecks: boolean; // 启用可提升性能和稳定性
-    metricsRetention: number; // 24小时
+    enablePerformanceTracking: boolean;
+    enableHealthChecks: boolean;
+    metricsRetention: number;
   };
 
-  /** 自动同步配置 */
+  /** Auto-sync configuration */
   autoSync?: {
     enabled?: boolean;
     interval?: number;
     minItems?: number;
     batchSize?: number;
   };
-  
-  /** API配置 */
+
+  /** API configuration */
   api: {
     rateLimit: {
       enabled: boolean;

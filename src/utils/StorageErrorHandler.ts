@@ -1,10 +1,15 @@
-// src/utils/errorHandler.ts
+/**
+ * @module StorageErrorHandler
+ * @description Unified error handling utility for storage operations
+ * @since 2025-11-19
+ * @version 1.0.0
+ */
 import { StorageErrorCode } from '../types/storageErrorCode';
 import { StorageError } from '../types/storageErrorInfc';
 import logger from './logger';
 
 /**
- * 错误处理工具类，提供统一的错误创建和处理方法
+ * Error handling utility class providing unified error creation and handling
  */
 export class ErrorHandler {
   /**
@@ -16,7 +21,7 @@ export class ErrorHandler {
    * @returns StorageError 格式化后的存储错误对象
    */
   static createTableError(operation: string, tableName: string, cause?: unknown, details?: string): StorageError {
-    // 在测试和开发环境打印底层错误，便于排查表创建/删除问题
+    // Print underlying errors in test/dev for table create/delete debugging
     if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
       logger.error(`[ErrorHandler][createTableError] operation=${operation}, table=${tableName}, cause=`, cause);
     }

@@ -1,11 +1,14 @@
-// src/taskQueue/taskQueue.ts
-// 任务队列管理系统
-//
+/**
+ * @module taskQueue
+ * @description Task queue management system for asynchronous operations
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
 //
 import logger from '../utils/logger';
 /**
-//  * 任务优先级枚举
+//  * Task priority enum
  */
 export enum TaskPriority {
   LOW = 0,
@@ -188,7 +191,7 @@ export class TaskQueue {
   start(): void {
     if (!this.isRunning) {
       this.isRunning = true;
-      // 测试环境也设置isRunning为true，但不自动处理任务，允许手动控制
+      // In test, set isRunning=true but do not auto-process, allow manual control
       if (!(typeof process !== 'undefined' && process.env.NODE_ENV === 'test')) {
         this.processNext();
       }
@@ -204,26 +207,26 @@ export class TaskQueue {
   async stop(options: { force?: boolean; timeout?: number } = {}): Promise<void> {
     const { force = false, timeout = 30000 } = options;
 
-    // 设置队列状态为停止
+    // Set队列状态为停止
     this.isRunning = false;
 
     if (force) {
-      // 强制停止，清理所有运行中的任务
+      // Force stop, clean all running tasks
       this.runningTasks.clear();
       return;
     }
 
-    // 等待正在运行的任务完成
+    // Wait正在运行的任务完成
     const startTime = Date.now();
     while (this.runningTasks.size > 0) {
-      // 检查是否超时
+      // Check if超时
       if (Date.now() - startTime > timeout) {
         logger.warn(`TaskQueue stop timed out after ${timeout}ms, forcing stop`);
         this.runningTasks.clear();
         return;
       }
 
-      // 等待一段时间后再次检查
+      // Wait一段时间后再次检查
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
@@ -232,10 +235,10 @@ export class TaskQueue {
    * 清理所有任务和资源（用于测试）
    */
   async cleanup(): Promise<void> {
-    // 停止队列
+    // Stop队列
     await this.stop({ force: true });
 
-    // 清理所有任务和回调
+    // Cleanup所有任务和回调
     this.queue = [];
     this.runningTasks.clear();
     this.taskCallbacks.clear();
@@ -256,8 +259,8 @@ export class TaskQueue {
    * @param processor 任务处理器
    */
   addProcessor(processor: TaskProcessor): void {
-    // 处理器可以支持多种任务类型，这里简化处理
-    // 实际实现中应该让处理器返回支持的任务类型列表
+    // Process器可以支持多种任务类型，这里简化处理
+    // In real implementation, processor should return supported task types
     this.processors.set(processor.constructor.name, processor);
   }
 
@@ -290,10 +293,10 @@ export class TaskQueue {
       timeout: options.timeout || this.config.defaultTimeout,
     };
 
-    // 添加到优先级队列
+    // Add到优先级队列
     this.enqueue(task);
 
-    // 添加回调
+    // Add回调
     if (options.callback) {
       if (!this.taskCallbacks.has(task.id)) {
         this.taskCallbacks.set(task.id, []);
@@ -301,7 +304,7 @@ export class TaskQueue {
       this.taskCallbacks.get(task.id)?.push(options.callback as (task: Task) => void);
     }
 
-    // 开始处理任务
+    // Start处理任务
     this.processNext();
 
     return task.id;
@@ -312,8 +315,8 @@ export class TaskQueue {
    * @param task 任务对象
    */
   private enqueue(task: Task): void {
-    // 按优先级排序，优先级高的任务排在前面
-    // 相同优先级的任务按创建时间排序，先创建的排在前面
+    // Sort by priority, higher priority first
+    // Same priority sorted by creation time, earlier first
     let inserted = false;
     for (let i = 0; i < this.queue.length; i++) {
       const existingTask = this.queue[i];
@@ -340,16 +343,16 @@ export class TaskQueue {
       return;
     }
 
-    // 获取下一个任务
+    // Get下一个任务
     const task = this.queue.shift();
     if (!task) return;
 
-    // 标记任务为运行中
+    // Mark task as running
     task.status = TaskStatus.RUNNING;
     task.startedAt = Date.now();
     this.runningTasks.add(task.id);
 
-    // 查找合适的处理器
+    // Find合适的处理器
     let processor: TaskProcessor | undefined;
     for (const [, p] of this.processors) {
       if (p.supports(task.type)) {
@@ -366,7 +369,7 @@ export class TaskQueue {
       return;
     }
 
-    // 处理任务
+    // Process任务
     const timeout = task.timeout || this.config.defaultTimeout;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -377,20 +380,20 @@ export class TaskQueue {
 
     Promise.race([processor.process(task), timeoutPromise])
       .then(result => {
-        // 清理超时定时器
+        // Cleanup超时定时器
         if (timeoutId) {
           clearTimeout(timeoutId);
         }
         this.completeTask(task, { status: TaskStatus.COMPLETED, result });
       })
       .catch(error => {
-        // 清理超时定时器
+        // Cleanup超时定时器
         if (timeoutId) {
           clearTimeout(timeoutId);
         }
 
         if (task.retryCount < task.maxRetries) {
-          // 重试任务
+          // Retry任务
           task.retryCount++;
           task.status = TaskStatus.PENDING;
           task.error = error;
@@ -410,7 +413,7 @@ export class TaskQueue {
 
           this.runningTasks.delete(task.id);
         } else {
-          // 任务失败
+          // Task失败
           this.completeTask(task, { status: TaskStatus.FAILED, error });
         }
       });
@@ -438,10 +441,10 @@ export class TaskQueue {
       task.error = result.error;
     }
 
-    // 移除运行中的任务
+    // Remove运行中的任务
     this.runningTasks.delete(task.id);
 
-    // 执行回调
+    // Execute回调
     if (this.taskCallbacks.has(task.id)) {
       const callbacks = this.taskCallbacks.get(task.id);
       callbacks?.forEach(callback => {
@@ -454,7 +457,7 @@ export class TaskQueue {
       this.taskCallbacks.delete(task.id);
     }
 
-    // 处理下一个任务
+    // Process下一个任务
     this.processNext();
   }
 
@@ -478,15 +481,15 @@ export class TaskQueue {
    * @param taskId 任务ID
    */
   cancelTask(taskId: string): boolean {
-    // 查找任务
+    // Find任务
     const taskIndex = this.queue.findIndex(task => task.id === taskId);
     if (taskIndex !== -1) {
-      // 从队列中移除
+      // Remove from queue
       const task = this.queue.splice(taskIndex, 1)[0];
       task.status = TaskStatus.CANCELLED;
       task.completedAt = Date.now();
 
-      // 执行回调
+      // Execute回调
       if (this.taskCallbacks.has(taskId)) {
         const callbacks = this.taskCallbacks.get(taskId);
         callbacks?.forEach(callback => {
@@ -502,9 +505,9 @@ export class TaskQueue {
       return true;
     }
 
-    // 检查是否正在运行
+    // Check if正在运行
     if (this.runningTasks.has(taskId)) {
-      // 这里简化处理，实际实现中应该支持取消正在运行的任务
+      // Simplified here, real implementation should support cancelling running tasks
       return false;
     }
 
@@ -519,7 +522,7 @@ export class TaskQueue {
       task.status = TaskStatus.CANCELLED;
       task.completedAt = Date.now();
 
-      // 执行回调
+      // Execute回调
       if (this.taskCallbacks.has(task.id)) {
         const callbacks = this.taskCallbacks.get(task.id);
         callbacks?.forEach(callback => {
@@ -537,5 +540,5 @@ export class TaskQueue {
   }
 }
 
-// 全局任务队列实例
+// Global任务队列实例
 export const taskQueue = new TaskQueue();

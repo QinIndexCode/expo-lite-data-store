@@ -1,5 +1,21 @@
-
 <!-- 更新日志 -->
+
+### 📅 2026-04-02 `v2.0.0-beta.5` 加密方案升级与架构优化
+
+> 加密升级：新增 AES-256-GCM 加密模式，符合 NIST SP 800-38D 和 OWASP MASVS 2026 标准
+> 自动迁移：encrypt/decrypt 自动检测数据版本，新数据默认使用 GCM，旧数据保持兼容
+> 安全提升：PBKDF2 默认迭代次数从 120,000 提升到 600,000（OWASP 2026 推荐）
+> 配置扩展：encryption.algorithm 支持 'AES-CTR' | 'AES-GCM' | 'auto' 三种模式
+> 架构优化：解决 ConfigManager 循环依赖，创建 PathHelper 独立路径管理
+> 错误处理：整合重复的 ErrorHandler 类，统一为 StorageErrorHandler 和 ApiErrorHandler
+> 适配器完善：StorageAdapterFactory 支持创建 EncryptedStorageAdapter
+> 配置统一：创建 tsconfig.base.json 统一所有 TypeScript 配置
+> 跨平台：修复构建脚本，使用 rimraf 替代 Windows 特定命令
+> 代码组织：移动 CryptoService 到 core/crypto/，删除空目录
+> 新增文件：crypto-gcm.ts（GCM 加密模块）、crypto-errors.ts（错误定义）、crypto-types.ts（类型定义）
+> 新增文件：PathHelper.ts（路径管理）、envUtils.ts（环境检测）
+> 新增文件：.prettierignore、COMMENT_SPECIFICATION 文档（中英文）
+> 测试：365 个测试全部通过，新增 GCM 加密测试
 
 ### 📅 2026-01-28 `v2.0.0-beta.2`  Expo Go 加密性能与 Provider 加固
 
@@ -70,6 +86,7 @@
 > 增强了安全性，确保密钥管理更加安全
 
 <!-- 2025-12-12 修复更新、删除、删除问题 -->
+
 ### 📅 2025-12-16 `v1.1.0`  配置系统优化与文档完善
 
 > 优化了配置系统，移除了npm install时的配置生成脚本
@@ -83,6 +100,7 @@
 ### 📅 2025-12-12 `v1.0.5`  修复更新、删除、删除问题
 
 > 修复了更新、删除、删除缓存问题以及其接口缺失问题。
+
 <!-- 2025-12-12 修复配置文件生成问题 -->
 
 ### 📅 2025-12-12 `v1.0.0`  配置文件生成修复

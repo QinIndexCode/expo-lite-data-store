@@ -1,7 +1,9 @@
-// src/core/file/SingleFileHandler.ts
-// 单文件处理器，用于处理单文件存储模式的文件操作
-// 创建于: 2025-11-23
-// 最后修改: 2025-12-11
+/**
+ * @module SingleFileHandler
+ * @description Single file handler for small data storage with atomic writes
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
 import * as FileSystem from 'expo-file-system';
 import { FileInfo, EncodingType } from 'expo-file-system';
@@ -22,19 +24,19 @@ export class SingleFileHandler extends FileHandlerBase {
 
   async write(data: Record<string, any>[]) {
     try {
-      // 使用基类的验证方法
+      // Use base class validation method
       this.validateArrayData(data);
 
       const hash = await this.computeHash(data);
       const content = JSON.stringify({ data, hash });
 
-      // 重试机制，最多重试3次
+      // Retry机制，最多重试3次
       let retries = 3;
       let lastError: any;
 
       while (retries > 0) {
         try {
-          // 原子写入：先写入临时文件，再重命名
+          // Atomic write: Write to temp file, then rename
           const tempFilePath = `${this.filePath}.tmp`;
 
           await withTimeout(
@@ -43,31 +45,31 @@ export class SingleFileHandler extends FileHandlerBase {
             `write temp file ${tempFilePath}`
           );
 
-          // 重命名临时文件为目标文件，实现原子写入
+          // Rename temp file to target for atomic write
           await withTimeout(
             FileSystem.moveAsync({ from: tempFilePath, to: this.filePath }),
             10000,
             `rename temp file to ${this.filePath}`
           );
 
-          // 写入成功后清除缓存
+          // Write success后清除缓存
           this.clearFileInfoCache(this.filePath);
-          return; // 成功写入，退出重试循环
+          return; // Succeed写入，退出重试循环
         } catch (error: any) {
           lastError = error;
           retries--;
 
-          // 如果是文件锁定错误，等待后重试
+          // If file locked error, wait and retry
           if (error.message && (error.message.includes('locked') || error.message.includes('busy'))) {
-            await new Promise(resolve => setTimeout(resolve, 100)); // 等待100ms后重试
+            await new Promise(resolve => setTimeout(resolve, 100)); // Wait100ms后重试
           } else {
-            // 其他错误，直接抛出
+            // Other errors, throw directly
             throw error;
           }
         }
       }
 
-      // 重试次数用尽，抛出最后一次错误
+      // Retry次数用尽，抛出最后一次错误
       throw lastError;
     } catch (error) {
       throw this.formatWriteError(`FILE_WRITE_ERROR: ${this.filePath}:`, error);
@@ -124,7 +126,7 @@ export class SingleFileHandler extends FileHandlerBase {
       if (info.exists) {
         await withTimeout(FileSystem.deleteAsync(this.filePath), 10000, `delete ${this.filePath}`);
 
-        // 删除成功后清除缓存
+        // Delete success后清除缓存
         this.clearFileInfoCache(this.filePath);
       }
     } catch (error) {

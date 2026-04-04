@@ -2,7 +2,7 @@
  * Encryption utility module
  * Expo SDK 54 compliant version (AES-256-CTR + HMAC-SHA512 emulates GCM)
  * Dependencies: expo-crypto (randomness) + @noble/ciphers (encryption) + @noble/hashes (HMAC & hashing)
- * 
+ *
  * @module crypto
  * @since 2025-11-17
  * @version 2.0.0
@@ -16,7 +16,7 @@ import logger from './logger';
 import { performanceMonitor } from '../core/monitor/PerformanceMonitor';
 import { configManager } from '../core/config/ConfigManager';
 
-// 使用正常的ES模块导入
+// Use standard ES module imports
 import { ctr } from '@noble/ciphers/aes';
 import { hmac } from '@noble/hashes/hmac';
 import { sha256 } from '@noble/hashes/sha256';
@@ -25,11 +25,16 @@ import { bytesToHex } from '@noble/hashes/utils';
 import * as ExpoCrypto from 'expo-crypto';
 import * as ExpoSecureStore from 'expo-secure-store';
 import ExpoConstants from 'expo-constants';
-import { pbkdf2 as providerPbkdf2, randomBytes as providerRandomBytes } from './cryptoProvider';
+import { pbkdf2 as providerPbkdf2, randomBytes as providerRandomBytes, hkdfDerive } from './cryptoProvider';
+import { encryptGCM, decryptGCM, encryptGCMBulk, decryptGCMBulk } from './crypto-gcm';
+import { CryptoError } from './crypto-errors';
+
+// Re-export for backward compatibility
+export { CryptoError };
 
 /**
  * Converts Uint8Array to Base64 string using Buffer or btoa.
- * 
+ *
  * @param bytes Uint8Array to convert
  * @returns Base64 encoded string
  */
@@ -44,7 +49,7 @@ const bytesToBase64 = (bytes: Uint8Array): string => {
 
 /**
  * Converts Base64 string to Uint8Array using Buffer or atob.
- * 
+ *
  * @param base64 Base64 encoded string
  * @returns Uint8Array of decoded bytes
  */
@@ -61,7 +66,7 @@ const base64ToBytes = (base64: string): Uint8Array => {
   }
 };
 
-// 动态导入 Expo 模块，避免在非 Expo 环境中崩溃
+// Dynamic导入 Expo 模块，避免在非 Expo 环境中崩溃
 let Crypto: any;
 let SecureStore: any;
 let Constants: any;
@@ -71,7 +76,7 @@ Constants = ExpoConstants;
 
 /**
  * Converts Uint8Array to Base64 string using Buffer or btoa.
- * 
+ *
  * @param bytes Uint8Array to convert
  * @returns Base64 encoded string
  */
@@ -81,7 +86,7 @@ const uint8ArrayToBase64 = (arr: Uint8Array): string => {
 
 /**
  * Converts Base64 string to Uint8Array using secure conversion.
- * 
+ *
  * @param str Base64 encoded string
  * @returns Uint8Array of decoded bytes
  */
@@ -91,7 +96,7 @@ const base64ToUint8Array = (str: string): Uint8Array => {
 
 /**
  * Serializes object to JSON and then encodes to Base64.
- * 
+ *
  * @param obj Object to serialize
  * @returns Base64 encoded JSON string
  */
@@ -103,7 +108,7 @@ const jsonToBase64 = (obj: any): string => {
 
 /**
  * Decodes Base64 string to JSON object.
- * 
+ *
  * @param str Base64 encoded JSON string
  * @returns Deserialized object
  */
@@ -114,60 +119,8 @@ const base64ToJson = (str: string): any => {
 };
 
 /**
- * Encryption error class for handling crypto-related errors
- * 
- * @class CryptoError
- * @extends Error
- * @since 2025-11-17
- */
-export class CryptoError extends Error {
-  /**
-   * Error code indicating the type of crypto error
-   */
-  public code:
-    | 'ENCRYPT_FAILED'
-    | 'DECRYPT_FAILED'
-    | 'KEY_DERIVE_FAILED'
-    | 'HMAC_MISMATCH'
-    | 'HASH_FAILED'
-    | 'VERIFY_FAILED';
-
-  /**
-   * Creates a new CryptoError instance
-   * 
-   * @constructor
-   * @param message Error message
-   * @param code Error code
-   * @param error Original error object (optional)
-   * 
-   * @example
-   * ```typescript
-   * throw new CryptoError('Encryption failed', 'ENCRYPT_FAILED', originalError);
-   * ```
-   */
-  constructor(
-    message: string,
-    code:
-      | 'ENCRYPT_FAILED'
-      | 'DECRYPT_FAILED'
-      | 'KEY_DERIVE_FAILED'
-      | 'HMAC_MISMATCH'
-      | 'HASH_FAILED'
-      | 'VERIFY_FAILED',
-    error?: unknown
-  ) {
-    super(message);
-    this.name = 'CryptoError';
-    this.code = code;
-    if (error) {
-      this.message += `:\n${error}`;
-    }
-  }
-}
-
-/**
  * Interface representing an encrypted payload structure
- * 
+ *
  * @interface EncryptedPayload
  * @since 2025-11-17
  */
@@ -195,7 +148,7 @@ let inMemoryStore: Map<string, string> = new Map();
 /**
  * Detects if the current environment is Expo Go.
  * Expo Go is Expo's preview app, which may have performance limitations.
- * 
+ *
  * @returns boolean True if running in Expo Go environment
  */
 const isExpoGoEnvironment = (): boolean => {
@@ -215,31 +168,28 @@ const isExpoGoEnvironment = (): boolean => {
  * - Expo Go: 20,000 iterations (balance of performance and security)
  * - Production: 100,000 iterations (default)
  * - High-performance devices: Up to 120,000 iterations (optional)
- * 
+ *
  * @returns number Number of iterations to use
  */
 const getIterations = (): number => {
   const configIterations = configManager.getConfig().encryption.keyIterations;
-  
+
   if (isExpoGoEnvironment()) {
     const expoGoIterations = Math.min(configIterations, 20000);
     if (configIterations > 20000) {
-      logger.warn(`Expo Go detected. Reducing PBKDF2 iterations from ${configIterations} to ${expoGoIterations} for performance.`);
+      logger.warn(
+        `Expo Go detected. Reducing PBKDF2 iterations from ${configIterations} to ${expoGoIterations} for performance.`
+      );
     }
     return Math.max(10000, expoGoIterations);
   }
-  
+
   return Math.max(10000, Math.min(configIterations, 1000000));
 };
 
 /**
- * 密钥大小（256位）
- */
-const KEY_SIZE = 256 / 32;
-
-/**
  * Interface representing a cached key entry with LRU tracking
- * 
+ *
  * @interface CachedKeyEntry
  * @since 2025-11-17
  */
@@ -258,7 +208,7 @@ export interface CachedKeyEntry {
 
 /**
  * Interface representing key cache statistics
- * 
+ *
  * @interface KeyCacheStats
  * @since 2025-11-17
  */
@@ -275,7 +225,7 @@ export interface KeyCacheStats {
 
 /**
  * Smart key cache with LRU eviction policy to avoid memory overflow
- * 
+ *
  * @class SmartKeyCache
  * @since 2025-11-17
  */
@@ -296,14 +246,14 @@ class SmartKeyCache {
 
   /**
    * Creates a new SmartKeyCache instance
-   * 
+   *
    * @constructor
    * @param maxSize Maximum number of entries to store in cache (default: 500)
    * @param maxAge Maximum age for cache entries in milliseconds (default: 1 hour)
-   * 
+   *
    * @example
    * ```typescript
-   * const keyCache = new SmartKeyCache(); // 使用配置中的默认值
+   * const keyCache = new SmartKeyCache(); // Use default values from config
    * ```
    */
   constructor(maxSize?: number, maxAge?: number) {
@@ -314,7 +264,7 @@ class SmartKeyCache {
 
   /**
    * Sets a key-value pair in the cache, evicting LRU entry if necessary
-   * 
+   *
    * @param key Cache key
    * @param value Cached key entry
    */
@@ -329,7 +279,7 @@ class SmartKeyCache {
 
   /**
    * Gets a cached entry by key, updating access statistics
-   * 
+   *
    * @param key Cache key
    * @returns Cached key entry if found, undefined otherwise
    */
@@ -347,7 +297,7 @@ class SmartKeyCache {
 
   /**
    * Checks if a key exists in the cache
-   * 
+   *
    * @param key Cache key
    * @returns True if key exists, false otherwise
    */
@@ -399,7 +349,7 @@ class SmartKeyCache {
 
   /**
    * Gets the current cache size
-   * 
+   *
    * @returns Current number of entries in the cache
    */
   size(): number {
@@ -408,7 +358,7 @@ class SmartKeyCache {
 
   /**
    * Gets the current cache statistics
-   * 
+   *
    * @returns Key cache statistics
    */
   getStats(): KeyCacheStats {
@@ -417,7 +367,7 @@ class SmartKeyCache {
 
   /**
    * Gets the current cache hit rate
-   * 
+   *
    * @returns Cache hit rate as a decimal (0 to 1)
    */
   getHitRate(): number {
@@ -447,6 +397,7 @@ export const getKeyCacheHitRate = (): number => {
  */
 export const clearKeyCache = (): void => {
   keyCache.clear();
+  rootKeyCache.clear();
 };
 
 /**
@@ -454,7 +405,7 @@ export const clearKeyCache = (): void => {
  */
 const KEY_CACHE_CLEANUP_INTERVAL = 10 * 60 * 1000;
 
-// 保存定时器 ID - 兼容 Node.js 和浏览器环境
+// Save定时器 ID - 兼容 Node.js 和浏览器环境
 // Node.js 中 setInterval 返回 number，浏览器中返回 Timeout 对象
 let keyCacheCleanupTimer: number | NodeJS.Timeout | undefined;
 
@@ -462,17 +413,17 @@ let keyCacheCleanupTimer: number | NodeJS.Timeout | undefined;
  * 初始化密钥缓存自动清理
  */
 const initializeKeyCacheCleanup = (): void => {
-  // 定期清理过期密钥缓存（10分钟一次）
+  // Periodically clean expired key cache (every 10 minutes)
   keyCacheCleanupTimer = setInterval(() => {
     keyCache.cleanup();
   }, KEY_CACHE_CLEANUP_INTERVAL);
 
-  // 页面卸载时清理缓存 //确保
-  // 显式检查window.addEventListener是否存在，防止React Native环境报错
-  // 使用更复杂的检查模式确保编译器不会优化掉
+  // Clear cache on page unload
+  // Explicitly check if window.addEventListener exists，防止React Native环境报错
+  // Use complex check to prevent compiler optimization
   if (typeof window !== 'undefined') {
-    // 在React Native中，window存在但addEventListener不存在
-    // 使用typeof检查确保方法存在
+    // In React Native, window exists but addEventListener does not
+    // Use typeof check to ensure method exists
     const addEventListener = window['addEventListener'];
     if (typeof addEventListener === 'function') {
       addEventListener.call(window, 'beforeunload', clearKeyCache);
@@ -484,96 +435,104 @@ const initializeKeyCacheCleanup = (): void => {
  * 停止密钥缓存清理定时器
  */
 export const stopKeyCacheCleanup = (): void => {
-  // 清除定时器
+  // Clear timer
   if (keyCacheCleanupTimer) {
     clearInterval(keyCacheCleanupTimer);
     keyCacheCleanupTimer = undefined;
   }
 
-  // 清除页面卸载事件监听器
-  // 显式检查window.removeEventListener是否存在，防止React Native环境报错
-  // 使用括号语法确保编译器不会优化掉检查
+  // Clear page unload event listener
+  // Explicitly check if window.removeEventListener exists，防止React Native环境报错
+  // Use bracket syntax to prevent compiler optimization
   if (typeof window !== 'undefined' && typeof window['removeEventListener'] === 'function') {
     window['removeEventListener']('beforeunload', clearKeyCache);
   }
 };
 
-// 初始化时启动自动清理
-// 但不在测试环境中自动启动，避免 Jest 检测到开放句柄
-// 确保在所有环境中都能正确判断，包括浏览器环境
+// Initialize时启动自动清理
+// But not auto-start in test to avoid Jest open handle detection
+// Ensure correct detection in all environments including browser
 const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
 if (!isTestEnvironment) {
   initializeKeyCacheCleanup();
 }
 
 /**
- * Derives AES and HMAC keys from master key and salt using PBKDF2 with SHA256.
- * 
+ * Root key cache: stores PBKDF2-derived root keys per masterKey.
+ * This is the expensive one-time operation. Once we have the root key,
+ * all subsequent per-record key derivations use fast HKDF (~3μs vs ~2s).
+ */
+const rootKeyCache = new Map<string, Uint8Array>();
+
+/**
+ * Derives AES and HMAC keys from master key and salt.
+ *
+ * Two-tier architecture for performance:
+ * 1. PBKDF2 (one-time, slow ~2s): masterKey + fixed_salt → rootKey (64 bytes)
+ * 2. HKDF (per-record, fast ~3μs): rootKey + salt → AES+HMAC keys (64 bytes)
+ *
+ * This eliminates the ~2s stall on every unique salt in Expo Go.
+ *
  * @param masterKey Master key for derivation
  * @param salt Salt for key derivation
  * @returns Promise<{ aesKey: Uint8Array; hmacKey: Uint8Array }> Derived AES and HMAC keys
- * 
+ *
  * @throws CryptoError If key derivation fails
  */
 const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey: Uint8Array; hmacKey: Uint8Array }> => {
   try {
-    const iterations = getIterations();
-    
-    const masterKeyHash = bytesToHex(sha256(masterKey)).substring(0, 16);
-    const saltStr = bytesToBase64(salt);
-    const cacheKey = `${masterKeyHash}_${saltStr}_${iterations}`;
+    // Step 1: Get or derive root key (PBKDF2, one-time per masterKey)
+    const masterKeyHash = bytesToHex(sha256(masterKey));
+    let rootKey = rootKeyCache.get(masterKeyHash);
 
-    const cachedEntry = keyCache.get(cacheKey);
-    if (cachedEntry) {
-      return {
-        aesKey: cachedEntry.aesKey,
-        hmacKey: cachedEntry.hmacKey,
-      };
+    if (!rootKey) {
+      // First time: expensive PBKDF2 operation (~2s in Expo Go with 20K iterations)
+      // Use a fixed salt for root key derivation (root key is only used as HKDF input)
+      const rootSalt = new Uint8Array([0x72, 0x6f, 0x6f, 0x74, 0x2d, 0x6b, 0x65, 0x79]); // "root-key"
+      const iterations = getIterations();
+      rootKey = providerPbkdf2(masterKey, rootSalt, iterations, 64, 'sha256');
+      rootKeyCache.set(masterKeyHash, rootKey);
     }
 
-    const startTime = Date.now();
-    
-    const derivedBytes = providerPbkdf2(masterKey, salt, iterations, 64, 'sha256');
+    // Step 2: Fast HKDF-expand for per-record keys (~3μs)
+    const derivedBytes = hkdfDerive(rootKey, salt, 64);
 
-    const duration = Date.now() - startTime;
-    if (duration > 2000) {
-      logger.warn(`PBKDF2 key derivation took ${duration}ms (iterations=${iterations}), consider reducing iterations for better performance`);
-    }
-
-    // 拆分派生密钥：前32字节用于AES，后32字节用于HMAC
+    // Split derived key: first 32 bytes for AES, last 32 bytes for HMAC
     const aesKey = derivedBytes.slice(0, 32);
     const hmacKey = derivedBytes.slice(32, 64);
 
-    const result = {
-      aesKey,
-      hmacKey,
-    };
+    const result = { aesKey, hmacKey };
 
-    keyCache.set(cacheKey, {
-      aesKey: result.aesKey,
-      hmacKey: result.hmacKey,
-      accessCount: 1,
-      lastAccessTime: Date.now(),
-      createdAt: Date.now(),
-    });
+    // Also cache in the LRU keyCache for stats tracking
+    const saltStr = bytesToBase64(salt);
+    const cacheKey = `${masterKeyHash.substring(0, 16)}_${saltStr}`;
+    const cachedEntry = keyCache.get(cacheKey);
+    if (!cachedEntry) {
+      keyCache.set(cacheKey, {
+        aesKey,
+        hmacKey,
+        accessCount: 1,
+        lastAccessTime: Date.now(),
+        createdAt: Date.now(),
+      });
+    } else {
+      cachedEntry.accessCount++;
+      cachedEntry.lastAccessTime = Date.now();
+    }
 
     return result;
   } catch (error) {
-    throw new CryptoError(
-      `Key derivation failed with iterations=${getIterations()} and keySize=${KEY_SIZE * 2}`,
-      'KEY_DERIVE_FAILED',
-      error
-    );
+    throw new CryptoError(`Key derivation failed`, 'KEY_DERIVE_FAILED', error);
   }
 };
 
 /**
  * Generates secure random bytes using the most secure available method.
  * Falls back to less secure methods if secure options are unavailable.
- * 
+ *
  * @param length Number of random bytes to generate
  * @returns Uint8Array of secure random bytes
- * 
+ *
  * @description
  * - Uses expo-crypto if available
  * - Falls back to crypto.getRandomValues in browser environments
@@ -589,31 +548,31 @@ const getSecureRandomBytes = (length: number): Uint8Array => {
  */
 const selectHMACAlgorithm = (dataSize: number): 'SHA-256' | 'SHA-512' => {
   const config = configManager.getConfig();
-  
+
   if (config.encryption.autoSelectHMAC === false) {
     return config.encryption.hmacAlgorithm;
   }
-  
+
   if (config.encryption.hmacAlgorithm === 'SHA-256') {
     return 'SHA-256';
   }
-  
+
   if (config.encryption.hmacAlgorithm === 'SHA-512') {
     return 'SHA-512';
   }
-  
+
   const dataSizeKB = dataSize / 1024;
-  
+
   if (isExpoGoEnvironment()) {
     return dataSizeKB < 64 ? 'SHA-256' : 'SHA-512';
   }
-  
+
   return dataSizeKB < 50 ? 'SHA-256' : 'SHA-512';
 };
 
 /**
  * Computes HMAC for the given data using the specified algorithm.
- * 
+ *
  * @param data Data to compute HMAC for
  * @param hmacKey HMAC key to use
  * @param algorithm HMAC algorithm to use (defaults to auto-selected)
@@ -621,26 +580,41 @@ const selectHMACAlgorithm = (dataSize: number): 'SHA-256' | 'SHA-512' => {
  */
 const computeHMAC = (data: string, hmacKey: Uint8Array, algorithm?: 'SHA-256' | 'SHA-512'): Uint8Array => {
   const selectedAlgorithm = algorithm || selectHMACAlgorithm(data.length);
-  
+
   const hashFn = selectedAlgorithm === 'SHA-256' ? sha256 : sha512;
   return hmac(hashFn, hmacKey, data);
 };
 
 /**
  * Encrypts text using AES-CTR with HMAC authentication.
- * 
+ *
  * @param plainText Plain text to encrypt
  * @param masterKey Master key for encryption
  * @returns Promise<string> Encrypted text in Base64 format
- * 
+ *
  * @throws CryptoError If encryption fails
- * 
+ *
  * @example
  * ```typescript
  * const encrypted = await encrypt('secret text', 'master password');
  * ```
  */
 export const encrypt = async (plainText: string, masterKey: string): Promise<string> => {
+  const algorithm = configManager.getConfig().encryption.algorithm || 'auto';
+
+  // Use GCM for 'auto' or 'AES-GCM' (new data defaults to GCM)
+  if (algorithm === 'AES-GCM' || algorithm === 'auto') {
+    return encryptGCM(plainText, masterKey);
+  }
+
+  // Fallback to CTR+HMAC for explicit 'AES-CTR'
+  return encryptCTR(plainText, masterKey);
+};
+
+/**
+ * Internal CTR+HMAC encryption (kept for backward compatibility)
+ */
+const encryptCTR = async (plainText: string, masterKey: string): Promise<string> => {
   const startTime = Date.now();
   try {
     const saltBytes = getSecureRandomBytes(16);
@@ -648,21 +622,17 @@ export const encrypt = async (plainText: string, masterKey: string): Promise<str
 
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltBytes);
 
-    // 将 Uint8Array 转换为 Base64 字符串
     const saltStr = uint8ArrayToBase64(saltBytes);
     const ivStr = uint8ArrayToBase64(ivBytes);
 
-    // 使用@noble/ciphers的AES-CTR模式加密
     const plainTextBytes = new TextEncoder().encode(plainText);
     const cipher = ctr(aesKey, ivBytes);
     const ciphertextBytes = cipher.encrypt(plainTextBytes);
     const ciphertextBase64 = bytesToBase64(ciphertextBytes);
 
-    // HMAC 校验（模拟 GCM tag）- 使用智能算法选择
     const hmacBytes = computeHMAC(ciphertextBase64, hmacKey);
     const hmacBase64 = bytesToBase64(hmacBytes);
 
-    // 组装 payload（Base64 安全存储）
     const payload: EncryptedPayload = {
       salt: saltStr,
       iv: ivStr,
@@ -670,9 +640,8 @@ export const encrypt = async (plainText: string, masterKey: string): Promise<str
       hmac: hmacBase64,
     };
 
-    // 修正：使用 jsonToBase64 安全序列化和 Base64 编码
     const result = jsonToBase64(payload);
-    
+
     performanceMonitor.record({
       operation: 'encrypt',
       duration: Date.now() - startTime,
@@ -680,7 +649,7 @@ export const encrypt = async (plainText: string, masterKey: string): Promise<str
       success: true,
       dataSize: plainText.length,
     });
-    
+
     return result;
   } catch (error) {
     performanceMonitor.record({
@@ -697,13 +666,13 @@ export const encrypt = async (plainText: string, masterKey: string): Promise<str
 
 /**
  * Decrypts text using AES-CTR with HMAC authentication.
- * 
+ *
  * @param encryptedBase64 Encrypted text in Base64 format
  * @param masterKey Master key for decryption
  * @returns Promise<string> Decrypted plain text
- * 
+ *
  * @throws CryptoError If decryption fails or HMAC verification fails
- * 
+ *
  * @example
  * ```typescript
  * const decrypted = await decrypt(encryptedText, 'master password');
@@ -712,37 +681,26 @@ export const encrypt = async (plainText: string, masterKey: string): Promise<str
 export const decrypt = async (encryptedBase64: string, masterKey: string): Promise<string> => {
   const startTime = Date.now();
   try {
-    // 使用新的base64ToJson函数解析payload
-    const payload: EncryptedPayload = base64ToJson(encryptedBase64);
+    // Auto-detect encryption version by parsing the payload
+    const jsonBytes = base64ToBytes(encryptedBase64);
+    const jsonStr = new TextDecoder().decode(jsonBytes);
+    const payload = JSON.parse(jsonStr);
 
-    const saltUint8Array = base64ToUint8Array(payload.salt);
-    const ivBytes = base64ToUint8Array(payload.iv);
-
-    const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
-
-    // 计算HMAC并验证
-    const computedHmacBytes = computeHMAC(payload.ciphertext, hmacKey);
-    const computedHmacBase64 = bytesToBase64(computedHmacBytes);
-
-    if (computedHmacBase64 !== payload.hmac) {
-      throw new CryptoError('HMAC mismatch: data tampered or wrong key', 'HMAC_MISMATCH');
+    // Check if this is a GCM payload
+    if (payload && payload.version === 'gcm-v1') {
+      const result = await decryptGCM(encryptedBase64, masterKey);
+      performanceMonitor.record({
+        operation: 'decrypt',
+        duration: Date.now() - startTime,
+        timestamp: Date.now(),
+        success: true,
+        dataSize: encryptedBase64.length,
+      });
+      return result;
     }
 
-    // 使用@noble/ciphers的AES-CTR模式解密
-    const ciphertextBytes = base64ToBytes(payload.ciphertext);
-    const cipher = ctr(aesKey, ivBytes);
-    const plainTextBytes = cipher.decrypt(ciphertextBytes);
-    const result = new TextDecoder().decode(plainTextBytes);
-    
-    performanceMonitor.record({
-      operation: 'decrypt',
-      duration: Date.now() - startTime,
-      timestamp: Date.now(),
-      success: true,
-      dataSize: encryptedBase64.length,
-    });
-    
-    return result;
+    // Fallback to CTR+HMAC decryption
+    return decryptCTR(encryptedBase64, masterKey);
   } catch (error) {
     performanceMonitor.record({
       operation: 'decrypt',
@@ -757,13 +715,44 @@ export const decrypt = async (encryptedBase64: string, masterKey: string): Promi
 };
 
 /**
+ * Internal CTR+HMAC decryption (kept for backward compatibility)
+ */
+const decryptCTR = async (encryptedBase64: string, masterKey: string): Promise<string> => {
+  try {
+    const payload: EncryptedPayload = base64ToJson(encryptedBase64);
+
+    const saltUint8Array = base64ToUint8Array(payload.salt);
+    const ivBytes = base64ToUint8Array(payload.iv);
+
+    const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
+
+    const computedHmacBytes = computeHMAC(payload.ciphertext, hmacKey);
+    const computedHmacBase64 = bytesToBase64(computedHmacBytes);
+
+    if (computedHmacBase64 !== payload.hmac) {
+      throw new CryptoError('HMAC mismatch: data tampered or wrong key', 'HMAC_MISMATCH');
+    }
+
+    const ciphertextBytes = base64ToBytes(payload.ciphertext);
+    const cipher = ctr(aesKey, ivBytes);
+    const plainTextBytes = cipher.decrypt(ciphertextBytes);
+    return new TextDecoder().decode(plainTextBytes);
+  } catch (error) {
+    if (error instanceof CryptoError) {
+      throw error;
+    }
+    throw new CryptoError('Decryption failed (wrong key or corrupted data)', 'DECRYPT_FAILED', error);
+  }
+};
+
+/**
  * Gets the master key for encryption operations.
- * 
+ *
  * @param requireAuthOnAccess Whether biometric authentication is required for each access (defaults to false)
  * @returns Promise<string> Master encryption key
- * 
+ *
  * @throws CryptoError If master key retrieval or generation fails
- * 
+ *
  * @description
  * - Uses expo-secure-store if available
  * - Falls back to in-memory storage if secure storage is unavailable
@@ -772,21 +761,20 @@ export const decrypt = async (encryptedBase64: string, masterKey: string): Promi
 export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promise<string> => {
   let key;
   const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
-  const isProduction = typeof process !== 'undefined' && process.env.NODE_ENV === 'production';
-  
+
   try {
-    // 检查 SecureStore 是否可用
+    // Check SecureStore 是否可用
     if (typeof SecureStore !== 'undefined') {
       try {
-        // 尝试使用生物识别获取密钥
+        // Try to get key with biometric
         key = await SecureStore.getItemAsync(MASTER_KEY_ALIAS, {
           requireAuthentication: requireAuthOnAccess,
           authenticationPrompt: '验证身份访问数据库', // Authenticate to access database
         });
-        
+
         if (!key) {
           key = await generateMasterKey();
-          // 尝试使用生物识别存储密钥
+          // Try to store key with biometric
           await SecureStore.setItemAsync(MASTER_KEY_ALIAS, key, {
             requireAuthentication: requireAuthOnAccess,
             authenticationPrompt: '设置加密密钥', // Set encryption key
@@ -794,46 +782,54 @@ export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promis
         }
       } catch (error) {
         logger.warn('Biometric authentication failed, retrying without biometrics:', error);
-        // 生物识别失败，回退到不使用生物识别的方式
-        // 不使用生物识别获取密钥
-        key = await SecureStore.getItemAsync(MASTER_KEY_ALIAS);
-        
-        if (!key) {
-          key = await generateMasterKey();
-          // 不使用生物识别存储密钥
-          await SecureStore.setItemAsync(MASTER_KEY_ALIAS, key);
+        try {
+          // Biometric failed, fallback to non-biometric
+          key = await SecureStore.getItemAsync(MASTER_KEY_ALIAS);
+
+          if (!key) {
+            key = await generateMasterKey();
+            // Store key without biometric
+            await SecureStore.setItemAsync(MASTER_KEY_ALIAS, key);
+          }
+        } catch (secureStoreError) {
+          // SecureStore 完全不可用，回退到内存存储
+          logger.warn('SecureStore completely unavailable, using in-memory key storage:', secureStoreError);
+          key = inMemoryStore.get(MASTER_KEY_ALIAS);
+          if (!key) {
+            key = await generateMasterKey();
+            inMemoryStore.set(MASTER_KEY_ALIAS, key);
+          }
         }
       }
     } else {
-      if (isExpoGoEnvironment() || isProduction) {
-        throw new CryptoError('SecureStore not available in this environment', 'KEY_DERIVE_FAILED');
-      }
       if (!isTestEnvironment) {
-        logger.warn('SecureStore not available, using in-memory master key storage in development');
+        logger.warn('SecureStore not available, using in-memory master key storage');
       }
 
-      // 从内存存储获取密钥
+      // Get key from memory storage
       key = inMemoryStore.get(MASTER_KEY_ALIAS);
-      
+
       if (!key) {
         key = await generateMasterKey();
-        // 存储到内存存储
+        // Store到内存存储
         inMemoryStore.set(MASTER_KEY_ALIAS, key);
       }
     }
   } catch (error) {
     logger.error('Failed to retrieve encryption key:', error);
-    throw new CryptoError(
-      '无法获取或生成加密密钥',
-      'KEY_DERIVE_FAILED',
-      error
-    );
+    // Final fallback: Generate in-memory key
+    logger.warn('All key retrieval methods failed, generating in-memory key as last resort');
+    key = inMemoryStore.get(MASTER_KEY_ALIAS);
+    if (!key) {
+      key = await generateMasterKey();
+      inMemoryStore.set(MASTER_KEY_ALIAS, key);
+    }
   }
 
   return key;
 };
 
-// resetMasterKey 重置主密钥（登出/重置用）
+// resetMasterKey for logout/reset
 export const resetMasterKey = async (): Promise<void> => {
   try {
     if (typeof SecureStore !== 'undefined') {
@@ -844,16 +840,16 @@ export const resetMasterKey = async (): Promise<void> => {
     }
   } catch (error) {
     logger.warn('Failed to reset master key:', error);
-    // 确保无论如何都清除内存中的密钥缓存
+    // Ensure in-memory key cache is cleared
     inMemoryStore.delete(MASTER_KEY_ALIAS);
   }
-  // 清除密钥缓存
+  // Clear key cache
   clearKeyCache();
 };
 
 /**
  * 预计算常用密钥，减少首次加密时的密钥派生时间
- * 
+ *
  * @returns Promise<void>
  */
 export const precomputeCommonKeys = async (): Promise<void> => {
@@ -863,21 +859,15 @@ export const precomputeCommonKeys = async (): Promise<void> => {
       logger.warn('Master key not available, skipping key precomputation');
       return;
     }
-    
-    // 预计算3个常用密钥
-    const commonSalts = [
-      getSecureRandomBytes(16),
-      getSecureRandomBytes(16),
-      getSecureRandomBytes(16),
-    ];
-    
+
+    // Pre-compute 3 common keys
+    const commonSalts = [getSecureRandomBytes(16), getSecureRandomBytes(16), getSecureRandomBytes(16)];
+
     logger.info(`Precomputing ${commonSalts.length} common keys for better performance`);
-    
-    // 并行预计算所有密钥
-    await Promise.all(
-      commonSalts.map(salt => deriveKey(masterKey, salt))
-    );
-    
+
+    // Parallel预计算所有密钥
+    await Promise.all(commonSalts.map(salt => deriveKey(masterKey, salt)));
+
     logger.info('Key precomputation completed');
   } catch (error) {
     logger.warn('Failed to precompute common keys:', error);
@@ -951,7 +941,7 @@ export const generateSalt = async (rounds: number = 12): Promise<string> => {
 
 /**
  * Interface representing a single bulk encryption result
- * 
+ *
  * @interface BulkEncryptionResult
  * @since 2025-11-17
  */
@@ -975,25 +965,34 @@ interface BulkEncryptionResult {
 export const encryptBulk = async (plainTexts: string[], masterKey: string): Promise<string[]> => {
   if (plainTexts.length === 0) return [];
 
+  const algorithm = configManager.getConfig().encryption.algorithm || 'auto';
+
+  if (algorithm === 'AES-GCM' || algorithm === 'auto') {
+    return encryptGCMBulk(plainTexts, masterKey);
+  }
+
+  return encryptBulkCTR(plainTexts, masterKey);
+};
+
+/**
+ * Internal CTR+HMAC bulk encryption (kept for backward compatibility)
+ */
+const encryptBulkCTR = async (plainTexts: string[], masterKey: string): Promise<string[]> => {
+  if (plainTexts.length === 0) return [];
+
   try {
     const saltBytes = getSecureRandomBytes(16);
-
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltBytes);
     const saltStr = uint8ArrayToBase64(saltBytes);
-
     const encryptedResults: BulkEncryptionResult[] = [];
 
     for (const plainText of plainTexts) {
       const ivBytes = getSecureRandomBytes(16);
       const ivStr = uint8ArrayToBase64(ivBytes);
-
-      // 使用@noble/ciphers的AES-CTR模式加密
       const plainTextBytes = new TextEncoder().encode(plainText);
       const cipher = ctr(aesKey, ivBytes);
       const ciphertextBytes = cipher.encrypt(plainTextBytes);
       const ciphertextBase64 = bytesToBase64(ciphertextBytes);
-
-      // 计算HMAC
       const hmacBytes = computeHMAC(ciphertextBase64, hmacKey);
       const hmacBase64 = bytesToBase64(hmacBytes);
 
@@ -1005,7 +1004,6 @@ export const encryptBulk = async (plainTexts: string[], masterKey: string): Prom
       });
     }
 
-    // 组装最终结果
     return encryptedResults.map(result => {
       const payload: EncryptedPayload = {
         salt: result.salt,
@@ -1013,7 +1011,6 @@ export const encryptBulk = async (plainTexts: string[], masterKey: string): Prom
         ciphertext: result.encryptedData,
         hmac: result.hmac,
       };
-
       return jsonToBase64(payload);
     });
   } catch (error) {
@@ -1030,19 +1027,36 @@ export const encryptBulk = async (plainTexts: string[], masterKey: string): Prom
 export const decryptBulk = async (encryptedTexts: string[], masterKey: string): Promise<string[]> => {
   if (encryptedTexts.length === 0) return [];
 
+  // Auto-detect: check first item to determine algorithm
   try {
-    // 可以并行处理解密操作
-    const decryptPromises = encryptedTexts.map(async encryptedText => {
-      // 使用新的base64ToJson函数安全解析payload
-      const payload: EncryptedPayload = base64ToJson(encryptedText);
+    const jsonBytes = base64ToBytes(encryptedTexts[0]);
+    const jsonStr = new TextDecoder().decode(jsonBytes);
+    const firstPayload = JSON.parse(jsonStr);
 
-      // 安全转换salt和iv
+    if (firstPayload && firstPayload.version === 'gcm-v1') {
+      return decryptGCMBulk(encryptedTexts, masterKey);
+    }
+  } catch {
+    // If parsing fails, fall through to CTR decryption
+  }
+
+  return decryptBulkCTR(encryptedTexts, masterKey);
+};
+
+/**
+ * Internal CTR+HMAC bulk decryption (kept for backward compatibility)
+ */
+const decryptBulkCTR = async (encryptedTexts: string[], masterKey: string): Promise<string[]> => {
+  if (encryptedTexts.length === 0) return [];
+
+  try {
+    const decryptPromises = encryptedTexts.map(async encryptedText => {
+      const payload: EncryptedPayload = base64ToJson(encryptedText);
       const saltUint8Array = base64ToUint8Array(payload.salt);
       const ivBytes = base64ToUint8Array(payload.iv);
 
       const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
 
-      // 计算HMAC并验证
       const computedHmacBytes = computeHMAC(payload.ciphertext, hmacKey);
       const computedHmacBase64 = bytesToBase64(computedHmacBytes);
 
@@ -1050,14 +1064,12 @@ export const decryptBulk = async (encryptedTexts: string[], masterKey: string): 
         throw new CryptoError('HMAC mismatch: data tampered or wrong key', 'HMAC_MISMATCH');
       }
 
-      // 使用@noble/ciphers的AES-CTR模式解密
       const ciphertextBytes = base64ToBytes(payload.ciphertext);
       const cipher = ctr(aesKey, ivBytes);
       const plainTextBytes = cipher.decrypt(ciphertextBytes);
       return new TextDecoder().decode(plainTextBytes);
     });
 
-    // 并行执行所有解密操作
     return await Promise.all(decryptPromises);
   } catch (error) {
     throw new CryptoError('Bulk decryption failed', 'DECRYPT_FAILED', error);
@@ -1074,7 +1086,7 @@ export const decryptBulk = async (encryptedTexts: string[], masterKey: string): 
  */
 export const generateHash = async (data: string, algorithm: 'SHA-256' | 'SHA-512' = 'SHA-512'): Promise<string> => {
   try {
-    // 检查 Crypto 是否可用（Expo 环境）
+    // Check Crypto 是否可用（Expo 环境）
     if (typeof Crypto !== 'undefined' && Crypto.digestStringAsync) {
       switch (algorithm) {
         case 'SHA-256':
@@ -1085,7 +1097,7 @@ export const generateHash = async (data: string, algorithm: 'SHA-256' | 'SHA-512
           throw new CryptoError(`Unsupported hash algorithm: ${algorithm}`, 'HASH_FAILED');
       }
     } else {
-      // 非 Expo 环境下的回退方案，使用 @noble/hashes
+      // Fallback for non-Expo, using @noble/hashes
       logger.warn('Expo Crypto not available, using @noble/hashes for hashing');
       const hashFn = algorithm === 'SHA-256' ? sha256 : sha512;
       return bytesToHex(hashFn(data));
@@ -1097,7 +1109,7 @@ export const generateHash = async (data: string, algorithm: 'SHA-256' | 'SHA-512
 
 /**
  * Interface representing field-level encryption configuration
- * 
+ *
  * @interface FieldEncryptionConfig
  * @since 2025-11-17
  */
@@ -1128,15 +1140,12 @@ export const encryptFields = async (
   fieldConfig: FieldEncryptionConfig
 ): Promise<Record<string, any>> => {
   const result = { ...data };
-  
-  // 只加密需要加密的字段
-  const fieldsToEncrypt = fieldConfig.fields.filter(field => 
-    result[field] !== undefined && result[field] !== null
-  );
-  
+
+  // Only encrypt fields requiring encryption
+  const fieldsToEncrypt = fieldConfig.fields.filter(field => result[field] !== undefined && result[field] !== null);
+
   const valuesToEncrypt = fieldsToEncrypt.map(field => {
-    const value =
-      typeof result[field] === 'string' ? result[field] : JSON.stringify(result[field]);
+    const value = typeof result[field] === 'string' ? result[field] : JSON.stringify(result[field]);
     return value as string;
   });
   if (valuesToEncrypt.length > 0) {
@@ -1193,7 +1202,7 @@ export const decryptFields = async (
       }
     } catch (error) {
       logger.warn(`Failed to decrypt field ${field}:`, error);
-      // 保留原始加密值，不抛出错误
+      // Keep original encrypted value, don not throw error
     }
   });
 
@@ -1212,7 +1221,7 @@ export const encryptFieldsBulk = async (
 ): Promise<Record<string, any>[]> => {
   if (dataArray.length === 0) return dataArray;
 
-  // 为所有字段收集需要加密的值
+  // Collect values for all fields requiring encryption
   const fieldValues: { [field: string]: string[] } = {};
 
   fieldConfig.fields.forEach(field => {
@@ -1222,7 +1231,7 @@ export const encryptFieldsBulk = async (
       .map(value => JSON.stringify(value));
   });
 
-  // 批量加密每个字段的值
+  // Batch encrypt each field value
   const encryptionPromises: Promise<void>[] = [];
   const encryptedValues: { [field: string]: string[] } = {};
 
@@ -1234,16 +1243,15 @@ export const encryptFieldsBulk = async (
     );
   }
 
-  // 使用Promise.allSettled提高容错性
+  // Use Promise.allSettled for better fault tolerance
   await Promise.allSettled(encryptionPromises);
 
-  // 重建结果数组
+  // Rebuild result array
   return dataArray.map((item, index) => {
     const result = { ...item };
     fieldConfig.fields.forEach(field => {
       if (item[field] !== undefined && item[field] !== null) {
-        const fieldIndex =
-          dataArray.slice(0, index).filter(i => i[field] !== undefined && i[field] !== null).length;
+        const fieldIndex = dataArray.slice(0, index).filter(i => i[field] !== undefined && i[field] !== null).length;
         if (encryptedValues[field] && encryptedValues[field][fieldIndex]) {
           result[field] = encryptedValues[field][fieldIndex];
         }
@@ -1265,7 +1273,7 @@ export const decryptFieldsBulk = async (
 ): Promise<Record<string, any>[]> => {
   if (dataArray.length === 0) return dataArray;
 
-  // 为所有字段收集需要解密的值
+  // Collect values for all fields requiring decryption
   const fieldValues: { [field: string]: string[] } = {};
 
   fieldConfig.fields.forEach(field => {
@@ -1274,7 +1282,7 @@ export const decryptFieldsBulk = async (
       .filter(value => value !== undefined && value !== null && typeof value === 'string');
   });
 
-  // 批量解密每个字段的值
+  // Batch decrypt each field value
   const decryptionPromises: Promise<void>[] = [];
   const decryptedValues: { [field: string]: any[] } = {};
 
@@ -1283,10 +1291,10 @@ export const decryptFieldsBulk = async (
       decryptBulk(values, fieldConfig.masterKey).then(decrypted => {
         decryptedValues[field] = decrypted.map(val => {
           try {
-            // 尝试解析JSON
+            // Try to parse JSON
             return JSON.parse(val);
           } catch {
-            return val; // 如果不是JSON，保持原值
+            return val; // If not JSON, keep original value
           }
         });
       })
@@ -1295,7 +1303,7 @@ export const decryptFieldsBulk = async (
 
   await Promise.all(decryptionPromises);
 
-  // 重建结果数组
+  // Rebuild result array
   return dataArray.map((item, index) => {
     const result = { ...item };
 

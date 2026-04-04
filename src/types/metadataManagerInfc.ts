@@ -1,38 +1,43 @@
-// src/types/metadataManagerInfc.ts
+/**
+ * @module metadataManagerInfc
+ * @description Metadata manager interface definition
+ * @since 2025-11-19
+ * @version 1.0.0
+ */
+
 import type { TableSchema } from '../core/meta/MetadataManager';
 
 /**
- * 元数据管理器接口
- * 定义了元数据管理的核心功能，用于降低模块间的耦合度
+ * Metadata manager interface defining core functionality to reduce module coupling
  */
 export interface IMetadataManager {
   /**
-   * 获取表的元数据
+   * Get metadata for a table
    */
   get(tableName: string): TableSchema | undefined;
 
   /**
-   * 获取表的路径
+   * Get the path for a table
    */
   getPath(tableName: string): string;
 
   /**
-   * 更新表的元数据
+   * Update metadata for a table
    */
   update(tableName: string, updates: Partial<TableSchema>): void;
 
   /**
-   * 删除表的元数据
+   * Delete metadata for a table
    */
   delete(tableName: string): void;
 
   /**
-   * 获取所有表名
+   * Get all table names
    */
   allTables(): string[];
 
   /**
-   * 获取表的记录数
+   * Get record count for a table
    */
   count(tableName: string): number;
 }

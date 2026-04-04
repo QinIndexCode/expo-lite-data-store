@@ -61,23 +61,79 @@ const readAsStringAsync = async (uri: string, options?: { encoding?: EncodingTyp
 
 // Mock deleteAsync function
 const deleteAsync = async (uri: string, options?: { idempotent?: boolean }): Promise<void> => {
-  // Simple mock implementation that deletes file or directory
+  // Recursive delete: remove all files and subdirectories under the URI
+  const uriPrefix = uri.endsWith('/') ? uri : uri + '/';
+  
+  // Delete all files under the directory
+  for (const [fileUri] of Object.entries(mockFileSystem)) {
+    if (fileUri === uri || fileUri.startsWith(uriPrefix)) {
+      delete mockFileSystem[fileUri];
+    }
+  }
+  
+  // Delete all subdirectories
+  for (const [dirUri] of Object.entries(mockDirectories)) {
+    if (dirUri === uri || dirUri.startsWith(uriPrefix)) {
+      delete mockDirectories[dirUri];
+    }
+  }
+  
+  // Also remove from parent directory contents
+  const parentDirUri = uri.substring(0, uri.lastIndexOf('/'));
+  const parentSlashIndex = parentDirUri.lastIndexOf('/');
+  const actualParentDir = parentSlashIndex >= 0 ? parentDirUri.substring(0, parentSlashIndex + 1) : parentDirUri + '/';
+  const name = uri.endsWith('/') ? uri.slice(0, -1).split('/').pop() : uri.split('/').pop();
+  
+  if (name && mockDirectories[actualParentDir]) {
+    mockDirectories[actualParentDir] = mockDirectories[actualParentDir].filter(n => n !== name);
+  }
+  
+  // Clean up the directory entry itself
   delete mockFileSystem[uri];
   delete mockDirectories[uri];
-
-  // Also remove from parent directory contents if it's a file
-  const directoryUri = uri.substring(0, uri.lastIndexOf('/') + 1);
-  const fileName = uri.substring(uri.lastIndexOf('/') + 1);
-  if (mockDirectories[directoryUri]) {
-    mockDirectories[directoryUri] = mockDirectories[directoryUri].filter(name => name !== fileName);
-  }
 };
 
 // Mock moveAsync function
 const moveAsync = async (options: { from: string; to: string }): Promise<void> => {
-  // Simple mock implementation that moves file or directory
   const { from, to } = options;
-  if (mockFileSystem[from]) {
+  
+  // Handle directory move: move all files under the directory
+  if (mockDirectories[from] || (mockFileSystem[from] && mockFileSystem[from].type === 'directory')) {
+    // Move directory entry in mockFileSystem
+    if (mockFileSystem[from]) {
+      mockFileSystem[to] = mockFileSystem[from];
+      delete mockFileSystem[from];
+    } else {
+      // If not in mockFileSystem, create directory entry
+      mockFileSystem[to] = { type: 'directory' };
+    }
+    
+    // Move directory entry in mockDirectories
+    mockDirectories[to] = mockDirectories[from] ? [...mockDirectories[from]] : [];
+    delete mockDirectories[from];
+    
+    // Move all files under the directory
+    const fromPrefix = from.endsWith('/') ? from : from + '/';
+    const toPrefix = to.endsWith('/') ? to : to + '/';
+    
+    for (const [uri, value] of Object.entries(mockFileSystem)) {
+      if (uri.startsWith(fromPrefix)) {
+        const newUri = toPrefix + uri.substring(fromPrefix.length);
+        mockFileSystem[newUri] = value;
+        delete mockFileSystem[uri];
+      }
+    }
+    
+    // Move all subdirectories
+    for (const [dirUri, contents] of Object.entries(mockDirectories)) {
+      if (dirUri.startsWith(fromPrefix) && dirUri !== from) {
+        const newDirUri = toPrefix + dirUri.substring(fromPrefix.length);
+        mockDirectories[newDirUri] = contents;
+        delete mockDirectories[dirUri];
+      }
+    }
+  } else if (mockFileSystem[from]) {
+    // Handle single file move
     mockFileSystem[to] = mockFileSystem[from];
     delete mockFileSystem[from];
 

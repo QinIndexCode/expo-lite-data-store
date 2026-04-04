@@ -1,36 +1,39 @@
-//src/cache/cacheAdapter.ts
-// 缓存适配器接口 / Cache Adapter Interface
+/**
+ * @module cacheAdapterInfc
+ * @description Cache adapter interface definition
+ * @since 2025-11-19
+ * @version 1.0.0
+ */
 
-//定义缓存适配器接口
+/**
+ * Cache adapter interface
+ */
 export interface ICacheAdapter {
   /**
-   *
-   *
-   *
-   *
-   * @param key 缓存键 / Cache Key
-   * @param value 缓存值 / Cache Value
-   * @param options 缓存选项 / Cache Options
+   * Set a cache value
+   * @param key Cache key
+   * @param value Cache value
+   * @param options Cache options
    * @returns Promise<void>
    */
   set(key: string, value: any, options?: any): Promise<void>;
 
   /**
-   * 获取缓存值 / Get Cache Value
-   * @param key 缓存键 / Cache Key
+   * Get a cached value
+   * @param key Cache key
    * @returns Promise<any>
    */
   get(key: string): Promise<any>;
 
   /**
-   * 删除缓存值 / Delete Cache Value
-   * @param key 缓存键 / Cache Key
+   * Delete a cached value
+   * @param key Cache key
    * @returns Promise<void>
    */
   delete(key: string): Promise<void>;
 
   /**
-   * 清空缓存 / Clear Cache
+   * Clear all cache
    * @returns Promise<void>
    */
   clear(): Promise<void>;

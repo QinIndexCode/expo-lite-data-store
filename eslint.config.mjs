@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  // 彻底忽略所有不该检查的文件
+  // Ignore all files that should not be checked
   {
     ignores: [
       'dist/**',
@@ -18,7 +18,7 @@ export default tseslint.config(
     ],
   },
 
-  // 只检查真正的源码
+  // Only check actual source files
   {
     files: ['src/**/*.ts', 'src/**/*.tsx'],
     plugins: {
@@ -29,7 +29,7 @@ export default tseslint.config(
       parserOptions: { project: true, tsconfigRootDir: import.meta.dirname },
     },
     rules: {
-      // 把所有会卡死你的规则全部关掉！！！
+      // Disable rules that cause issues
       'no-case-declarations': 'off',
       'no-useless-escape': 'off',
       'prefer-const': 'off',

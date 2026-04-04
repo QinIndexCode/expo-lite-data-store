@@ -1,7 +1,9 @@
-// src/core/api/ValidationWrapper.ts
-// 验证包装器类，负责输入数据验证
-// 创建于: 2025-12-03
-// 最后修改: 2025-12-11
+/**
+ * @module ValidationWrapper
+ * @description Validation wrapper for input data verification
+ * @since 2025-12-03
+ * @version 1.0.0
+ */
 
 import { StorageError } from '../../types/storageErrorInfc';
 import { FILE_OPERATION, REGEX } from '../constants';

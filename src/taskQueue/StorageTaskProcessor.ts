@@ -1,5 +1,9 @@
-// src/taskQueue/StorageTaskProcessor.ts
-// 存储任务处理器
+/**
+ * @module StorageTaskProcessor
+ * @description Storage task processor for queue-based storage operations
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
 import { FileSystemStorageAdapter } from '../core/adapter/FileSystemStorageAdapter';
 import { Task, TaskProcessor } from './taskQueue';

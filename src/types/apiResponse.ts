@@ -1,8 +1,12 @@
-// src/types/apiResponse.ts
-// 统一API响应格式定义
+/**
+ * @module apiResponse
+ * @description Unified API response format definitions
+ * @since 2025-11-19
+ * @version 1.0.0
+ */
 
 /**
- * API响应状态枚举
+ * API response status enum
  */
 export enum ApiResponseStatus {
   SUCCESS = 'success',
@@ -10,119 +14,119 @@ export enum ApiResponseStatus {
 }
 
 /**
- * API响应格式接口
+ * API response interface
  */
 export interface ApiResponse<T = any> {
   /**
-   * 操作是否成功
+   * Whether the operation succeeded
    */
   success: boolean;
 
   /**
-   * 响应数据（成功时返回）
+   * Response data (returned on success)
    */
   data?: T;
 
   /**
-   * 错误信息（失败时返回）
+   * Error information (returned on failure)
    */
   error?: {
     /**
-     * 错误码
+     * Error code
      */
     code: string;
 
     /**
-     * 错误消息
+     * Error message
      */
     message: string;
 
     /**
-     * 错误详情
+     * Error details
      */
     details?: string;
 
     /**
-     * 错误建议
+     * Suggested resolution
      */
     suggestion?: string;
 
     /**
-     * 原始错误
+     * Original error
      */
     cause?: any;
   };
 
   /**
-   * 响应元数据
+   * Response metadata
    */
   meta: {
     /**
-     * 请求ID
+     * Request ID
      */
     requestId: string;
 
     /**
-     * 响应时间戳
+     * Response timestamp
      */
     timestamp: number;
 
     /**
-     * API版本
+     * API version
      */
     version: string;
 
     /**
-     * 处理时间（毫秒）
+     * Processing time in milliseconds
      */
     duration?: number;
 
     /**
-     * 处理时间（毫秒）- 兼容旧版本
+     * Processing time in milliseconds - legacy compatibility
      */
     processingTime?: number;
   };
 
   /**
-   * 响应状态（字符串格式）
+   * Response status (string format)
    */
   status?: string;
 }
 
 /**
- * 批量操作响应格式接口
+ * Bulk operation response interface
  */
 export interface BulkApiResponse<T = any> extends ApiResponse {
   /**
-   * 批量操作结果
+   * Bulk operation results
    */
   data: {
     /**
-     * 成功的操作数
+     * Number of successful operations
      */
     successCount: number;
 
     /**
-     * 失败的操作数
+     * Number of failed operations
      */
     failureCount: number;
 
     /**
-     * 操作结果列表
+     * List of operation results
      */
     results: Array<{
       /**
-       * 操作状态
+       * Operation status
        */
       status: ApiResponseStatus;
 
       /**
-       * 操作数据
+       * Operation data
        */
       data?: T;
 
       /**
-       * 操作错误
+       * Operation error
        */
       error?: ApiResponse['error'];
     }>;
@@ -130,10 +134,10 @@ export interface BulkApiResponse<T = any> extends ApiResponse {
 }
 
 /**
- * 创建成功响应
- * @param data 响应数据
- * @param options 响应选项
- * @returns 成功响应对象
+ * Create a success response
+ * @param data Response data
+ * @param options Response options
+ * @returns Success response object
  */
 export function createSuccessResponse<T>(
   data: T,
@@ -156,10 +160,10 @@ export function createSuccessResponse<T>(
 }
 
 /**
- * 创建错误响应
- * @param error 错误信息
- * @param options 响应选项
- * @returns 错误响应对象
+ * Create an error response
+ * @param error Error information
+ * @param options Response options
+ * @returns Error response object
  */
 export function createErrorResponse(
   error: {
@@ -189,8 +193,8 @@ export function createErrorResponse(
 }
 
 /**
- * 生成请求ID
- * @returns 请求ID
+ * Generate a request ID
+ * @returns Request ID
  */
 function generateRequestId(): string {
   return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);

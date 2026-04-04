@@ -1,7 +1,9 @@
-// src/core/query/QueryEngine.ts
-// 查询引擎，支持数据过滤、排序、分页和聚合操作
-// 创建于: 2025-11-28
-// 最后修改: 2025-12-12
+/**
+ * @module QueryEngine
+ * @description Query engine for data filtering, sorting, pagination, and aggregation
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
 import type { FilterCondition } from '../../types/storageTypes';
 import {
@@ -17,16 +19,70 @@ import logger from '../../utils/logger';
 
 const MAX_FILTER_DEPTH = 10;
 
+/**
+ * Escapes special regex characters in a string
+ */
+const escapeRegExp = (str: string): string => {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
+/**
+ * Converts SQL LIKE pattern to RegExp
+ * Compiles once for reuse across all items
+ */
+const likePatternToRegex = (pattern: string): RegExp => {
+  const escaped = escapeRegExp(pattern);
+  const regexPattern = escaped.replace(/%/g, '.*').replace(/_/g, '.');
+  return new RegExp(`^${regexPattern}$`, 'i');
+};
+
+/**
+ * Pre-compiles all $like patterns in a filter condition
+ */
+const precompileLikePatterns = (condition: any): Map<string, RegExp> => {
+  const patterns = new Map<string, RegExp>();
+  if (!condition || typeof condition !== 'object') return patterns;
+
+  const collectPatterns = (cond: any): void => {
+    if (!cond || typeof cond !== 'object') return;
+    if ('$and' in cond && Array.isArray(cond.$and)) {
+      cond.$and.forEach(collectPatterns);
+      return;
+    }
+    if ('$or' in cond && Array.isArray(cond.$or)) {
+      cond.$or.forEach(collectPatterns);
+      return;
+    }
+    for (const [, value] of Object.entries(cond)) {
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        for (const [op, opValue] of Object.entries(value)) {
+          if (op === '$like' && typeof opValue === 'string') {
+            if (!patterns.has(opValue)) {
+              patterns.set(opValue, likePatternToRegex(opValue));
+            }
+          }
+        }
+      }
+    }
+  };
+
+  collectPatterns(condition);
+  return patterns;
+};
+
 export class QueryEngine {
   private static filterWithDepth<T extends Record<string, any>>(
     data: T[],
-    condition: FilterCondition | undefined,
-    depth: number
+    condition: any,
+    depth: number,
+    likePatterns?: Map<string, RegExp>
   ): T[] {
     if (!condition) return data;
 
     if (depth > MAX_FILTER_DEPTH) {
-      logger.error(`QueryEngine: Maximum filter depth (${MAX_FILTER_DEPTH}) exceeded. This may indicate a circular reference or overly complex query.`);
+      logger.error(
+        `QueryEngine: Maximum filter depth (${MAX_FILTER_DEPTH}) exceeded. This may indicate a circular reference or overly complex query.`
+      );
       throw new Error(`Maximum filter depth (${MAX_FILTER_DEPTH}) exceeded`);
     }
 
@@ -61,12 +117,12 @@ export class QueryEngine {
       for (const [key, value] of Object.entries(condition)) {
         const itemValue = item[key];
 
-        // 操作符条件
+        // Operator condition
         if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
           for (const [op, opValue] of Object.entries(value)) {
             switch (op) {
               case '$eq':
-                // 处理null和undefined的特殊情况
+                // Processnull和undefined的特殊情况
                 if (itemValue === null || itemValue === undefined) {
                   if (itemValue !== opValue) {
                     matches = false;
@@ -76,7 +132,7 @@ export class QueryEngine {
                 }
                 break;
               case '$ne':
-                // 处理null和undefined的特殊情况
+                // Processnull和undefined的特殊情况
                 if (itemValue === null || itemValue === undefined) {
                   if (itemValue === opValue) {
                     matches = false;
@@ -109,9 +165,9 @@ export class QueryEngine {
                 if (!Array.isArray(opValue)) {
                   matches = false;
                 } else {
-                  // 使用Set优化性能
+                  // Use Set for performance
                   const opValueSet = new Set(opValue);
-                  // 处理null和undefined的特殊情况
+                  // Processnull和undefined的特殊情况
                   if (itemValue === null || itemValue === undefined) {
                     if (!opValueSet.has(itemValue)) {
                       matches = false;
@@ -131,9 +187,9 @@ export class QueryEngine {
                 if (!Array.isArray(opValue)) {
                   matches = false;
                 } else {
-                  // 使用Set优化性能
+                  // Use Set for performance
                   const opValueSet = new Set(opValue);
-                  // 处理null和undefined的特殊情况
+                  // Processnull和undefined的特殊情况
                   if (itemValue === null || itemValue === undefined) {
                     if (opValueSet.has(itemValue)) {
                       matches = false;
@@ -153,10 +209,16 @@ export class QueryEngine {
                 if (typeof itemValue !== 'string' || typeof opValue !== 'string') {
                   matches = false;
                 } else {
-                  const pattern = opValue.replace(/%/g, '.*');
-                  const regex = new RegExp(`^${pattern}$`, 'i');
-                  if (!regex.test(itemValue)) {
-                    matches = false;
+                  const regex = likePatterns?.get(opValue);
+                  if (regex) {
+                    if (!regex.test(itemValue)) {
+                      matches = false;
+                    }
+                  } else {
+                    const fallbackRegex = likePatternToRegex(opValue);
+                    if (!fallbackRegex.test(itemValue)) {
+                      matches = false;
+                    }
                   }
                 }
                 break;
@@ -167,21 +229,21 @@ export class QueryEngine {
             if (!matches) break;
           }
         }
-        // 简单值比较
+        // Simple value comparison
         else {
-          // 处理null和undefined的特殊情况
+          // Processnull和undefined的特殊情况
           if (itemValue === null || itemValue === undefined) {
             if (itemValue !== value) {
               matches = false;
             }
-          } 
-          // 处理数组比较，使用JSON.stringify比较内容
+          }
+          // Process数组比较，使用JSON.stringify比较内容
           else if (Array.isArray(itemValue) && Array.isArray(value)) {
             if (JSON.stringify(itemValue) !== JSON.stringify(value)) {
               matches = false;
             }
           }
-          // 普通值比较
+          // Ordinary value comparison
           else if (itemValue !== value) {
             matches = false;
           }
@@ -195,11 +257,12 @@ export class QueryEngine {
   }
 
   static filter<T extends Record<string, any>>(data: T[], condition?: FilterCondition): T[] {
-    return this.filterWithDepth(data, condition, 0);
+    const likePatterns = precompileLikePatterns(condition);
+    return this.filterWithDepth(data, condition, 0, likePatterns);
   }
 
   static update<T extends Record<string, any>>(originalData: T, updateData: Record<string, any>): T {
-    // 使用集中化的更新操作符处理函数
+    // Use centralized update operator handler
     return processUpdateOperators(originalData, updateData);
   }
 
@@ -207,20 +270,24 @@ export class QueryEngine {
    * 批量更新数据，支持更新操作符
    * 调整参数顺序：必需参数在前，可选参数在后
    */
-  static bulkUpdate<T extends Record<string, any>>(data: T[], updateData: Record<string, any>, condition?: FilterCondition): T[] {
+  static bulkUpdate<T extends Record<string, any>>(
+    data: T[],
+    updateData: Record<string, any>,
+    condition?: FilterCondition
+  ): T[] {
     if (!updateData || Object.keys(updateData).length === 0) {
       return data;
     }
-    
+
     const filteredData = condition ? this.filter(data, condition) : data;
     const updatedDataMap = new Map<string | number, T>();
-    
-    // 收集需要更新的数据的映射
+
+    // Collect data mapping for update
     for (const item of filteredData) {
       updatedDataMap.set(item.id || item._id, item);
     }
-    
-    // 更新数据
+
+    // Update数据
     return data.map(item => {
       const id = item.id || item._id;
       if (updatedDataMap.has(id)) {
@@ -234,22 +301,22 @@ export class QueryEngine {
    * 分页处理，优化切片操作
    */
   static paginate<T>(data: T[], skip = 0, limit?: number): T[] {
-    // 优化：如果skip大于等于数据长度，直接返回空数组
+    // Optimization: If skip >= data length, return empty array
     if (skip >= data.length) {
       return [];
     }
 
-    // 优化：当limit为0时，返回空数组
+    // Optimization: When limit is 0, return empty array
     if (limit === 0) {
       logger.warn('Warning: limit=0 was passed to paginate, returning empty array as per convention');
       return [];
     }
 
-    // 优化：计算实际需要的结束索引
+    // Optimization: Calculate actual end index
     const startIndex = skip;
     const endIndex = limit !== undefined ? Math.min(startIndex + limit, data.length) : data.length;
 
-    // 优化：如果startIndex为0且endIndex为数据长度，直接返回原数组
+    // Optimization: If startIndex=0 and endIndex=data length, return original
     if (startIndex === 0 && endIndex === data.length) {
       return data;
     }
@@ -286,31 +353,31 @@ export class QueryEngine {
     data: any[],
     sortBy: string | string[]
   ): string {
-    // 如果用户指定了算法，直接使用
+    // If user specified algorithm, use directly
     if (requestedAlgorithm && requestedAlgorithm !== 'default') {
       return requestedAlgorithm;
     }
 
-    // 智能选择算法
+    // Smart algorithm selection
     const dataSize = data.length;
     const sortFields = Array.isArray(sortBy) ? sortBy : [sortBy];
 
-    // 小数据集使用默认算法
+    // Use default algorithm for small datasets
     if (dataSize < QUERY.COUNTING_SORT_THRESHOLD) {
       return 'default';
     }
 
-    // 大数据集使用归并排序（稳定且高效）
+    // Use merge sort for large datasets (stable and efficient)
     if (dataSize > QUERY.MERGE_SORT_THRESHOLD) {
       return 'merge';
     }
 
-    // 检查是否适合计数排序（字段值范围有限）
+    // Check if适合计数排序（字段值范围有限）
     if (sortFields.length === 1 && sortFields[0] !== undefined && this.isSuitableForCountingSort(data, sortFields[0])) {
       return 'counting';
     }
 
-    // 默认使用归并排序（平衡稳定性和性能）
+    // Default to merge sort (balance stability and performance)
     return 'merge';
   }
 
@@ -323,7 +390,7 @@ export class QueryEngine {
     const values = new Set();
     let uniqueCount = 0;
 
-    // 收集唯一值，限制检查数量以提高性能
+    // Collect unique values, limit check count for performance
     const sampleSize = Math.min(data.length, 1000);
     for (let i = 0; i < sampleSize && uniqueCount < 50; i++) {
       const value = data[i][field];
@@ -335,7 +402,7 @@ export class QueryEngine {
       }
     }
 
-    // 如果唯一值数量少于总数的10%，且绝对数量小于阈值，适合计数排序
+    // If unique values < 10% of total and below threshold, use counting sort
     return uniqueCount < Math.min(data.length * 0.1, QUERY.COUNTING_SORT_THRESHOLD);
   }
 
@@ -351,15 +418,15 @@ export class QueryEngine {
   ): T[] {
     if (!sortBy || data.length === 0) return data;
 
-    // 选择排序算法
+    // Select sorting algorithm
     const selectedAlgorithm = this.selectSortAlgorithm(algorithm, data, sortBy);
     const sortFunction = this.getSortFunction(selectedAlgorithm);
 
-    // 处理多字段排序
+    // Process多字段排序
     if (Array.isArray(sortBy)) {
       const sortOrders = Array.isArray(order) ? order : new Array(sortBy.length).fill(order || 'asc');
 
-      // 递归应用排序，从最后一个字段开始向前排序
+      // Recursive应用排序，从最后一个字段开始向前排序
       let sortedData = [...data];
       for (let i = sortBy.length - 1; i >= 0; i--) {
         const field = sortBy[i];
@@ -368,7 +435,7 @@ export class QueryEngine {
       }
       return sortedData;
     } else {
-      // 单字段排序
+      // Single field sort
       const sortOrder = Array.isArray(order) ? order[0] : order || 'asc';
       return sortFunction(data, sortBy, sortOrder);
     }
@@ -423,7 +490,7 @@ export class QueryEngine {
     const groupFields = Array.isArray(groupBy) ? groupBy : [groupBy];
 
     for (const item of data) {
-      // 生成分组键
+      // Generate grouping key
       const key = groupFields.map(field => item[field]).join('_');
 
       if (!groups[key]) {

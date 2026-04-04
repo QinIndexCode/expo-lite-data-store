@@ -1,74 +1,55 @@
 /**
- * 根路径管理工具
- * 使用单例模式获取应用的根目录路径，支持异步和同步两种方式
- * 异步方式使用真实的expo-file-system API，同步方式返回模拟对象
+ * @module ROOTPath
+ * @description Singleton root path manager for application directory
+ * @since 2025-11-19
+ * @version 1.0.0
  */
 
-// Import expo-file-system statically
-import { configManager } from '../core/config/ConfigManager';
-import * as FileSystem from 'expo-file-system';
+import { pathHelper } from './PathHelper';
 
 /**
- * 单例根路径管理类
- * 确保应用中只有一个根路径实例
+ * Singleton root path manager class
  */
 class SingletonRootPath {
   /**
-   * 单例实例
+   * Singleton instance
    */
   private static instance: any = null;
 
   /**
-   * 私有构造函数，防止外部实例化
+   * Private constructor to prevent external instantiation
    */
   private constructor() {}
 
   /**
-   * 获取异步根路径实例
-   * 使用真实的expo-file-system API创建并返回根目录路径
-   * @returns Promise<any> 根目录路径字符串
+   * Get async root path instance
+   * @returns Promise<any> Root directory path string
    */
   public static async getInstance(): Promise<any> {
     if (!SingletonRootPath.instance) {
-      const documentDirectory = FileSystem.documentDirectory;
-      const rootDirPath = `${documentDirectory}${configManager.getConfig().storageFolder}/`;
-      await FileSystem.makeDirectoryAsync(rootDirPath, { intermediates: true });
-      SingletonRootPath.instance = rootDirPath;
+      SingletonRootPath.instance = await pathHelper.getRootPath();
     }
     return SingletonRootPath.instance;
   }
 
   /**
-   * 获取同步根路径实例
-   * 区分测试环境和非测试环境
-   * 测试环境：返回模拟路径
-   * 非测试环境：返回真实的Expo文件系统路径
-   * @returns any 根目录路径字符串
+   * Get sync root path instance
+   * @returns any Root directory path string
    */
   public static getInstanceSync(): any {
     if (!SingletonRootPath.instance) {
-      // 区分测试环境和非测试环境
-      if (process.env.NODE_ENV === 'test') {
-        // 测试环境使用模拟路径
-        SingletonRootPath.instance = `/mock/documents/${configManager.getConfig().storageFolder}/`;
-      } else {
-        // 非测试环境使用真实的Expo文件系统路径
-        // 使用FileSystem.documentDirectory直接获取真实路径
-        const documentDirectory = FileSystem.documentDirectory;
-        SingletonRootPath.instance = `${documentDirectory}${configManager.getConfig().storageFolder}/`;
-      }
+      SingletonRootPath.instance = pathHelper.getRootPathSync();
     }
     return SingletonRootPath.instance;
   }
 }
 
 /**
- * 根路径实例
- * 使用同步方式获取，根据环境返回真实路径或模拟路径
+ * Root path instance
  */
 const ROOT = SingletonRootPath.getInstanceSync();
 
 /**
- * 导出根路径实例
+ * Export root path instance
  */
 export default ROOT;

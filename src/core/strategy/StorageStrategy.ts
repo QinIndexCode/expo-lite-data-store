@@ -1,6 +1,11 @@
-// src/core/strategy/StorageStrategy.ts
+/**
+ * @module StorageStrategy
+ * @description Storage strategy for single-file vs chunked storage selection
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
-// 定义存储记录类型
+// Define storage record type
 type RecordType = Record<string, any>;
 
 /**
@@ -52,10 +57,10 @@ export class SingleFileStrategy implements StorageStrategy {
   private readonly MAX_SIZE = 1024 * 1024;
 
   isSuitable(data: RecordType[]): boolean {
-    // 估算数据大小
+    // Estimate data size
     const estimatedSize = data.reduce((acc, item) => acc + JSON.stringify(item).length, 0);
 
-    // 数据大小小于1MB时适合使用单文件策略
+    // Use single file strategy when data < 1MB
     return estimatedSize < this.MAX_SIZE;
   }
 
@@ -80,10 +85,10 @@ export class ChunkedFileStrategy implements StorageStrategy {
   private readonly MIN_SIZE = 512 * 1024;
 
   isSuitable(data: RecordType[]): boolean {
-    // 估算数据大小
+    // Estimate data size
     const estimatedSize = data.reduce((acc, item) => acc + JSON.stringify(item).length, 0);
 
-    // 数据大小大于512KB时适合使用分片策略
+    // Use chunked strategy when data > 512KB
     return estimatedSize >= this.MIN_SIZE;
   }
 
@@ -104,7 +109,7 @@ export class StorageStrategyManager {
   private strategies: StorageStrategy[] = [];
 
   constructor() {
-    // 注册默认策略
+    // Register default strategy
     this.registerStrategy(new SingleFileStrategy());
     this.registerStrategy(new ChunkedFileStrategy());
   }
@@ -116,7 +121,7 @@ export class StorageStrategyManager {
    */
   registerStrategy(strategy: StorageStrategy): void {
     this.strategies.push(strategy);
-    // 按优先级排序，优先级高的策略排在前面
+    // Sort by priority, higher priority first
     this.strategies.sort((a, b) => b.getPriority() - a.getPriority());
   }
 
@@ -127,14 +132,14 @@ export class StorageStrategyManager {
    * @returns 合适的存储策略，如果没有合适的策略则返回null
    */
   selectStrategy(data: RecordType[]): StorageStrategy | null {
-    // 遍历所有策略，返回第一个适合的策略
+    // Iterate所有策略，返回第一个适合的策略
     for (const strategy of this.strategies) {
       if (strategy.isSuitable(data)) {
         return strategy;
       }
     }
 
-    // 如果没有合适的策略，返回优先级最高的策略
+    // If no matching strategy, return highest priority
     return this.strategies[0] || null;
   }
 

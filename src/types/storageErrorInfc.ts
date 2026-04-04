@@ -1,7 +1,14 @@
-import { StorageErrorCode } from './storageErrorCode.js';
+/**
+ * @module storageErrorInfc
+ * @description Storage error class with detailed error messages and suggestions
+ * @since 2025-11-19
+ * @version 1.0.0
+ */
+
+import { StorageErrorCode } from './storageErrorCode';
 
 /**
- * 错误分类枚举
+ * Error category enum
  */
 export enum ErrorCategory {
   TABLE = 'table',
@@ -16,31 +23,31 @@ export enum ErrorCategory {
 }
 
 /**
- * 存储错误类，提供详细的错误信息和建议
+ * Storage error class providing detailed error messages and suggestions
  */
 export class StorageError extends Error {
   /**
-   * 错误分类
+   * Error category
    */
   public readonly category: ErrorCategory;
 
   /**
-   * 错误详情
+   * Error details
    */
   public readonly details?: string;
 
   /**
-   * 解决建议
+   * Suggested resolution
    */
   public readonly suggestion?: string;
 
   /**
-   * 错误发生时间
+   * Error timestamp
    */
   public readonly timestamp: number;
 
   /**
-   * 原始错误原因
+   * Original error cause
    */
   public readonly cause?: Error;
 
@@ -65,7 +72,7 @@ export class StorageError extends Error {
   }
 
   /**
-   * 根据错误码获取错误分类
+   * Get error category from error code
    */
   private getCategoryFromCode(code: StorageErrorCode): ErrorCategory {
     if (code.startsWith('TABLE_')) {
@@ -90,7 +97,7 @@ export class StorageError extends Error {
   }
 
   /**
-   * 转换为JSON格式，便于日志记录
+   * Convert to JSON format for logging
    */
   toJSON(): object {
     return {

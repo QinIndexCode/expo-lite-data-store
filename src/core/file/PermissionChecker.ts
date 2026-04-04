@@ -1,7 +1,9 @@
-// src/core/file/PermissionChecker.ts
-// 权限检查器类，用于检查文件系统访问权限
-// 创建于: 2025-11-28
-// 最后修改: 2025-12-11
+/**
+ * @module PermissionChecker
+ * @description Permission checker for file system access validation
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
 import * as FileSystem from 'expo-file-system';
 import { EncodingType } from 'expo-file-system';
@@ -17,13 +19,13 @@ export class PermissionChecker {
    */
   async checkPermissions(): Promise<void> {
     try {
-      // 在测试环境下直接跳过真实权限检查，避免对 Expo 原生 API 的依赖导致单元测试失败
+      // Skip real permission check in test to avoid Expo native API dependency
       if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
         return;
       }
-      // 创建临时文件来检查权限
+      // Create临时文件来检查权限
       const tempFilePath = `${ROOT}/.temp_permission_check`;
-      // 使用正确导入的 EncodingType.UTF8
+      // Use correctly imported EncodingType.UTF8
       await FileSystem.writeAsStringAsync(tempFilePath, 'permission check', { encoding: EncodingType.UTF8 });
       await FileSystem.deleteAsync(tempFilePath);
     } catch (error) {

@@ -1,11 +1,11 @@
-// src/core/service/TransactionService.ts
-// 事务管理服务
-// 负责处理数据库事务的开始、提交和回滚
-// 支持事务操作队列管理和表数据快照保存
-// 创建于: 2025-11-28
-// 最后修改: 2025-12-19
+/**
+ * @module TransactionService
+ * @description Transaction service managing begin, commit, and rollback operations
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
-import { QueryEngine } from "../query/QueryEngine";
+import { QueryEngine } from '../query/QueryEngine';
 /**
  * 事务错误类
  * 用于抛出事务相关的错误
@@ -33,8 +33,6 @@ export class TransactionError extends Error {
     this.suggestion = suggestion;
   }
 }
-
-
 
 /**
  * 操作选项类型
@@ -135,7 +133,12 @@ export class TransactionService {
     writeFn: (tableName: string, data: Record<string, any>[], options?: OperationOptions) => Promise<any>,
     deleteFn: (tableName: string, where: WhereCondition, options?: OperationOptions) => Promise<any>,
     bulkWriteFn: (tableName: string, operations: Record<string, any>[], options?: OperationOptions) => Promise<any>,
-    updateFn: (tableName: string, data: Record<string, any>, where: WhereCondition, options?: OperationOptions) => Promise<any>
+    updateFn: (
+      tableName: string,
+      data: Record<string, any>,
+      where: WhereCondition,
+      options?: OperationOptions
+    ) => Promise<any>
   ): Promise<void> {
     if (!this.isInTransaction()) {
       throw new TransactionError(
@@ -147,43 +150,46 @@ export class TransactionService {
     }
 
     try {
-      // 直接执行每个操作
+      // Execute each operation directly
       for (const operation of this.operations) {
         switch (operation.type) {
           case 'write':
-            // 直接使用writeFn执行写入操作
-            // 确保data是数组
+            // Execute write operation directly with writeFn
+            // Ensure data is array
             const writeData = Array.isArray(operation.data) ? operation.data : [operation.data];
             await writeFn(operation.tableName, writeData, { ...operation.options, directWrite: true });
             break;
           case 'update':
-            // 直接使用updateFn执行更新操作
-            // 确保where不是undefined
-            await updateFn(operation.tableName, operation.data, operation.where || {}, { ...operation.options, directWrite: true });
+            // Execute update operation directly with updateFn
+            // Ensure where is not undefined
+            await updateFn(operation.tableName, operation.data, operation.where || {}, {
+              ...operation.options,
+              directWrite: true,
+            });
             break;
           case 'delete':
-            // 直接使用deleteFn执行删除操作
-            // 确保where不是undefined
-            // 注意：delete操作的where条件存储在operation.data中
-            // 传递directWrite: true确保在提交时实际执行删除操作
+            // Execute delete operation directly with deleteFn
+            // Ensure where is not undefined
+            // Note: delete where condition stored in operation.data
+            // Pass directWrite: true to ensure actual delete on commit
             await deleteFn(operation.tableName, operation.data || {}, { ...operation.options, directWrite: true });
             break;
           case 'bulkWrite':
-            // 直接使用bulkWriteFn执行批量写入操作
-            // 确保data是数组
+            // Execute bulk write operation directly with bulkWriteFn
+            // Ensure data is array
             const bulkData = Array.isArray(operation.data) ? operation.data : [operation.data];
             await bulkWriteFn(operation.tableName, bulkData, { ...operation.options, directWrite: true });
             break;
         }
       }
     } catch (error) {
-      // 如果操作失败，尝试回滚事务
+      // If operation fails, try to rollback transaction
       await this.rollback(writeFn);
-      // 重新抛出错误，让调用者知道事务失败
+      // Re-throw error to inform caller transaction failed
       throw error;
     } finally {
-      // 确保事务状态被重置，无论成功还是失败
-      // 使用resetTransactionState方法确保状态一致性
+      // Ensure transaction state is reset regardless of success
+      // Use resetTransactionState to ensure state consistency
       if (this.isInTransaction()) {
         this.resetTransactionState();
       }
@@ -208,13 +214,13 @@ export class TransactionService {
     }
 
     try {
-      // 遍历所有快照，恢复数据
+      // Iterate所有快照，恢复数据
       for (const [tableName, snapshot] of this.snapshots) {
         await writeFn(tableName, snapshot.data, { mode: 'overwrite', directWrite: true });
       }
     } finally {
-      // 无论成功还是失败，都结束事务状态
-      // 使用resetTransactionState方法确保状态一致性
+      // End transaction state regardless of success or failure
+      // Use resetTransactionState to ensure state consistency
       this.resetTransactionState();
     }
   }
@@ -280,15 +286,15 @@ export class TransactionService {
       );
     }
 
-    // 只保存第一次操作该表的快照
+    // Only save snapshot for first operation on this table
     if (!this.snapshots.has(tableName)) {
-      // 优化：使用更高效的深拷贝方法，减少60%的快照开销
-      // 使用structuredClone（如果可用）或优化的JSON深拷贝
+      // Optimization: Efficient deep copy, reduce snapshot overhead by 60%
+      // Use structuredClone (if available) or optimized JSON deep copy
       let snapshotData: Record<string, any>[];
       if (typeof structuredClone !== 'undefined') {
         snapshotData = structuredClone(data);
       } else {
-        // 回退到优化的JSON深拷贝
+        // Fallback到优化的JSON深拷贝
         snapshotData = JSON.parse(JSON.stringify(data));
       }
 
@@ -315,9 +321,9 @@ export class TransactionService {
     }
 
     this.operations.push(operation);
-    
-    // 清除该表的事务数据缓存，确保下次获取时重新计算
-    // 这样可以保证事务数据缓存始终与操作队列一致
+
+    // Clear transaction data cache, ensure recalculation on next access
+    // Ensures transaction data cache stays consistent with operation queue
     this.transactionData.delete(operation.tableName);
   }
 
@@ -331,15 +337,15 @@ export class TransactionService {
     tableName: string,
     readFn: (tableName: string, options?: any) => Promise<Record<string, any>[]>
   ): Promise<Record<string, any>[]> {
-    // 如果已有计算好的事务数据，直接返回
+    // If already has computed transaction data, return directly
     if (this.transactionData.has(tableName)) {
       return this.transactionData.get(tableName)!;
     }
 
-    // 获取原始数据
+    // Get原始数据
     let data = await readFn(tableName);
 
-    // 应用所有已添加的操作
+    // Apply all added operations
     for (const operation of this.operations) {
       if (operation.tableName !== tableName) {
         continue;
@@ -347,21 +353,21 @@ export class TransactionService {
 
       switch (operation.type) {
         case 'write':
-          // 写入操作：根据mode决定是覆盖还是追加
+          // Write操作：根据mode决定是覆盖还是追加
           const writeData = Array.isArray(operation.data) ? operation.data : [operation.data];
           if (operation.options?.mode === 'overwrite') {
-            // 覆盖模式：直接替换数据
+            // Overwrite mode: Replace data directly
             data = writeData;
           } else {
-            // 默认追加模式：合并数据
+            // Default append mode: Merge data
             data = [...data, ...writeData];
           }
           break;
         case 'update':
-          // 更新操作：使用QueryEngine过滤匹配的数据并更新
+          // Update操作：使用QueryEngine过滤匹配的数据并更新
           const matchedItems = QueryEngine.filter(data, operation.where || {});
           const matchedIds = new Set(matchedItems.map(item => item.id || item._id));
-          
+
           data = data.map(item => {
             const itemId = item.id || item._id;
             if (matchedIds.has(itemId)) {
@@ -371,33 +377,33 @@ export class TransactionService {
           });
           break;
         case 'delete':
-          // 删除操作：使用QueryEngine过滤掉匹配的数据
-          // 注意：delete操作的where条件存储在operation.data中
+          // Delete操作：使用QueryEngine过滤掉匹配的数据
+          // Note: delete where condition stored in operation.data
           data = data.filter(item => {
-            // 使用QueryEngine检查是否不匹配条件
+            // Use QueryEngine to check if not matching condition
             return QueryEngine.filter([item], operation.data || {}).length === 0;
           });
           break;
         case 'bulkWrite':
-          // 批量操作：逐个应用批量操作中的每个子操作
+          // Bulk operation: Apply each sub-operation individually
           const bulkOperations = Array.isArray(operation.data) ? operation.data : [operation.data];
           for (const bulkOp of bulkOperations) {
-            // 确保bulkOp是有效的操作对象
+            // Ensure bulkOp is a valid operation object
             if (typeof bulkOp !== 'object' || !bulkOp.type) {
               continue;
             }
-            
+
             switch (bulkOp.type) {
               case 'insert':
-                // 插入操作：添加数据到集合
+                // Insert operation: Add data to collection
                 const insertData = Array.isArray(bulkOp.data) ? bulkOp.data : [bulkOp.data];
                 data = [...data, ...insertData];
                 break;
               case 'update':
-                // 更新操作：使用QueryEngine过滤匹配的数据并更新
+                // Update操作：使用QueryEngine过滤匹配的数据并更新
                 const bulkMatchedItems = QueryEngine.filter(data, bulkOp.where || {});
                 const bulkMatchedIds = new Set(bulkMatchedItems.map(item => item.id || item._id));
-                
+
                 data = data.map(item => {
                   const itemId = item.id || item._id;
                   if (bulkMatchedIds.has(itemId)) {
@@ -407,8 +413,8 @@ export class TransactionService {
                 });
                 break;
               case 'delete':
-                // 删除操作：使用QueryEngine过滤掉匹配的数据
-                // 注意：与顶层delete操作一致，条件存储在bulkOp.data中
+                // Delete操作：使用QueryEngine过滤掉匹配的数据
+                // Note: Consistent with top-level delete, condition stored in bulkOp.data
                 const deleteCondition = bulkOp.data || bulkOp.where || {};
                 data = data.filter(item => {
                   return QueryEngine.filter([item], deleteCondition).length === 0;
@@ -420,7 +426,7 @@ export class TransactionService {
       }
     }
 
-    // 保存计算结果到transactionData
+    // Save计算结果到transactionData
     this.transactionData.set(tableName, data);
     return data;
   }

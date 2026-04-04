@@ -1,12 +1,14 @@
-// src/core/config/ConfigManager.ts
-// 配置管理器类，支持从多个来源加载配置
-// 优先级：程序化配置 > 环境变量 > 自定义配置文件 > 默认配置
+/**
+ * @module ConfigManager
+ * @description Configuration manager supporting multiple configuration sources
+ * @since 2025-11-19
+ * @version 1.0.0
+ */
 
 import defaultConfig from '../../defaultConfig';
-import { LiteStoreConfig, DeepPartial } from '../../types/config';  
+import { LiteStoreConfig, DeepPartial } from '../../types/config';
 import logger from '../../utils/logger';
-// 内联基本logger功能，避免Metro bundler导入问题
-
+// Inline basic logger to avoid Metro bundler import issues
 
 /**
  * 配置管理器类
@@ -21,7 +23,7 @@ export class ConfigManager {
    * 私有构造函数，单例模式
    */
   private constructor() {
-    // 初始化时加载默认配置
+    // Initialize时加载默认配置
     this.currentConfig = { ...defaultConfig };
     this.loadConfig();
   }
@@ -54,8 +56,19 @@ export class ConfigManager {
     // 4. 应用程序化配置
     mergedConfig = this.mergeConfig(mergedConfig, this.customConfig);
 
-    // 更新当前配置
+    // Update当前配置
     this.currentConfig = mergedConfig;
+
+    // Sync storageFolder 到 PathHelper，避免循环依赖
+    try {
+      const { pathHelper } = require('../../utils/PathHelper');
+      if (pathHelper && mergedConfig.storageFolder) {
+        pathHelper.setStorageFolder(mergedConfig.storageFolder);
+      }
+    } catch {
+      // Ignore PathHelper loading errors
+    }
+
     logger.success('Configuration loaded successfully');
   }
 
@@ -67,7 +80,7 @@ export class ConfigManager {
   private mergeConfigFromEnvironment(baseConfig: LiteStoreConfig): LiteStoreConfig {
     const envConfig: DeepPartial<LiteStoreConfig> = {};
 
-    // 基础配置
+    // Basic configuration
     if (process.env.LITE_STORE_CHUNK_SIZE) {
       envConfig.chunkSize = parseInt(process.env.LITE_STORE_CHUNK_SIZE, 10);
     }
@@ -81,23 +94,28 @@ export class ConfigManager {
       envConfig.timeout = parseInt(process.env.LITE_STORE_TIMEOUT, 10);
     }
 
-    // 加密配置
+    // Encrypt配置
     if (process.env.LITE_STORE_ENCRYPTION_KEY_ITERATIONS) {
       envConfig.encryption = envConfig.encryption || {};
       envConfig.encryption.keyIterations = parseInt(process.env.LITE_STORE_ENCRYPTION_KEY_ITERATIONS, 10);
     }
 
-    // 性能配置
+    // Performance configuration
     if (process.env.LITE_STORE_PERFORMANCE_MAX_CONCURRENT_OPERATIONS) {
       envConfig.performance = envConfig.performance || {};
-      envConfig.performance.maxConcurrentOperations = parseInt(process.env.LITE_STORE_PERFORMANCE_MAX_CONCURRENT_OPERATIONS, 10);
+      envConfig.performance.maxConcurrentOperations = parseInt(
+        process.env.LITE_STORE_PERFORMANCE_MAX_CONCURRENT_OPERATIONS,
+        10
+      );
     }
     if (process.env.LITE_STORE_PERFORMANCE_MEMORY_WARNING_THRESHOLD) {
       envConfig.performance = envConfig.performance || {};
-      envConfig.performance.memoryWarningThreshold = parseFloat(process.env.LITE_STORE_PERFORMANCE_MEMORY_WARNING_THRESHOLD);
+      envConfig.performance.memoryWarningThreshold = parseFloat(
+        process.env.LITE_STORE_PERFORMANCE_MEMORY_WARNING_THRESHOLD
+      );
     }
 
-    // 缓存配置
+    // Cache配置
     if (process.env.LITE_STORE_CACHE_MAX_SIZE) {
       envConfig.cache = envConfig.cache || {};
       envConfig.cache.maxSize = parseInt(process.env.LITE_STORE_CACHE_MAX_SIZE, 10);
@@ -107,7 +125,7 @@ export class ConfigManager {
       envConfig.cache.defaultExpiry = parseInt(process.env.LITE_STORE_CACHE_DEFAULT_EXPIRY, 10);
     }
 
-    // 自动同步配置
+    // Auto-sync configuration
     if (process.env.LITE_STORE_AUTO_SYNC_ENABLED) {
       envConfig.autoSync = envConfig.autoSync || {};
       envConfig.autoSync.enabled = process.env.LITE_STORE_AUTO_SYNC_ENABLED === 'true';
@@ -127,21 +145,22 @@ export class ConfigManager {
    */
   private mergeConfigFromFile(baseConfig: LiteStoreConfig): LiteStoreConfig {
     try {
-      // 检查是否在React Native/Expo环境中
-      const isReactNative = typeof window !== 'undefined' || typeof navigator !== 'undefined';
-      
+      // Check if在React Native/Expo环境中，或者在测试环境中
+      const isReactNative =
+        typeof window !== 'undefined' || typeof navigator !== 'undefined' || process.env.NODE_ENV === 'test';
+
       if (isReactNative) {
         // React Native/Expo环境：
         // 1. 首先尝试从app.json读取配置（推荐方式）
         try {
-          // 在Expo环境中，我们可以直接从global.__expoConfig获取配置
-          // 这是一个更可靠的方式，因为它直接访问Expo的内部配置
+          // In Expo, get config directly from global.__expoConfig
+          // More reliable way, directly accesses Expo internal config
           if (typeof global !== 'undefined') {
             const globalAny = global as any;
-            
+
             if (globalAny.__expoConfig) {
               const expoConfig = globalAny.__expoConfig;
-              
+
               if (expoConfig.extra?.liteStore && typeof expoConfig.extra.liteStore === 'object') {
                 const liteStoreConfig = expoConfig.extra.liteStore;
                 logger.info('Configuration loaded from app.json via expo-constants');
@@ -149,28 +168,33 @@ export class ConfigManager {
               }
             }
           }
-          
+
           // 2. 尝试使用expo-constants获取配置
           try {
             let Constants = require('expo-constants');
-            
-            // 如果Constants是一个模块对象，尝试获取其默认导出
-            if (typeof Constants === 'object' && Constants && 'default' in Constants && typeof Constants.default === 'object') {
+
+            // If Constants is a module, try to get default export
+            if (
+              typeof Constants === 'object' &&
+              Constants &&
+              'default' in Constants &&
+              typeof Constants.default === 'object'
+            ) {
               Constants = Constants.default;
             }
-            
+
             let expoConfig: null | { extra?: { liteStore?: any } } = null;
-            
-            // 方式1: 使用getConfig()方法（最可靠的方式）
+
+            // Method 1: Use getConfig() (most reliable)
             if (typeof Constants.getConfig === 'function') {
               try {
                 expoConfig = Constants.getConfig();
               } catch (getConfigError) {
-                // 忽略getConfig()错误
+                // IgnoregetConfig()错误
               }
             }
-            
-            // 方式2: 直接使用Constants的属性
+
+            // Method 2: Use Constants properties directly
             if (!expoConfig && Constants.expoConfig) {
               // Expo SDK 49及以上
               expoConfig = Constants.expoConfig;
@@ -178,19 +202,19 @@ export class ConfigManager {
               // Expo SDK 48及以下
               expoConfig = Constants.manifest;
             }
-            
-            // 方式3: 尝试访问extra属性直接从Constants获取
+
+            // Method 3: Try to access extra from Constants
             if (!expoConfig && Constants.extra) {
-              // 直接从Constants.extra获取liteStore配置
+              // Get liteStore config directly from Constants.extra
               const liteStoreConfig = Constants.extra?.liteStore;
               if (liteStoreConfig && typeof liteStoreConfig === 'object') {
                 logger.info('Configuration loaded from app.json via expo-constants');
                 return this.mergeConfig(baseConfig, liteStoreConfig);
               }
             }
-            
+
             if (expoConfig) {
-              // 从app.json的extra字段中读取配置
+              // Read config from app.json extra field
               const liteStoreConfig = expoConfig.extra?.liteStore;
               if (liteStoreConfig && typeof liteStoreConfig === 'object') {
                 logger.info('Configuration loaded from app.json via expo-constants');
@@ -198,13 +222,13 @@ export class ConfigManager {
               }
             }
           } catch (expoConstantsError) {
-            // 忽略expo-constants加载错误
+            // Ignoreexpo-constants加载错误
           }
-          
+
           // 3. 尝试直接从global对象获取配置（备选方案）
           if (typeof global !== 'undefined') {
             const globalAny = global as any;
-            
+
             if (globalAny.expo && globalAny.expo.extra?.liteStore) {
               const liteStoreConfig = globalAny.expo.extra?.liteStore;
               if (liteStoreConfig && typeof liteStoreConfig === 'object') {
@@ -212,7 +236,7 @@ export class ConfigManager {
                 return this.mergeConfig(baseConfig, liteStoreConfig);
               }
             }
-            
+
             // 4. 尝试从global.liteStoreConfig获取配置
             if (globalAny.liteStoreConfig) {
               const customConfig = globalAny.liteStoreConfig;
@@ -223,11 +247,11 @@ export class ConfigManager {
             }
           }
         } catch (error) {
-          // 忽略配置加载错误，使用默认配置
+          // Ignore配置加载错误，使用默认配置
         }
       }
     } catch (error) {
-      // 忽略所有配置文件加载错误，使用默认配置
+      // Ignore所有配置文件加载错误，使用默认配置
     }
 
     return baseConfig;
@@ -247,14 +271,19 @@ export class ConfigManager {
         const baseValue = merged[key as keyof T];
         const newValue = newConfig[key as keyof T];
 
-        if (typeof newValue === 'object' && newValue !== null && !Array.isArray(newValue) && typeof baseValue === 'object') {
-          // 递归合并对象
+        if (
+          typeof newValue === 'object' &&
+          newValue !== null &&
+          !Array.isArray(newValue) &&
+          typeof baseValue === 'object'
+        ) {
+          // Recursive合并对象
           merged[key as keyof T] = this.mergeConfig(
             baseValue as object,
             newValue as DeepPartial<object>
           ) as typeof baseValue;
         } else if (newValue !== undefined) {
-          // 只有当 newValue 不是 undefined 时才替换
+          // Only replace if newValue is not undefined
           merged[key as keyof T] = newValue as typeof baseValue;
         }
       }
@@ -298,6 +327,13 @@ export class ConfigManager {
   }
 
   /**
+   * 重置单例实例（用于测试）
+   */
+  static resetInstance(): void {
+    ConfigManager.instance = null;
+  }
+
+  /**
    * 获取配置值
    * @param path 配置路径，如 'encryption.encryptedFields'
    * @returns 配置值
@@ -327,15 +363,15 @@ export class ConfigManager {
     const lastKey = keys.pop();
     if (!lastKey) return;
 
-    // 检查所有键名，防止原型污染
+    // Check所有键名，防止原型污染
     const validateKey = (key: string) => {
-      // 拒绝特殊键名，防止原型污染
+      // Reject特殊键名，防止原型污染
       if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
         throw new Error(`Invalid configuration key: ${key}`);
       }
     };
 
-    // 验证所有键名
+    // Validate所有键名
     keys.forEach(validateKey);
     validateKey(lastKey);
 
@@ -351,5 +387,5 @@ export class ConfigManager {
   }
 }
 
-// 导出默认配置管理器实例
+// Export default config manager instance
 export const configManager = ConfigManager.getInstance();

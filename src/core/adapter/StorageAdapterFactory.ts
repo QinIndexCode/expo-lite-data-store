@@ -1,12 +1,15 @@
-// src/core/adapter/StorageAdapterFactory.ts
-// 存储适配器工厂，负责创建不同类型的存储适配器实例
-// 创建于: 2025-11-28
-// 最后修改: 2025-12-11
+/**
+ * @module StorageAdapterFactory
+ * @description Factory for creating different types of storage adapter instances
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
 import { IMetadataManager } from '../../types/metadataManagerInfc';
 import { IStorageAdapter } from '../../types/storageAdapterInfc';
 import { meta } from '../meta/MetadataManager';
 import { FileSystemStorageAdapter } from './FileSystemStorageAdapter';
+import { EncryptedStorageAdapter } from '../EncryptedStorageAdapter';
 
 /**
  * 存储适配器类型枚举
@@ -28,6 +31,10 @@ export interface StorageAdapterConfig {
    * 元数据管理器实例
    */
   metadataManager?: IMetadataManager;
+  /**
+   * 是否需要生物识别认证访问
+   */
+  requireAuthOnAccess?: boolean;
   /**
    * 其他配置选项
    */
@@ -57,9 +64,9 @@ export class StorageAdapterFactory {
       case StorageAdapterType.FILE_SYSTEM:
         return new FileSystemStorageAdapter(config.metadataManager || meta);
       case StorageAdapterType.ENCRYPTED:
-        // 加密存储适配器的实现，目前尚未完全实现
-        // return new EncryptedStorageAdapter(config.metadataManager || meta, config.encryptionKey);
-        throw new Error('Encrypted storage adapter is not yet implemented');
+        return new EncryptedStorageAdapter({
+          requireAuthOnAccess: config.requireAuthOnAccess || false,
+        });
       default:
         throw new Error(`Unknown storage adapter type: ${config.type}`);
     }
@@ -73,5 +80,17 @@ export class StorageAdapterFactory {
    */
   static createDefaultAdapter(metadataManager?: IMetadataManager): IStorageAdapter {
     return new FileSystemStorageAdapter(metadataManager || meta);
+  }
+
+  /**
+   * 创建加密存储适配器
+   *
+   * @param requireAuthOnAccess - 是否需要生物识别认证访问，可选
+   * @returns 加密存储适配器实例
+   */
+  static createEncryptedAdapter(requireAuthOnAccess?: boolean): IStorageAdapter {
+    return new EncryptedStorageAdapter({
+      requireAuthOnAccess: requireAuthOnAccess || false,
+    });
   }
 }

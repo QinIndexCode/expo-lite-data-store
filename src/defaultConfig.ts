@@ -1,6 +1,8 @@
 /**
- * Default Configuration for expo-lite-data-store
- * This file contains the default configuration values
+ * @module defaultConfig
+ * @description Default configuration for expo-lite-data-store
+ * @since 2025-11-19
+ * @version 1.0.0
  */
 
 import { LiteStoreConfig } from './types/config';
@@ -18,7 +20,7 @@ export default {
    * API Configuration
    */
   api: {
-    rateLimit: { 
+    rateLimit: {
       enabled: false,
       requestsPerSecond: 10,
       burstCapacity: 20,
@@ -30,10 +32,10 @@ export default {
   },
 
   encryption: {
-    algorithm: 'AES-CTR' as const,
+    algorithm: 'auto' as const,
     keySize: 256,
     hmacAlgorithm: 'SHA-512' as const,
-    keyIterations: 120000,
+    keyIterations: 600000,
     encryptedFields: ['password', 'email', 'phone'],
     cacheTimeout: 30000,
     maxCacheSize: 100,
@@ -43,7 +45,7 @@ export default {
 
   performance: {
     enableQueryOptimization: true,
-    maxConcurrentOperations: 5, // 推荐范围：3-10，根据设备性能调整
+    maxConcurrentOperations: 5, // Recommended range: 3-10, adjust by device performance
     enableBatchOptimization: true,
     memoryWarningThreshold: 0.8,
   },
@@ -56,8 +58,8 @@ export default {
   },
 
   monitoring: {
-    enablePerformanceTracking: false, // 暂未完全支持
-    enableHealthChecks: true, // 启用可提升性能和稳定性
+    enablePerformanceTracking: false, // Not fully supported yet
+    enableHealthChecks: true, // Enable to improve performance and stability
     metricsRetention: 86400000, // 24小时
   },
 

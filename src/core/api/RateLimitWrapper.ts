@@ -1,10 +1,12 @@
-// src/core/api/RateLimitWrapper.ts
-// 限流包装器类，负责API限流逻辑
-// 创建于: 2025-11-28
-// 最后修改: 2025-12-11
+/**
+ * @module RateLimitWrapper
+ * @description Rate limiter wrapper for API request throttling
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
 import { RATE_LIMIT } from '../constants';
-import { RateLimiter, RateLimitStatus } from './RateLimiter.js';
+import { RateLimiter, RateLimitStatus } from './RateLimiter';
 
 /**
  * 限流包装器，负责API限流逻辑

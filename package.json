@@ -1,6 +1,6 @@
 {
   "name": "expo-lite-data-store",
-  "version": "2.0.0-beta.4",
+  "version": "2.0.0-beta.5",
   "main": "dist/cjs/index.js",
   "types": "dist/types/index.d.ts",
   "author": "QinIndexCode",
@@ -49,7 +49,7 @@
     "build:js": "tsc -p tsconfig.js.json",
     "build:cjs": "tsc -p tsconfig.cjs.json",
     "build:types": "tsc -p tsconfig.types.json",
-    "build:all": "rimraf dist && npm run build:js && npm run build:cjs && npm run build:types && del /f /q .tsbuildinfo .tsbuildinfo.esm .tsbuildinfo.cjs 2>nul && npm run lint",
+    "build:all": "rimraf dist && npm run build:js && npm run build:cjs && npm run build:types && rimraf .tsbuildinfo .tsbuildinfo.esm .tsbuildinfo.cjs && npm run lint",
     "clean": "rimraf dist",
     "test": "jest --config jest.simple.config.cjs --testPathIgnorePatterns=crypto-security-assessment --testPathIgnorePatterns=performance-optimization --testPathIgnorePatterns=api.stress",
     "test:core": "jest --config jest.simple.config.cjs --testPathIgnorePatterns=crypto-security-assessment --testPathIgnorePatterns=performance-optimization --testMatch=**/src/core/**/__tests__/**/*.test.ts",
@@ -81,38 +81,13 @@
     "expo-constants": "~18.0.12",
     "expo-crypto": "~15.0.8",
     "expo-file-system": "~18.1.11",
-    "expo-secure-store": "~15.0.8",
-    "react-native-quick-crypto": "~1.0.7"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.39.1",
-    "@types/bcryptjs": "^2.4.6",
-    "@types/jest": "^29.5.0",
-    "@types/node": "^24.10.1",
-    "@types/react": "^19.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.48.1",
-    "@typescript-eslint/parser": "^8.48.1",
-    "eslint": "^9.39.1",
-    "eslint-config-prettier": "^9.1.0",
-    "eslint-plugin-prettier": "^5.2.1",
-    "eslint-plugin-react": "^7.37.5",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "expo": "~54.0.23",
-    "globals": "^16.5.0",
-    "jest": "^29.7.0",
-    "jiti": "^2.6.1",
-    "prettier": "^3.3.3",
-    "react": "19.1.0",
-    "react-native": "0.81.5",
-    "rimraf": "^6.1.2",
-    "ts-jest": "^29.4.5",
-    "typescript": "~5.9.2",
-    "typescript-eslint": "^8.48.1"
+    "expo-secure-store": "~15.0.8"
   },
   "peerDependencies": {
     "expo": ">=50.0.0",
     "react": ">=18.0.0",
-    "react-native": ">=0.73.0"
+    "react-native": ">=0.73.0",
+    "react-native-quick-crypto": ">=1.0.0"
   },
   "peerDependenciesMeta": {
     "expo": {
@@ -123,6 +98,9 @@
     },
     "react-native": {
       "optional": false
+    },
+    "react-native-quick-crypto": {
+      "optional": true
     }
   },
   "private": false

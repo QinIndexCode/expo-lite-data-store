@@ -1,6 +1,8 @@
 /**
- * 配置验证工具
- * 用于验证ConfigManager中的配置参数类型和格式
+ * @module configValidator
+ * @description Configuration validator for ConfigManager parameters
+ * @since 2025-11-19
+ * @version 1.0.0
  */
 import { configManager } from '../core/config/ConfigManager';
 
@@ -38,20 +40,20 @@ export class ConfigValidator {
     };
 
     const config = configManager.getConfig();
-    
-    // 验证基础配置
+
+    // Validate基础配置
     this.validateBasicConfig(config, result);
 
-    // 验证加密配置
+    // Validate加密配置
     this.validateEncryptionConfig(config, result);
 
-    // 验证性能配置
+    // Validate性能配置
     this.validatePerformanceConfig(config, result);
 
-    // 验证缓存配置
+    // Validate缓存配置
     this.validateCacheConfig(config, result);
 
-    // 验证监控配置
+    // Validate监控配置
     this.validateMonitoringConfig(config, result);
 
     return result;
@@ -63,7 +65,7 @@ export class ConfigValidator {
    * @param result 验证结果对象
    */
   private static validateBasicConfig(config: any, result: ConfigValidationResult): void {
-    // 验证chunkSize
+    // ValidatechunkSize
     if (config.chunkSize !== undefined) {
       if (typeof config.chunkSize !== 'number') {
         result.errors.push('chunkSize must be a number');
@@ -74,7 +76,7 @@ export class ConfigValidator {
       }
     }
 
-    // 验证storageFolder
+    // ValidatestorageFolder
     if (config.storageFolder !== undefined) {
       if (typeof config.storageFolder !== 'string') {
         result.errors.push('storageFolder must be a string');
@@ -82,7 +84,7 @@ export class ConfigValidator {
       }
     }
 
-    // 验证sortMethods
+    // ValidatesortMethods
     if (config.sortMethods !== undefined) {
       if (typeof config.sortMethods !== 'string') {
         result.errors.push('sortMethods must be a string');
@@ -95,7 +97,7 @@ export class ConfigValidator {
       }
     }
 
-    // 验证timeout
+    // Validatetimeout
     if (config.timeout !== undefined) {
       if (typeof config.timeout !== 'number') {
         result.errors.push('timeout must be a number');
@@ -115,7 +117,7 @@ export class ConfigValidator {
   private static validateEncryptionConfig(config: any, result: ConfigValidationResult): void {
     const encryption = config.encryption;
     if (encryption) {
-      // 验证algorithm
+      // Validatealgorithm
       if (encryption.algorithm !== undefined) {
         if (typeof encryption.algorithm !== 'string') {
           result.errors.push('encryption.algorithm must be a string');
@@ -128,7 +130,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证keySize
+      // ValidatekeySize
       if (encryption.keySize !== undefined) {
         if (typeof encryption.keySize !== 'number') {
           result.errors.push('encryption.keySize must be a number');
@@ -141,7 +143,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证hmacAlgorithm
+      // ValidatehmacAlgorithm
       if (encryption.hmacAlgorithm !== undefined) {
         if (typeof encryption.hmacAlgorithm !== 'string') {
           result.errors.push('encryption.hmacAlgorithm must be a string');
@@ -154,7 +156,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证keyIterations
+      // ValidatekeyIterations
       if (encryption.keyIterations !== undefined) {
         if (typeof encryption.keyIterations !== 'number') {
           result.errors.push('encryption.keyIterations must be a number');
@@ -166,13 +168,13 @@ export class ConfigValidator {
         }
       }
 
-      // 验证encryptedFields
+      // ValidateencryptedFields
       if (encryption.encryptedFields !== undefined) {
         if (!Array.isArray(encryption.encryptedFields)) {
           result.errors.push('encryption.encryptedFields must be an array');
           result.isValid = false;
         } else {
-          // 验证数组元素是否都是字符串
+          // Validate数组元素是否都是字符串
           for (const field of encryption.encryptedFields) {
             if (typeof field !== 'string') {
               result.errors.push('encryption.encryptedFields must contain only strings');
@@ -183,7 +185,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证cacheTimeout
+      // ValidatecacheTimeout
       if (encryption.cacheTimeout !== undefined) {
         if (typeof encryption.cacheTimeout !== 'number') {
           result.errors.push('encryption.cacheTimeout must be a number');
@@ -194,7 +196,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证maxCacheSize
+      // ValidatemaxCacheSize
       if (encryption.maxCacheSize !== undefined) {
         if (typeof encryption.maxCacheSize !== 'number') {
           result.errors.push('encryption.maxCacheSize must be a number');
@@ -205,7 +207,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证useBulkOperations
+      // ValidateuseBulkOperations
       if (encryption.useBulkOperations !== undefined) {
         if (typeof encryption.useBulkOperations !== 'boolean') {
           result.errors.push('encryption.useBulkOperations must be a boolean');
@@ -223,7 +225,7 @@ export class ConfigValidator {
   private static validatePerformanceConfig(config: any, result: ConfigValidationResult): void {
     const performance = config.performance;
     if (performance) {
-      // 验证enableQueryOptimization
+      // ValidateenableQueryOptimization
       if (performance.enableQueryOptimization !== undefined) {
         if (typeof performance.enableQueryOptimization !== 'boolean') {
           result.errors.push('performance.enableQueryOptimization must be a boolean');
@@ -231,7 +233,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证maxConcurrentOperations
+      // ValidatemaxConcurrentOperations
       if (performance.maxConcurrentOperations !== undefined) {
         if (typeof performance.maxConcurrentOperations !== 'number') {
           result.errors.push('performance.maxConcurrentOperations must be a number');
@@ -244,7 +246,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证enableBatchOptimization
+      // ValidateenableBatchOptimization
       if (performance.enableBatchOptimization !== undefined) {
         if (typeof performance.enableBatchOptimization !== 'boolean') {
           result.errors.push('performance.enableBatchOptimization must be a boolean');
@@ -252,7 +254,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证memoryWarningThreshold
+      // ValidatememoryWarningThreshold
       if (performance.memoryWarningThreshold !== undefined) {
         if (typeof performance.memoryWarningThreshold !== 'number') {
           result.errors.push('performance.memoryWarningThreshold must be a number');
@@ -273,7 +275,7 @@ export class ConfigValidator {
   private static validateCacheConfig(config: any, result: ConfigValidationResult): void {
     const cache = config.cache;
     if (cache) {
-      // 验证maxSize
+      // ValidatemaxSize
       if (cache.maxSize !== undefined) {
         if (typeof cache.maxSize !== 'number') {
           result.errors.push('cache.maxSize must be a number');
@@ -286,7 +288,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证defaultExpiry
+      // ValidatedefaultExpiry
       if (cache.defaultExpiry !== undefined) {
         if (typeof cache.defaultExpiry !== 'number') {
           result.errors.push('cache.defaultExpiry must be a number');
@@ -297,9 +299,7 @@ export class ConfigValidator {
         }
       }
 
-
-
-      // 验证cleanupInterval
+      // ValidatecleanupInterval
       if (cache.cleanupInterval !== undefined) {
         if (typeof cache.cleanupInterval !== 'number') {
           result.errors.push('cache.cleanupInterval must be a number');
@@ -312,8 +312,6 @@ export class ConfigValidator {
     }
   }
 
-
-
   /**
    * 验证监控配置
    * @param config 配置对象
@@ -322,7 +320,7 @@ export class ConfigValidator {
   private static validateMonitoringConfig(config: any, result: ConfigValidationResult): void {
     const monitoring = config.monitoring;
     if (monitoring) {
-      // 验证enablePerformanceTracking
+      // ValidateenablePerformanceTracking
       if (monitoring.enablePerformanceTracking !== undefined) {
         if (typeof monitoring.enablePerformanceTracking !== 'boolean') {
           result.errors.push('monitoring.enablePerformanceTracking must be a boolean');
@@ -330,7 +328,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证enableHealthChecks
+      // ValidateenableHealthChecks
       if (monitoring.enableHealthChecks !== undefined) {
         if (typeof monitoring.enableHealthChecks !== 'boolean') {
           result.errors.push('monitoring.enableHealthChecks must be a boolean');
@@ -338,7 +336,7 @@ export class ConfigValidator {
         }
       }
 
-      // 验证metricsRetention
+      // ValidatemetricsRetention
       if (monitoring.metricsRetention !== undefined) {
         if (typeof monitoring.metricsRetention !== 'number') {
           result.errors.push('monitoring.metricsRetention must be a number');
@@ -356,28 +354,28 @@ export class ConfigValidator {
    * @returns 修复后的配置对象
    */
   static autoFix(): any {
-    // 获取当前配置
+    // Get当前配置
     let config = { ...configManager.getConfig() };
-    
-    // 自动修复基础配置
+
+    // Auto-fix basic configuration
     this.autoFixBasicConfig(config);
 
-    // 自动修复加密配置
+    // Auto-fix encryption configuration
     this.autoFixEncryptionConfig(config);
 
-    // 自动修复性能配置
+    // Auto-fix performance configuration
     this.autoFixPerformanceConfig(config);
 
-    // 自动修复缓存配置
+    // Auto-fix cache configuration
     this.autoFixCacheConfig(config);
 
-    // 自动修复API配置
+    // Auto-fix API configuration
     this.autoFixApiConfig(config);
 
-    // 自动修复监控配置
+    // Auto-fix monitoring configuration
     this.autoFixMonitoringConfig(config);
-    
-    // 更新配置
+
+    // Update配置
     configManager.setConfig(config);
 
     return config;
@@ -389,7 +387,7 @@ export class ConfigValidator {
    */
   private static autoFixBasicConfig(config: any): void {
     if (typeof config.chunkSize !== 'number' || config.chunkSize <= 0) {
-      config.chunkSize = 5 * 1024 * 1024; // 默认5MB
+      config.chunkSize = 5 * 1024 * 1024; // Default 5MB
     }
 
     if (typeof config.storageFolder !== 'string') {
@@ -402,7 +400,7 @@ export class ConfigValidator {
     }
 
     if (typeof config.timeout !== 'number' || config.timeout <= 0) {
-      config.timeout = 10000; // 默认10秒
+      config.timeout = 10000; // Default 10 seconds
     }
   }
 
@@ -437,8 +435,6 @@ export class ConfigValidator {
     ) {
       config.encryption.keyIterations = 120000;
     }
-
-
 
     if (!Array.isArray(config.encryption.encryptedFields)) {
       config.encryption.encryptedFields = ['password', 'email', 'phone'];
@@ -504,13 +500,11 @@ export class ConfigValidator {
     }
 
     if (typeof config.cache.defaultExpiry !== 'number' || config.cache.defaultExpiry < 0) {
-      config.cache.defaultExpiry = 3600000; // 默认1小时
+      config.cache.defaultExpiry = 3600000; // Default 1 hour
     }
 
-
-
     if (typeof config.cache.cleanupInterval !== 'number' || config.cache.cleanupInterval < 0) {
-      config.cache.cleanupInterval = 300000; // 默认5分钟
+      config.cache.cleanupInterval = 300000; // Default 5 minutes
     }
   }
 
@@ -574,7 +568,7 @@ export class ConfigValidator {
     }
 
     if (typeof config.monitoring.metricsRetention !== 'number' || config.monitoring.metricsRetention < 0) {
-      config.monitoring.metricsRetention = 86400000; // 默认24小时
+      config.monitoring.metricsRetention = 86400000; // Default 24 hours
     }
   }
 }

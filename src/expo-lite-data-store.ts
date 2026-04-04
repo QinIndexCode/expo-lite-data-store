@@ -1,7 +1,7 @@
 /**
  * Expo Lite Data Store Main API Export File
  * Provides all public interfaces for database operations, including table management, data read/write, queries, transactions, etc.
- * 
+ *
  * @module expo-lite-data-store
  * @since 2025-11-19
  * @version 1.0.0
@@ -13,7 +13,7 @@ import { getKeyCacheStats, getKeyCacheHitRate } from './utils/crypto';
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult, TableOptions } from './types/storageTypes';
 import type { PerformanceStats, HealthCheckResult } from './core/monitor/PerformanceMonitor';
 import type { KeyCacheStats } from './utils/crypto';
-import * as CryptoService from './services/CryptoService';
+import * as CryptoService from './core/crypto/CryptoService';
 
 const normalizeSecurity = (opts?: { encrypted?: boolean; requireAuthOnAccess?: boolean }) => {
   const requireAuthOnAccess = opts?.requireAuthOnAccess ?? false;
@@ -50,19 +50,16 @@ export { CryptoService };
  * @param options Create table options, including common options and table-specific options
  * @returns Promise<void>
  */
-export const createTable = async (
-  tableName: string,
-  options: CreateTableOptions = {}
-): Promise<void> => {
+export const createTable = async (tableName: string, options: CreateTableOptions = {}): Promise<void> => {
   const { encryptedFields = [], encryptFullTable = false, ...tableOptions } = options ?? {};
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.createTable(tableName, { 
-    ...tableOptions, 
-    encrypted, 
-    requireAuthOnAccess, 
-    encryptedFields, 
-    encryptFullTable 
+  return adapter.createTable(tableName, {
+    ...tableOptions,
+    encrypted,
+    requireAuthOnAccess,
+    encryptedFields,
+    encryptFullTable,
   });
 };
 
@@ -72,10 +69,7 @@ export const createTable = async (
  * @param options Operation options, including common options
  * @returns Promise<void>
  */
-export const deleteTable = async (
-  tableName: string,
-  options: TableOptions = {}
-): Promise<void> => {
+export const deleteTable = async (tableName: string, options: TableOptions = {}): Promise<void> => {
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.deleteTable(tableName, options);
@@ -87,10 +81,7 @@ export const deleteTable = async (
  * @param options Operation options, including common options
  * @returns Promise<boolean>
  */
-export const hasTable = async (
-  tableName: string,
-  options: TableOptions = {}
-): Promise<boolean> => {
+export const hasTable = async (tableName: string, options: TableOptions = {}): Promise<boolean> => {
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.hasTable(tableName, options);
@@ -101,9 +92,7 @@ export const hasTable = async (
  * @param options Operation options, including common options
  * @returns Promise<string[]>
  */
-export const listTables = async (
-  options: TableOptions = {}
-): Promise<string[]> => {
+export const listTables = async (options: TableOptions = {}): Promise<string[]> => {
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.listTables(options);
@@ -111,19 +100,19 @@ export const listTables = async (
 
 /**
  * Insert data (always uses append mode)
- * 
+ *
  * 功能定位：专门用于向表中追加新数据，不支持覆盖
- * 
+ *
  * 使用场景：
  *   - 初始化数据导入
  *   - 日志记录
  *   - 事件追踪
  *   - 需要保证数据不被覆盖的场景
- * 
+ *
  * 与write的区别：
  *   - insert：固定为追加模式，不支持覆盖
  *   - write：支持追加和覆盖两种模式
- * 
+ *
  * @param tableName Table name
  * @param data Data to insert (single record or array of records)
  * @param options Write options, including common options
@@ -142,20 +131,20 @@ export const insert = async (
 
 /**
  * Overwrite data (always uses overwrite mode)
- * 
+ *
  * 功能定位：专门用于覆盖表中的数据
- * 
+ *
  * 使用场景：
  *   - 完全替换表数据
  *   - 数据同步
  *   - 缓存刷新
  *   - 批量数据更新
  *   - 初始化表数据
- * 
+ *
  * 与insert的区别：
  *   - insert：追加模式，保留现有数据
  *   - overwrite：覆盖模式，替换所有数据
- * 
+ *
  * @param tableName Table name
  * @param data Data to overwrite (single record or array of records)
  * @param options Write options, excluding mode (always uses overwrite mode), and common options
@@ -174,27 +163,24 @@ export const overwrite = async (
 
 /**
  * Read all data from table
- * 
+ *
  * 功能定位：直接从表中读取所有数据，不处理查询条件、排序和分页
- * 
+ *
  * 使用场景：
  *   - 需要获取表中所有数据的场景
  *   - 简单的数据读取操作
  *   - 作为底层API被其他查询方法调用
  *   - 对性能要求较高的场景
- * 
+ *
  * 与findMany的区别：
  *   - read：直接调用底层存储读取数据，性能更高，不支持查询条件、排序和分页
  *   - findMany：先读取所有数据，然后在内存中处理查询条件、排序和分页，功能更全面但性能相对较低
- * 
+ *
  * @param tableName Table name
  * @param options Read options, including common options
  * @returns Promise<Record<string, any>[]> Array of records
  */
-export const read = async (
-  tableName: string,
-  options: ReadOptions = {}
-): Promise<Record<string, any>[]> => {
+export const read = async (tableName: string, options: ReadOptions = {}): Promise<Record<string, any>[]> => {
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   const { ...readOptions } = options ?? {};
@@ -213,10 +199,7 @@ export const read = async (
  * @param options Operation options, including common options
  * @returns Promise<number>
  */
-export const countTable = async (
-  tableName: string,
-  options: TableOptions = {}
-): Promise<number> => {
+export const countTable = async (tableName: string, options: TableOptions = {}): Promise<number> => {
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.count(tableName);
@@ -224,24 +207,24 @@ export const countTable = async (
 
 /**
  * Verify table count accuracy
- * 
+ *
  * 功能定位：数据一致性诊断工具
- * 
+ *
  * 使用场景：
  *   - 数据一致性诊断：验证元数据与实际数据是否一致
  *   - 故障排查：诊断数据不一致问题
  *   - 数据修复：自动修复元数据中的计数错误
  *   - 元数据同步：定期检查和维护数据一致性
- * 
+ *
  * 与countTable的区别：
  *   - countTable：获取当前记录数（快速，直接从元数据读取）
  *   - verifyCountTable：验证并修复数据一致性（较慢，需要扫描实际数据）
- * 
+ *
  * 最佳实践：
  *   - 仅在诊断数据问题时使用
  *   - 定期维护任务中使用（如每天检查一次）
  *   - 不在常规业务流程中使用，以避免性能开销
- * 
+ *
  * @param tableName Table name
  * @param options Operation options, including common options
  * @returns Promise<{ metadata: number; actual: number; match: boolean }> Comparison result with metadata count, actual count, and match status
@@ -257,14 +240,14 @@ export const verifyCountTable = async (
 
 /**
  * Find a single record that matches the specified criteria.
- * 
+ *
  * @param tableName Table name to search in
  * @param options Query options including filter criteria and security settings
  * @param options.where Filter condition to match records against
  * @param options.encrypted Whether to use encrypted storage (defaults to false)
  * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
  * @returns Promise<Record<string, any> | null> Found record or null if no match
- * 
+ *
  * @example
  * ```typescript
  * const user = await findOne('users', {
@@ -275,7 +258,7 @@ export const verifyCountTable = async (
  */
 export const findOne = async (
   tableName: string,
-  options: { where: Record<string, any>, encrypted?: boolean, requireAuthOnAccess?: boolean }
+  options: { where: Record<string, any>; encrypted?: boolean; requireAuthOnAccess?: boolean }
 ): Promise<Record<string, any> | null> => {
   const { where } = options ?? {};
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
@@ -285,7 +268,7 @@ export const findOne = async (
 
 /**
  * Find multiple records that match the specified criteria.
- * 
+ *
  * @param tableName Table name to search in
  * @param options Query options including filter criteria, pagination, sorting, and security settings
  * @param options.where Filter condition to match records against (defaults to {})
@@ -297,7 +280,7 @@ export const findOne = async (
  * @param options.encrypted Whether to use encrypted storage (defaults to false)
  * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
  * @returns Promise<Record<string, any>[]> Array of matching records
- * 
+ *
  * @example
  * ```typescript
  * const users = await findMany('users', {
@@ -313,14 +296,14 @@ export const findOne = async (
 export const findMany = async (
   tableName: string,
   options?: {
-    where?: Record<string, any>,
-    skip?: number,
-    limit?: number,
-    sortBy?: string | string[],
-    order?: 'asc' | 'desc' | Array<'asc' | 'desc'>,
-    sortAlgorithm?: any,
-    encrypted?: boolean,
-    requireAuthOnAccess?: boolean
+    where?: Record<string, any>;
+    skip?: number;
+    limit?: number;
+    sortBy?: string | string[];
+    order?: 'asc' | 'desc' | Array<'asc' | 'desc'>;
+    sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
+    encrypted?: boolean;
+    requireAuthOnAccess?: boolean;
   }
 ): Promise<Record<string, any>[]> => {
   const { where = {}, skip, limit, sortBy, order, sortAlgorithm } = options ?? {};
@@ -332,7 +315,7 @@ export const findMany = async (
     limit,
     sortBy,
     order,
-    sortAlgorithm
+    sortAlgorithm,
   };
 
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
@@ -341,14 +324,14 @@ export const findMany = async (
 
 /**
  * Delete records that match the specified criteria.
- * 
+ *
  * @param tableName Table name to delete records from
  * @param options Delete options including filter criteria and security settings
  * @param options.where Filter condition to match records for deletion
  * @param options.encrypted Whether to use encrypted storage (defaults to false)
  * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
  * @returns Promise<number> Number of records deleted
- * 
+ *
  * @example
  * ```typescript
  * const deletedCount = await remove('users', {
@@ -359,7 +342,7 @@ export const findMany = async (
  */
 export const remove = async (
   tableName: string,
-  options: { where: Record<string, any>, encrypted?: boolean, requireAuthOnAccess?: boolean }
+  options: { where: Record<string, any>; encrypted?: boolean; requireAuthOnAccess?: boolean }
 ): Promise<number> => {
   const { where } = options ?? {};
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
@@ -369,20 +352,20 @@ export const remove = async (
 
 /**
  * Bulk operations
- * 
+ *
  * 功能定位：批量执行多个操作（插入、更新、删除）
- * 
+ *
  * 使用场景：
  *   - 批量数据导入
  *   - 批量数据更新
  *   - 批量数据删除
  *   - 复杂的数据处理流程
- * 
+ *
  * 操作类型说明：
  *   - insert: 插入数据，只需要data参数
  *   - update: 更新数据，需要data和where参数
  *   - delete: 删除数据，只需要where参数
- * 
+ *
  * @param tableName Table name
  * @param operations Array of operations, using union types for type safety
  * @param options Operation options, including common options
@@ -417,9 +400,7 @@ export const bulkWrite = async (
  * @param options Operation options, including common options
  * @returns Promise<void>
  */
-export const beginTransaction = async (
-  options: TableOptions = {}
-): Promise<void> => {
+export const beginTransaction = async (options: TableOptions = {}): Promise<void> => {
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.beginTransaction(options);
@@ -430,9 +411,7 @@ export const beginTransaction = async (
  * @param options Operation options, including common options
  * @returns Promise<void>
  */
-export const commit = async (
-  options: TableOptions = {}
-): Promise<void> => {
+export const commit = async (options: TableOptions = {}): Promise<void> => {
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.commit(options);
@@ -443,9 +422,7 @@ export const commit = async (
  * @param options Operation options, including common options
  * @returns Promise<void>
  */
-export const rollback = async (
-  options: TableOptions = {}
-): Promise<void> => {
+export const rollback = async (options: TableOptions = {}): Promise<void> => {
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.rollback(options);
@@ -457,10 +434,7 @@ export const rollback = async (
  * @param options Operation options, including common options
  * @returns Promise<void>
  */
-export const migrateToChunked = async (
-  tableName: string,
-  options: TableOptions = {}
-): Promise<void> => {
+export const migrateToChunked = async (tableName: string, options: TableOptions = {}): Promise<void> => {
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.migrateToChunked(tableName);
@@ -468,7 +442,7 @@ export const migrateToChunked = async (
 
 /**
  * Update records that match the specified criteria.
- * 
+ *
  * @param tableName Table name to update records in
  * @param data Update data to apply to matching records
  * @param options Update options including filter criteria and security settings
@@ -476,7 +450,7 @@ export const migrateToChunked = async (
  * @param options.encrypted Whether to use encrypted storage (defaults to false)
  * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
  * @returns Promise<number> Number of records updated
- * 
+ *
  * @example
  * ```typescript
  * const updatedCount = await update('users', {
@@ -491,7 +465,7 @@ export const migrateToChunked = async (
 export const update = async (
   tableName: string,
   data: Record<string, any>,
-  options: { where: Record<string, any>, encrypted?: boolean, requireAuthOnAccess?: boolean }
+  options: { where: Record<string, any>; encrypted?: boolean; requireAuthOnAccess?: boolean }
 ): Promise<number> => {
   const { where } = options ?? {};
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
@@ -501,13 +475,13 @@ export const update = async (
 
 /**
  * Clear all data from the specified table.
- * 
+ *
  * @param tableName Table name to clear
  * @param options Clear options including security settings
  * @param options.encrypted Whether to use encrypted storage (defaults to false)
  * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
  * @returns Promise<void>
- * 
+ *
  * @example
  * ```typescript
  * await clearTable('users', {
@@ -516,19 +490,28 @@ export const update = async (
  * });
  * ```
  */
-export const clearTable = async (
-  tableName: string,
-  options: TableOptions = {}
-): Promise<void> => {
+export const clearTable = async (tableName: string, options: TableOptions = {}): Promise<void> => {
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
   return adapter.clearTable(tableName);
 };
 
-
-
 // Export types
-export type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult, CommonOptions, TableOptions, FindOptions, FilterCondition } from './types/storageTypes';
+export type {
+  CreateTableOptions,
+  ReadOptions,
+  WriteOptions,
+  WriteResult,
+  CommonOptions,
+  TableOptions,
+  FindOptions,
+  FilterCondition,
+} from './types/storageTypes';
+
+export { StorageError } from './types/storageErrorInfc';
+export { StorageErrorCode } from './types/storageErrorCode';
+export type { LiteStoreConfig, DeepPartial } from './types/config';
+export { CryptoError } from './utils/crypto-errors';
 
 export default {
   createTable,

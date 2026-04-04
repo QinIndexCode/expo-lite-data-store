@@ -1,7 +1,8 @@
-// src/core/monitor/PerformanceMonitor.ts
 /**
- * 性能监控器
- * 用于收集和统计应用程序的性能指标
+ * @module PerformanceMonitor
+ * @description Performance monitor collecting and reporting application metrics
+ * @since 2025-11-28
+ * @version 1.0.0
  */
 import { configManager } from '../config/ConfigManager';
 /**
@@ -162,13 +163,13 @@ export class PerformanceMonitor {
    * 构造函数
    */
   constructor() {
-    // 从配置文件获取监控参数
+    // Get monitoring parameters from config
     this.enabled = PerformanceMonitor.isPerformanceTrackingEnabled();
-    this.maxRecords = 1000; // 默认保留1000条记录
+    this.maxRecords = 1000; // Default keep 1000 records
     this.metricsRetention = PerformanceMonitor.getMetricsRetention();
-    this.sampleRate = 0.1; // 默认10%采样率，减少90%的指标收集开销
+    this.sampleRate = 0.1; // Default 10% sampling, reduce 90% metrics overhead
 
-    // 定期清理旧指标（在测试环境中禁用，避免 Jest open handle 提示）
+    // Periodically clean old metrics (disabled in test)
     if (typeof process === 'undefined' || process.env?.NODE_ENV !== 'test') {
       this.startMetricsCleanupTimer();
     }
@@ -183,20 +184,20 @@ export class PerformanceMonitor {
       return;
     }
 
-    // 采样策略：只记录部分性能指标，减少90%的指标收集开销
+    // Sampling strategy: record partial metrics, reduce 90% overhead
     if (Math.random() > this.sampleRate) {
       return;
     }
 
-    // 添加到历史记录
+    // Add到历史记录
     this.metrics.push(metrics);
 
-    // 限制记录数量
+    // Limit record count
     if (this.metrics.length > this.maxRecords) {
       this.metrics.shift();
     }
 
-    // 更新操作统计
+    // Update操作统计
     this.updateOperationStats(metrics);
   }
 
@@ -297,7 +298,7 @@ export class PerformanceMonitor {
    * 定期清理旧指标
    */
   private startMetricsCleanupTimer(): void {
-    const cleanupInterval = 60000; // 每分钟清理一次
+    const cleanupInterval = 60000; // Clean up every minute
     this.cleanupTimer = setInterval(() => {
       this.cleanupOldMetrics();
     }, cleanupInterval);
@@ -328,10 +329,10 @@ export class PerformanceMonitor {
     const now = Date.now();
     const cutoffTime = now - this.metricsRetention;
 
-    // 过滤掉超过保留时间的指标
+    // Filter掉超过保留时间的指标
     this.metrics = this.metrics.filter(metric => metric.timestamp >= cutoffTime);
 
-    // 如果清理后指标数量减少，重新计算操作统计
+    // If metrics reduced after cleanup, recalculate stats
     this.recalculateOperationStats();
   }
 
@@ -339,10 +340,10 @@ export class PerformanceMonitor {
    * 重新计算操作统计
    */
   private recalculateOperationStats(): void {
-    // 清除旧统计
+    // Clear old statistics
     this.operationStats.clear();
 
-    // 重新计算所有指标的统计
+    // Recalculate all metrics statistics
     for (const metric of this.metrics) {
       this.updateOperationStats(metric);
     }
@@ -391,7 +392,7 @@ export class PerformanceMonitor {
    * @returns 指标保留时间（毫秒）
    */
   static getMetricsRetention(): number {
-    return configManager.getConfig().monitoring?.metricsRetention || 86400000; // 默认24小时
+    return configManager.getConfig().monitoring?.metricsRetention || 86400000; // Default 24 hours
   }
 
   /**

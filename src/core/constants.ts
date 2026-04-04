@@ -1,16 +1,18 @@
-// src/core/constants.ts
-// 应用程序常量定义，用于消除魔法数字和硬编码值
-// 创建于: 2025-12-03
-// 最后修改: 2025-12-12
+/**
+ * @module constants
+ * @description Application constants to eliminate magic numbers and hardcoded values
+ * @since 2025-12-03
+ * @version 1.0.0
+ */
 
 /**
  * 限流相关常量
  * 用于配置API请求的速率限制策略
  */
 export const RATE_LIMIT = {
-  DEFAULT_RATE: 100, // 默认每秒允许的请求数
-  DEFAULT_CAPACITY: 200, // 默认令牌桶容量，用于处理突发流量
-  DEFAULT_RESET_TIME: 1000, // 默认令牌桶重置时间（毫秒）
+  DEFAULT_RATE: 100, // Default requests per second allowed
+  DEFAULT_CAPACITY: 200, // Default token bucket capacity for burst traffic
+  DEFAULT_RESET_TIME: 1000, // Default token bucket reset time (ms)
 } as const;
 
 /**
@@ -18,12 +20,12 @@ export const RATE_LIMIT = {
  * 用于配置缓存系统的各项参数
  */
 export const CACHE = {
-  DEFAULT_MAX_SIZE: 1000, // 默认缓存最大条目数
-  DEFAULT_EXPIRY: 3600000, // 默认缓存过期时间（1小时，毫秒）
-  CLEANUP_INTERVAL: 300000, // 定期清理过期缓存的间隔（5分钟，毫秒）
-  AVALANCHE_PROTECTION_RANGE: [0, 300000] as [number, number], // 缓存雪崩保护的随机过期范围（0-5分钟）
-  MEMORY_THRESHOLD: 0.8, // 内存使用阈值，超过此值将触发缓存清理（80%）
-  PENETRATION_PROTECTION_TTL: 60000, // 缓存穿透保护的TTL（1分钟，毫秒）
+  DEFAULT_MAX_SIZE: 1000, // Default max cache entries
+  DEFAULT_EXPIRY: 3600000, // Default cache expiry (1 hour, ms)
+  CLEANUP_INTERVAL: 300000, // Cleanup interval for expired cache (5 min, ms)
+  AVALANCHE_PROTECTION_RANGE: [0, 300000] as [number, number], // Cache雪崩保护的随机过期范围（0-5分钟）
+  MEMORY_THRESHOLD: 0.8, // Memory threshold to trigger cache cleanup (80%)
+  PENETRATION_PROTECTION_TTL: 60000, // Cache穿透保护的TTL（1分钟，毫秒）
 } as const;
 
 /**
@@ -31,10 +33,10 @@ export const CACHE = {
  * 用于配置文件系统操作的各项参数
  */
 export const FILE_OPERATION = {
-  DEFAULT_CHUNK_SIZE: 5 * 1024 * 1024, // 默认文件分片大小（5MB）
-  MAX_TABLE_NAME_LENGTH: 100, // 表名的最大允许长度
-  OPERATION_TIMEOUT: 10000, // 文件操作的超时时间（10秒，毫秒）
-  RETRY_DELAY: 100, // 文件操作失败后的重试延迟（100毫秒）
+  DEFAULT_CHUNK_SIZE: 5 * 1024 * 1024, // Default file chunk size (5MB)
+  MAX_TABLE_NAME_LENGTH: 100, // Max allowed table name length
+  OPERATION_TIMEOUT: 10000, // File operation timeout (10s, ms)
+  RETRY_DELAY: 100, // Retry delay after file operation failure (100ms)
 } as const;
 
 /**
@@ -42,10 +44,10 @@ export const FILE_OPERATION = {
  * 用于配置查询引擎的各项参数
  */
 export const QUERY = {
-  DEFAULT_PAGE_SIZE: 100, // 默认查询分页大小
-  MAX_PAGE_SIZE: 1000, // 最大允许的查询分页大小
-  COUNTING_SORT_THRESHOLD: 100, // 适用计数排序的数据集大小阈值
-  MERGE_SORT_THRESHOLD: 10000, // 适用归并排序的数据集大小阈值
+  DEFAULT_PAGE_SIZE: 100, // Default query page size
+  MAX_PAGE_SIZE: 1000, // Max allowed query page size
+  COUNTING_SORT_THRESHOLD: 100, // Dataset size threshold for counting sort
+  MERGE_SORT_THRESHOLD: 10000, // Dataset size threshold for merge sort
 } as const;
 
 /**
@@ -53,8 +55,8 @@ export const QUERY = {
  * 用于配置性能监控系统的各项参数
  */
 export const MONITORING = {
-  DEFAULT_INTERVAL: 60000, // 性能监控的默认采样间隔（1分钟，毫秒）
-  MAX_HISTORY_RECORDS: 100, // 性能监控历史记录的最大保留数量
+  DEFAULT_INTERVAL: 60000, // Default sampling interval for performance monitoring (1 min, ms)
+  MAX_HISTORY_RECORDS: 100, // Max retained records in performance monitoring history
 } as const;
 
 /**
@@ -62,6 +64,6 @@ export const MONITORING = {
  * 用于数据验证和格式检查
  */
 export const REGEX = {
-  TABLE_NAME: /^[a-zA-Z][a-zA-Z0-9_]*$/, // 表名格式验证：字母开头，仅允许字母、数字和下划线
-  VALID_CHARS: /^[a-zA-Z0-9_\-]+$/, // 有效字符验证：仅允许字母、数字、下划线和连字符
+  TABLE_NAME: /^[a-zA-Z][a-zA-Z0-9_]*$/, // Table name validation: starts with letter, only letters, digits, underscores
+  VALID_CHARS: /^[a-zA-Z0-9_\-]+$/, // Valid chars: only letters, digits, underscores, hyphens
 } as const;

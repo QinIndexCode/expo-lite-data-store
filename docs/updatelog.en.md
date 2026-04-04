@@ -1,5 +1,21 @@
-
 <!-- Update Log -->
+
+### 📅 2026-04-02 `v2.0.0-beta.5` Encryption Upgrade and Architecture Optimization
+
+> Encryption Upgrade: Added AES-256-GCM encryption mode, compliant with NIST SP 800-38D and OWASP MASVS 2026
+> Auto Migration: encrypt/decrypt auto-detects data version; new data defaults to GCM, old data remains compatible
+> Security Boost: PBKDF2 default iterations increased from 120,000 to 600,000 (OWASP 2026 recommendation)
+> Config Extension: encryption.algorithm supports 'AES-CTR' | 'AES-GCM' | 'auto' modes
+> Architecture: Resolved ConfigManager circular dependency, created PathHelper for independent path management
+> Error Handling: Consolidated duplicate ErrorHandler classes into StorageErrorHandler and ApiErrorHandler
+> Adapter Complete: StorageAdapterFactory now supports creating EncryptedStorageAdapter
+> Config Unification: Created tsconfig.base.json to unify all TypeScript configurations
+> Cross-Platform: Fixed build scripts, replaced Windows-specific commands with rimraf
+> Code Organization: Moved CryptoService to core/crypto/, removed empty directories
+> New Files: crypto-gcm.ts (GCM encryption), crypto-errors.ts (error definitions), crypto-types.ts (type definitions)
+> New Files: PathHelper.ts (path management), envUtils.ts (environment detection)
+> New Files: .prettierignore, COMMENT_SPECIFICATION docs (Chinese and English)
+> Tests: All 365 tests passing, added GCM encryption tests
 
 ### 📅 2026-01-28 `v2.0.0-beta.2`  Expo Go Crypto Performance and Provider Hardening
 
@@ -70,6 +86,7 @@
 > Enhanced security, ensuring more secure key management
 
 <!-- 2025-12-12 Fixed update, delete, delete issues -->
+
 ### 📅 2025-12-16 `v1.1.0`  Configuration System Optimization and Documentation Improvement
 
 > Optimized the configuration system, removed the configuration generation script during npm install
@@ -83,6 +100,7 @@
 ### 📅 2025-12-12 `v1.0.5`  Fixed update, delete, delete issues
 
 > Fixed update, delete, delete cache issues and their missing interface issues.
+
 <!-- 2025-12-12 Fixed configuration file generation issues -->
 
 ### 📅 2025-12-12 `v1.0.0`  Configuration File Generation Fix

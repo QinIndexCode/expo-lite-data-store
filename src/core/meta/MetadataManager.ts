@@ -1,7 +1,9 @@
-// src/core/meta/MetadataManager.ts
-// 元数据管理器，负责管理数据库的元数据信息
-// 创建于: 2025-11-23
-// 最后修改: 2025-12-11
+/**
+ * @module MetadataManager
+ * @description Metadata manager for table schema and data tracking
+ * @since 2025-11-19
+ * @version 1.0.0
+ */
 
 import * as FileSystem from 'expo-file-system';
 import { StorageError } from '../../types/storageErrorInfc';
@@ -33,22 +35,22 @@ export interface ColumnSchema {
  * 定义表的元数据信息
  */
 export interface TableSchema {
-  mode: 'single' | 'chunked'; // 存储模式：单文件或分片
-  path: string; // 文件路径：单文件格式为"users.ldb"，分片格式为"users/"
-  count: number; // 表中记录数
-  size?: number; // 表的总大小（字节）
-  lastId?: number; // 最后一条记录的ID
-  chunks?: number; // 分片数量（仅分片模式）
-  createdAt: number; // 创建时间戳
-  updatedAt: number; // 更新时间戳
-  columns: ColumnSchema; // 列定义
-  indexes?: Record<string, 'unique' | 'normal'>; // 索引信息
-  isHighRisk?: boolean; // 是否为高风险表
-  highRiskFields?: string[]; // 高风险字段列表
+  mode: 'single' | 'chunked'; // Store模式：单文件或分片
+  path: string; // File path: single file "users.ldb", chunked "users/"
+  count: number; // Record count in table
+  size?: number; // Total table size (bytes)
+  lastId?: number; // Last record ID
+  chunks?: number; // Chunk count (chunked mode only)
+  createdAt: number; // Create时间戳
+  updatedAt: number; // Update时间戳
+  columns: ColumnSchema; // Column definitions
+  indexes?: Record<string, 'unique' | 'normal'>; // Index information
+  isHighRisk?: boolean; // Is high risk table
+  highRiskFields?: string[]; // High risk fields list
 
-  encryptedFields?: string[]; // 需要加密的字段列表
-  encrypted?: boolean; // 是否为加密表
-  encryptFullTable?: boolean; // 是否使用整表加密
+  encryptedFields?: string[]; // Fields requiring encryption
+  encrypted?: boolean; // Is encrypted table
+  encryptFullTable?: boolean; // Use full table encryption
 }
 
 /**
@@ -56,9 +58,9 @@ export interface TableSchema {
  * 定义整个数据库的元数据信息
  */
 export interface DatabaseMeta {
-  version: string; // 数据库版本
-  generatedAt: number; // 元数据生成时间
-  tables: Record<string, TableSchema>; // 所有表的元数据
+  version: string; // Database version
+  generatedAt: number; // Metadata generation time
+  tables: Record<string, TableSchema>; // Metadata of all tables
 }
 
 /**
@@ -74,15 +76,15 @@ export class MetadataManager {
   };
 
   private dirty = false;
-  private writing = false; // 防止并发写冲突
-  private saveTimer: any = null; // 防抖定时器
-  private loadPromise: Promise<void> | null = null; // 用于跟踪load方法的执行状态
+  private writing = false; // Prevent concurrent write conflicts
+  private saveTimer: any = null; // Debounce timer
+  private loadPromise: Promise<void> | null = null; // Track load method execution status
 
   constructor() {
-    this.loadPromise = this.load(); // 异步加载，不阻塞启动，但保存promise以便外部等待
+    this.loadPromise = this.load(); // Async加载，不阻塞启动，但保存promise以便外部等待
   }
 
-  // 加载元数据（损坏自动重建）
+  // Load元数据（损坏自动重建）
   private async load() {
     try {
       const info = await FileSystem.getInfoAsync(META_FILE_PATH);
@@ -108,14 +110,14 @@ export class MetadataManager {
     }
   }
 
-  // 等待加载完成（用于测试）
+  // Wait加载完成（用于测试）
   async waitForLoad(): Promise<void> {
     if (this.loadPromise) {
       await this.loadPromise;
     }
   }
 
-  // 清理资源（用于测试）
+  // Cleanup资源（用于测试）
   cleanup(): void {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
@@ -123,7 +125,7 @@ export class MetadataManager {
     }
   }
 
-  // 立即保存元数据（用于测试）
+  // Save metadata immediately (for testing)
   async saveImmediately(): Promise<void> {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
@@ -133,7 +135,7 @@ export class MetadataManager {
   }
 
   // Lock Save (Prevent Concurrent Write)
-  // 锁保存（防止并发写冲突）
+  // Locked save (prevent concurrent write conflicts)
   private async save() {
     if (!this.dirty || this.writing) return;
     this.writing = true;
@@ -142,16 +144,16 @@ export class MetadataManager {
     try {
       this.cache.generatedAt = Date.now();
 
-      // 确保目录存在
+      // Ensure directory exists
       const dirPath = META_FILE_PATH.substring(0, META_FILE_PATH.lastIndexOf('/'));
       try {
         await FileSystem.makeDirectoryAsync(dirPath, { intermediates: true });
       } catch (dirError) {
-        // 目录创建失败，可能目录已存在，忽略
+        // Directory creation failed, may already exist, ignore
         logger.warn(`MAKE DIRECTORY FAILED for ${dirPath}`, dirError);
       }
 
-      // 写入元数据文件
+      // Write元数据文件
       await FileSystem.writeAsStringAsync(META_FILE_PATH, JSON.stringify(this.cache, null, 2), {
         encoding: FileSystem.EncodingType.UTF8,
       });
@@ -166,19 +168,19 @@ export class MetadataManager {
   private triggerSave() {
     this.dirty = true;
     if (this.saveTimer) clearTimeout(this.saveTimer);
-    // 在测试环境中使用更短的延迟，避免测试挂起
+    // Use shorter delay in test to prevent test hanging
     const delay = typeof process !== 'undefined' && process.env.NODE_ENV === 'test' ? 10 : 200;
     this.saveTimer = setTimeout(() => this.save(), delay);
   }
 
-  // 获取单表元数据
+  // Get单表元数据
   get(tableName: string): TableSchema | undefined {
-    // 同步访问：如果正在加载，返回 undefined（调用者应处理此情况）
-    // 注意：大多数情况下加载会很快完成，不会造成问题
+    // Sync访问：如果正在加载，返回 undefined（调用者应处理此情况）
+    // Note: Load usually completes quickly, no issues
     return this.cache.tables[tableName];
   }
 
-  // 异步获取单表元数据（确保加载完成）
+  // Async获取单表元数据（确保加载完成）
   async getAsync(tableName: string): Promise<TableSchema | undefined> {
     await this.waitForLoad();
     return this.cache.tables[tableName];
@@ -188,7 +190,7 @@ export class MetadataManager {
     return this.cache.tables[tableName]?.path || `${tableName}.ldb`;
   }
 
-  // 更新表元数据（自动合并）
+  // Update表元数据（自动合并）
   update(tableName: string, updates: Partial<TableSchema>): void {
     const existing = this.cache.tables[tableName] || {
       mode: 'single',
@@ -208,16 +210,15 @@ export class MetadataManager {
     this.triggerSave();
   }
 
-  
-  // 异步更新表元数据（确保加载完成）
+  // Async更新表元数据（确保加载完成）
   async updateAsync(tableName: string, updates: Partial<TableSchema>): Promise<void> {
-    // 确保加载完成后再更新
+    // Ensure load complete before update
     await this.waitForLoad();
-    
+
     this.update(tableName, updates);
   }
 
-  // 同步更新（用于向后兼容，但会警告）
+  // Sync更新（用于向后兼容，但会警告）
   updateSync(tableName: string, updates: Partial<TableSchema>): void {
     const existing = this.cache.tables[tableName] || {
       mode: 'single',
@@ -252,11 +253,11 @@ export class MetadataManager {
     return this.cache.tables[tableName]?.count ?? 0;
   }
 
-  // 调试用：查看完整元数据
+  // Debug用：查看完整元数据
   debugDump_checkMetaCache(): DatabaseMeta {
     return this.cache;
   }
 }
 
-// 单例导出 + 自动加载
+// Singleton export + auto-load
 export const meta = new MetadataManager();

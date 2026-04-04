@@ -1,7 +1,9 @@
-// src/core/file/ChunkedFileHandler.ts
-// 分片文件处理器，用于处理分片存储模式的文件操作
-// 创建于: 2025-11-23
-// 最后修改: 2025-12-11
+/**
+ * @module ChunkedFileHandler
+ * @description Chunked file handler for large data storage with automatic splitting
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
 import * as FileSystem from 'expo-file-system';
 import { EncodingType } from 'expo-file-system';
@@ -37,26 +39,24 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
   /**
    * 实现基类的write方法，覆盖现有数据
-   * 优化：先清空现有数据，再写入新数据，确保原子性
+   * 采用先清空再写入的方式，每个分块使用原子写入（临时文件+重命名）
    */
   async write(data: Record<string, any>[]): Promise<void> {
     try {
-      // 使用基类的验证方法
       this.validateArrayData(data);
 
-      // 如果数据为空，直接清空现有数据
       if (data.length === 0) {
         await this.clear();
         return;
       }
 
-      // 先清空现有数据
+      // Clear existing data first
       await this.clear();
-      
-      // 然后写入新数据
+
+      // Then write new data (each chunk uses atomic write)
       await this.append(data);
-      
-      // 更新元数据（确保元数据与实际数据一致）
+
+      // Update metadata
       this.metadataManager.update(this.tableName, {
         count: data.length,
         updatedAt: Date.now(),
@@ -100,22 +100,22 @@ export class ChunkedFileHandler extends FileHandlerBase {
    */
   async append(data: Record<string, any>[]) {
     try {
-      // 验证输入数据必须是数组
+      // Validate input must be an array
       this.validateArrayData(data);
 
-      if (data.length === 0) return; // 空数据直接返回
+      if (data.length === 0) return; // Empty data returns immediately
 
-      // 创建表目录，确保目录存在
+      // Create table directory
       await withTimeout(
         FileSystem.makeDirectoryAsync(this.tableDirPath, { intermediates: true }),
         10000,
         `create table directory ${this.tableName}`
       );
 
-      // 清除目录信息缓存，确保后续操作使用最新信息
+      // Clear directory info cache，确保后续操作使用最新信息
       this.clearFileInfoCache(this.tableDirPath);
 
-      // 获取当前表的元数据，如果不存在则创建默认元数据
+      // Get table metadata，如果不存在则创建默认元数据
       const currentMeta = this.metadataManager.get(this.tableName) || {
         mode: 'chunked' as const,
         path: this.tableName + '/',
@@ -125,16 +125,16 @@ export class ChunkedFileHandler extends FileHandlerBase {
         updatedAt: Date.now(),
       };
 
-      // 获取配置的块大小，确保有合理的默认值（1MB）
+      // Get configured chunk size，确保有合理的默认值（1MB）
       const chunkSize = configManager.getConfig().chunkSize || 1024 * 1024;
 
-      // 预处理：将数据分成多个块，每个块不超过chunkSize
+      // Preprocessing: split data into chunks，每个块不超过chunkSize
       const chunksToWrite = await this.preprocessData(data, chunkSize);
 
-      // 获取当前块索引
+      // Get当前块索引
       let chunkIndex = currentMeta.chunks || 0;
 
-      // 并行写入所有块，限制并行数为4，避免过多I/O操作
+      // Parallel写入所有块，限制并行数为4，避免过多I/O操作
       const parallelLimit = 4;
       const writePromises: Promise<void>[] = [];
 
@@ -142,32 +142,32 @@ export class ChunkedFileHandler extends FileHandlerBase {
         const chunkData = chunksToWrite[i];
         const currentIndex = chunkIndex + i;
 
-        // 创建写入Promise
+        // Create写入Promise
         const writePromise = this.writeChunk(currentIndex, chunkData || []);
         writePromises.push(writePromise);
 
-        // 限制并行数
+        // Limit parallel count
         if (writePromises.length >= parallelLimit) {
-          // 等待一批写入完成
+          // Wait一批写入完成
           await Promise.all(writePromises);
           writePromises.length = 0;
         }
       }
 
-      // 处理剩余的写入Promise
+      // Process剩余的写入Promise
       if (writePromises.length > 0) {
         await Promise.all(writePromises);
       }
 
-      // 更新表的元数据
+      // Update表的元数据
       this.metadataManager.update(this.tableName, {
         mode: 'chunked',
-        count: currentMeta.count + data.length, // 更新记录数
-        chunks: chunkIndex + chunksToWrite.length, // 更新块数量
-        updatedAt: Date.now(), // 更新时间戳
+        count: currentMeta.count + data.length, // Update记录数
+        chunks: chunkIndex + chunksToWrite.length, // Update块数量
+        updatedAt: Date.now(), // Update时间戳
       });
     } catch (error) {
-      // 捕获并处理所有异常，格式化错误信息
+      // Catch并处理所有异常，格式化错误信息
       logger.error(`append data to table ${this.tableName} failed`, error);
       throw this.formatWriteError(`append data to table ${this.tableName} failed`, error);
     }
@@ -185,22 +185,22 @@ export class ChunkedFileHandler extends FileHandlerBase {
     let currentChunk: Record<string, any>[] = [];
     let currentSize = 0;
 
-    // 优化：批量处理，减少JSON序列化次数
+    // Optimization: batch processing to reduce JSON serialization
     const encoder = new TextEncoder();
     const overhead = 200; // JSON结构和哈希的预估开销
 
-    // 优化：预计算数据项大小，避免重复计算
+    // Optimization: pre-calculate data item size, avoid repeated calculation
     const itemSizes: number[] = [];
     const validItems: Record<string, any>[] = [];
 
-    // 第一步：验证和预计算大小
+    // Step 1: Validate and pre-calculate sizes
     for (const item of data) {
       try {
         if (!this.validateDataItem(item)) {
           continue;
         }
 
-        // 估算单个数据项的大小（优化：只序列化一次）
+        // Estimate single data item size（优化：只序列化一次）
         const itemSize = encoder.encode(JSON.stringify(item)).byteLength + overhead;
         itemSizes.push(itemSize);
         validItems.push(item);
@@ -209,7 +209,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       }
     }
 
-    // 第二步：智能分块算法改进
+    // Step 2: Smart chunking algorithm improvement
     // 1. 统计数据项大小分布，优化分块策略
     const sizeStats = {
       min: Math.min(...itemSizes),
@@ -220,7 +220,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     // 2. 根据数据分布动态调整块大小（不超过配置的chunkSize）
     const dynamicChunkSize = Math.min(
       chunkSize,
-      Math.max(sizeStats.avg * 100, chunkSize * 0.8) // 确保每个块至少包含一定数量的数据项
+      Math.max(sizeStats.avg * 100, chunkSize * 0.8) // Ensure each chunk has minimum data items
     );
 
     // 3. 智能分块，尽量填满每个块，同时考虑数据项大小分布
@@ -228,20 +228,20 @@ export class ChunkedFileHandler extends FileHandlerBase {
       const item = validItems[i];
       const itemSize = itemSizes[i] || 0;
 
-      // 如果单个项就超过块大小，单独成块
+      // If single item exceeds chunk size, make it standalone chunk
       if (item && itemSize > dynamicChunkSize) {
-        // 如果当前块有数据，先保存
+        // If current chunk has data, save first
         if (currentChunk.length > 0) {
           chunks.push(currentChunk);
           currentChunk = [];
           currentSize = 0;
         }
-        // 大项单独成块
+        // Large items make standalone chunks
         chunks.push([item as Record<string, any>]);
         continue;
       }
 
-      // 智能判断：如果当前块加上新项接近块大小（90%以上），则直接保存当前块
+      // Smart: If current chunk + new item near chunk size (>90%), save chunk
       const fillRatio = (currentSize + itemSize) / dynamicChunkSize;
       if (fillRatio > 0.9 && currentChunk.length > 0) {
         chunks.push(currentChunk);
@@ -249,19 +249,19 @@ export class ChunkedFileHandler extends FileHandlerBase {
         currentSize = 0;
       }
 
-      // 如果当前块加上新项超过限制，将当前块添加到结果中
+      // If current chunk + new item exceeds limit, add chunk to results
       if (currentSize + itemSize > dynamicChunkSize && currentChunk.length > 0) {
         chunks.push(currentChunk);
         currentChunk = [];
         currentSize = 0;
       }
 
-      // 添加到当前块
+      // Add到当前块
       currentChunk.push(item as Record<string, any>);
       currentSize += itemSize;
     }
 
-    // 添加最后一个块
+    // Add最后一个块
     if (currentChunk.length > 0) {
       chunks.push(currentChunk);
     }
@@ -272,7 +272,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
   private async writeChunk(index: number, data: Record<string, any>[]) {
     const filePath = this.getChunkFilePath(index);
     try {
-      // 使用基类的验证方法
+      // Use base class validation method
       this.validateArrayData(data);
 
       const hash = await this.computeHash(data);
@@ -280,18 +280,18 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
       logger.debug(`Writing chunk ${index} to ${filePath}, data length: ${data.length}`);
 
-      // 重试机制，最多重试3次
+      // Retry机制，最多重试3次
       let retries = 3;
       let lastError: any;
 
       while (retries > 0) {
         try {
-          // 原子写入：先写入临时文件，再重命名
+          // Atomic write: Write to temp file, then rename
           const tempFilePath = `${this.tableDirPath}${String(index).padStart(6, '0')}.tmp`;
 
           logger.debug(`Writing temp file ${tempFilePath}`);
 
-          // 添加超时控制
+          // Add超时控制
           await withTimeout(
             FileSystem.writeAsStringAsync(tempFilePath, content, { encoding: EncodingType.UTF8 }),
             10000,
@@ -300,7 +300,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
           logger.debug(`Renaming temp file ${tempFilePath} to ${filePath}`);
 
-          // 重命名临时文件为目标文件，实现原子写入
+          // Rename temp file to target for atomic write
           await withTimeout(
             FileSystem.moveAsync({ from: tempFilePath, to: filePath }),
             10000,
@@ -309,29 +309,29 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
           logger.debug(`Written chunk ${index} to ${filePath}`);
 
-          // 验证文件是否存在
+          // Validate文件是否存在
           const fileInfo = await FileSystem.getInfoAsync(filePath);
           logger.debug(`File ${filePath} exists: ${fileInfo.exists}`);
 
-          // 写入成功后清除缓存
+          // Write成功后清除缓存
           this.clearFileInfoCache(filePath);
-          return; // 成功写入，退出重试循环
+          return; // Succeed写入，退出重试循环
         } catch (error: any) {
           logger.debug(`Error writing chunk ${index}: ${error.message}`);
           lastError = error;
           retries--;
 
-          // 如果是文件锁定错误，等待后重试
+          // If file locked error, wait and retry
           if (error.message && (error.message.includes('locked') || error.message.includes('busy'))) {
-            await new Promise(resolve => setTimeout(resolve, 100)); // 等待100ms后重试
+            await new Promise(resolve => setTimeout(resolve, 100)); // Wait100ms后重试
           } else {
-            // 其他错误，直接抛出
+            // Other errors, throw directly
             throw error;
           }
         }
       }
 
-      // 重试次数用尽，抛出最后一次错误
+      // Retry次数用尽，抛出最后一次错误
       throw lastError;
     } catch (error) {
       throw this.formatWriteError(`write chunk ${index} failed`, error);
@@ -342,7 +342,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
    * 分块预加载缓存
    */
   private chunkCache = new Map<number, Record<string, any>[]>();
-  private readonly maxCacheSize = 10; // 最多缓存10个分块
+  private readonly maxCacheSize = 10; // Max 10 chunks in cache
 
   /**
    * 预加载分块到缓存
@@ -365,7 +365,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
         return !this.chunkCache.has(fileIndex);
       });
 
-    // 限制并行加载数量
+    // Limit parallel load count
     const parallelLimit = 4;
     for (let i = 0; i < filesToLoad.length; i += parallelLimit) {
       const batch = filesToLoad.slice(i, i + parallelLimit);
@@ -376,9 +376,9 @@ export class ChunkedFileHandler extends FileHandlerBase {
             const chunkIndex = parseInt(fileName.replace(CHUNK_EXT, ''), 10);
             const data = await this.readChunkFile(filePath);
             if (data.length > 0) {
-              // 限制缓存大小
+              // Limit cache size
               if (this.chunkCache.size >= this.maxCacheSize) {
-                // 删除最旧的缓存项
+                // Delete最旧的缓存项
                 const firstKey = this.chunkCache.keys().next().value;
                 if (firstKey !== undefined) {
                   this.chunkCache.delete(firstKey);
@@ -463,7 +463,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       }
     }
 
-    // 添加缓存的数据
+    // Add缓存的数据
     cachedIndices.sort((a, b) => a - b);
     for (const index of cachedIndices) {
       const cached = this.chunkCache.get(index);
@@ -475,7 +475,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     // 3. 并行读取未缓存的分片文件，限制并行数为6，避免过多I/O操作
     const parallelLimit = 6;
 
-    // 分批次并行读取
+    // Batch parallel reading
     for (let i = 0; i < filesToRead.length; i += parallelLimit) {
       const batchFiles = filesToRead.slice(i, i + parallelLimit);
 
@@ -485,7 +485,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
           const chunkIndex = parseInt(fileName.replace(CHUNK_EXT, ''), 10);
           const data = await this.readChunkFile(filePath);
 
-          // 缓存读取的分片
+          // Cache读取的分片
           if (data.length > 0 && this.chunkCache.size < this.maxCacheSize) {
             this.chunkCache.set(chunkIndex, data);
           }
@@ -493,11 +493,11 @@ export class ChunkedFileHandler extends FileHandlerBase {
           return data;
         } catch (e) {
           logger.warn(`READ CHUNK ${filePath} FAILED`, e);
-            return [];
+          return [];
         }
       });
 
-      // 等待当前批次完成
+      // Wait当前批次完成
       const batchResults = await Promise.all(batchPromises);
       allChunkData.push(...batchResults);
     }
@@ -520,7 +520,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
       logger.debug(`Getting chunk files from ${this.tableDirPath}`);
 
-      // 优先尝试读取目录
+      // Try reading directory first
       try {
         const entries = await withTimeout(
           FileSystem.readDirectoryAsync(this.tableDirPath),
@@ -538,9 +538,9 @@ export class ChunkedFileHandler extends FileHandlerBase {
         logger.debug(
           `List directory failed, falling back to file detection: ${listError instanceof Error ? listError.message : 'Unknown error'}`
         );
-        // 如果列出目录失败，可能是在测试环境或目录 API 不支持的环境
-        // 回退：按编号探测可能存在的分片文件
-        // 增加探测范围到20个文件，确保测试中生成的文件能被探测到
+        // If list directory fails, may be in test or unsupported environment
+        // Fallback：按编号探测可能存在的分片文件
+        // Increase detection range to 20 files for test coverage
         for (let i = 0; i < 20; i++) {
           const filePath = this.getChunkFilePath(i);
           try {
@@ -550,7 +550,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
               filePaths.push(filePath);
             }
           } catch {
-            // 获取文件信息失败说明文件不存在，忽略
+            // Get file info失败说明文件不存在，忽略
             continue;
           }
         }
@@ -597,10 +597,10 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
   async clear() {
     try {
-      // 简化实现：直接删除整个目录，然后重新创建
-      // 这样可以一次性删除所有文件，包括分片文件和元文件
+      // Simplified: Delete entire directory, then recreate
+      // This deletes all files at once, including chunk and meta files
 
-      // 先尝试删除目录
+      // Try deleting directory first
       try {
         await withTimeout(
           FileSystem.deleteAsync(this.tableDirPath, { idempotent: true }),
@@ -608,28 +608,28 @@ export class ChunkedFileHandler extends FileHandlerBase {
           'DELETE TABLE DIRECTORY'
         );
       } catch (err) {
-        // 删除目录失败，可能目录不存在，忽略
-      logger.warn(`DELETE TABLE DIRECTORY FAILED`, err);
+        // Delete目录失败，可能目录不存在，忽略
+        logger.warn(`DELETE TABLE DIRECTORY FAILED`, err);
       }
 
-      // 重新创建目录
+      // Recreate directory
       await withTimeout(
         FileSystem.makeDirectoryAsync(this.tableDirPath, { intermediates: true }),
         10000,
         'RECREATE TABLE DIRECTORY'
       );
 
-      // 清除目录缓存
+      // Clear directory cache
       this.clearFileInfoCache(this.tableDirPath);
 
-      // 更新元数据
+      // Update metadata
       this.metadataManager.update(this.tableName, {
         count: 0,
         chunks: 0,
         updatedAt: Date.now(),
       });
     } catch (error) {
-      // 清空分片表失败
+      // Failed to clear chunked table
       logger.error('CLEAR CHUNKED TABLE FAILED', error);
       throw this.formatDeleteError('CLEAR CHUNKED TABLE FAILED', error);
     }

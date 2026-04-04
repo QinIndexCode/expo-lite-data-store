@@ -1,37 +1,36 @@
-# 源代码目录
+# Source code (only distribute compiled output)
 src/
 
-# 测试相关目录
+# Test files
 __tests__/
 __mocks__/
 apiTest/
 coverage/
-
-# 测试文件
 *.test.ts
 *.test.js
 *.spec.ts
 *.spec.js
+test-scripts/
 
-# 构建配置文件
-jest*.js
-jest*.config.js
+# Build and config files
+jest*.cjs
+jest*.config.cjs
 eslint.config.js
 eslint*.js
 prettier*.js
 .prettierrc*
 *.tsbuildinfo
 
-# TypeScript配置文件
-tsconfig.json
-tsconfig.js.json 
+# TypeScript config (only types config needed for consumers)
+tsconfig.cjs.json
+tsconfig.base.json
 
-
-# 开发和环境配置文件
+# Dev and env config files
 package-dev.json
 package-env.json
 package-lock.json
-# Expo / React Native 开发文件
+
+# Expo / React Native dev files
 .expo/
 .expo-shared/
 app.json
@@ -39,23 +38,13 @@ metro.config.js
 babel.config.js
 expo-env.d.ts
 
-# 文档文件（保留必要的README）
+# Documentation (keep only README.md and LICENSE)
 *.md
-README.zh-CN.md
-README.en.md
-WIKI.md
-WIKI_EN.md
-docs/ARCHITECTURE.zh-CN.md
-docs/ARCHITECTURE.en.md
-docs/COMMENT_SPECIFICATION.zh-CN.md
-docs/COMMENT_SPECIFICATION.en.md
-docs/updatelog.zh-CN.md
-docs/updatelog.en.md
-
 !README.md
 !LICENSE.txt
+docs/
 
-# 工具和临时文件
+# Tools and temp files
 code-improvement-report.js
 debug-*.*
 test-*.*
@@ -63,28 +52,16 @@ test-*.*
 *.tmp
 *.log
 
-# 编辑器和IDE配置
+# IDE config
 .vscode/
 .trae/
 .idea/
 *.swp
 *.swo
 
-# Git相关文件
+# Git files
 .git/
 .gitignore
 
-# 确保必要的文件被包含
-!/dist/
-!package.json
-!tsconfig.types.json
-!tsconfig.js.json
-!tsconfig.json
-
-# 测试脚本目录
-test-scripts/
+# Test config
 jest.*
-
-#构建产物
-dist/
-expo-lite-data-store-*.tgz

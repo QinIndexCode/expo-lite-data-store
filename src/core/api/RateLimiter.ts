@@ -1,10 +1,11 @@
-// src/core/api/RateLimiter.ts
-// API限流机制，基于令牌桶算法
-// 创建于: 2025-11-28
-// 最后修改: 2025-12-11
+/**
+ * @module RateLimiter
+ * @description API rate limiter using token bucket algorithm
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
 import { RATE_LIMIT } from '../constants';
-
 
 /**
  * 限流配置接口
@@ -86,9 +87,9 @@ export class RateLimiter {
    */
   constructor(config: Partial<RateLimitConfig> = {}) {
     this.config = {
-      rate: config.rate || RateLimiter.getDefaultRate(), // 默认每秒请求数
-      capacity: config.capacity || RateLimiter.getDefaultCapacity(), // 默认令牌桶容量
-      enabled: config.enabled !== false && RateLimiter.isEnabledByDefault(), // 默认启用限流
+      rate: config.rate || RateLimiter.getDefaultRate(), // Default requests per second
+      capacity: config.capacity || RateLimiter.getDefaultCapacity(), // Default token bucket capacity
+      enabled: config.enabled !== false && RateLimiter.isEnabledByDefault(), // Enable rate limiting by default
     };
   }
 
@@ -110,10 +111,10 @@ export class RateLimiter {
     let clientInfo = this.clientLimits.get(clientId);
 
     if (!clientInfo) {
-      // 新客户端，初始化令牌桶
+      // New client, initialize token bucket
       clientInfo = {
         lastRequestTime: now,
-        tokens: this.config.capacity - 1, // 消耗一个令牌
+        tokens: this.config.capacity - 1, // Consume one token
       };
       this.clientLimits.set(clientId, clientInfo);
 
@@ -124,18 +125,18 @@ export class RateLimiter {
       };
     }
 
-    // 计算时间差，生成新令牌
+    // Calculate时间差，生成新令牌
     const timeElapsed = now - clientInfo.lastRequestTime;
     const newTokens = Math.floor((timeElapsed / 1000) * this.config.rate);
 
     if (newTokens > 0) {
-      // 更新令牌数，不超过容量
+      // Update令牌数，不超过容量
       clientInfo.tokens = Math.min(clientInfo.tokens + newTokens, this.config.capacity);
       clientInfo.lastRequestTime = now;
     }
 
     if (clientInfo.tokens > 0) {
-      // 有令牌，允许请求
+      // Has tokens, allow request
       clientInfo.tokens--;
       this.clientLimits.set(clientId, clientInfo);
 
@@ -145,8 +146,8 @@ export class RateLimiter {
         resetTime: now + 1000,
       };
     } else {
-      // 没有令牌，拒绝请求
-      // 计算需要等待的时间
+      // No tokens, reject request
+      // Calculate需要等待的时间
       const retryAfter = Math.ceil((1 - timeElapsed / 1000) * 1000);
 
       return {
@@ -177,25 +178,25 @@ export class RateLimiter {
     let clientInfo = this.clientLimits.get(clientId);
 
     if (!clientInfo) {
-      // 新客户端，初始化令牌桶
+      // New client, initialize token bucket
       clientInfo = {
         lastRequestTime: now,
         tokens: this.config.capacity,
       };
     }
 
-    // 计算时间差，生成新令牌
+    // Calculate时间差，生成新令牌
     const timeElapsed = now - clientInfo.lastRequestTime;
     const newTokens = Math.floor((timeElapsed / 1000) * this.config.rate);
 
     if (newTokens > 0) {
-      // 更新令牌数，不超过容量
+      // Update令牌数，不超过容量
       clientInfo.tokens = Math.min(clientInfo.tokens + newTokens, this.config.capacity);
       clientInfo.lastRequestTime = now;
     }
 
     if (clientInfo.tokens >= tokens) {
-      // 有足够令牌，允许请求
+      // Sufficient tokens, allow request
       clientInfo.tokens -= tokens;
       this.clientLimits.set(clientId, clientInfo);
 
@@ -205,8 +206,8 @@ export class RateLimiter {
         resetTime: now + 1000,
       };
     } else {
-      // 没有足够令牌，拒绝请求
-      // 计算需要等待的时间
+      // Insufficient tokens, reject request
+      // Calculate需要等待的时间
       const tokensNeeded = tokens - clientInfo.tokens;
       const retryAfter = Math.ceil((tokensNeeded / this.config.rate) * 1000);
 
@@ -376,5 +377,5 @@ export class GlobalRateLimiter {
   }
 }
 
-// 全局限流管理器实例
+// Global限流管理器实例
 export const globalRateLimiter = new GlobalRateLimiter();

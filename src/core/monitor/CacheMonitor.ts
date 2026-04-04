@@ -1,4 +1,9 @@
-// src/core/monitor/CacheMonitor.ts
+/**
+ * @module CacheMonitor
+ * @description Cache monitor tracking cache statistics and health
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 import { CacheManager, CacheStats } from '../cache/CacheManager';
 
 /**
@@ -52,7 +57,7 @@ export class CacheMonitor {
       }
     }, intervalMs);
 
-    // 立即记录一次
+    // Record immediately once
     this.recordStats();
   }
 
@@ -63,7 +68,7 @@ export class CacheMonitor {
     if (this.monitoringInterval) {
       clearInterval(this.monitoringInterval);
       this.monitoringInterval = null;
-      // 监控已停止
+      // Monitor已停止
     }
   }
 
@@ -74,7 +79,7 @@ export class CacheMonitor {
     const stats = this.cacheManager.getStats();
     this.history.push({ ...stats });
 
-    // 限制历史记录数量
+    // Limit history record count
     if (this.history.length > this.maxHistoryRecords) {
       this.history.shift();
     }
@@ -111,7 +116,7 @@ export class CacheMonitor {
    */
   getMemoryUsageTrend(): { timestamp: number; memoryUsage: number }[] {
     return this.history.map((stats, index) => ({
-      timestamp: Date.now() - (this.history.length - index) * 60000, // 估算时间戳
+      timestamp: Date.now() - (this.history.length - index) * 60000, // Estimated timestamp
       memoryUsage: stats.memoryUsage,
     }));
   }
@@ -128,19 +133,19 @@ export class CacheMonitor {
     const issues: string[] = [];
     const recommendations: string[] = [];
 
-    // 检查命中率
+    // Check命中率
     if (stats.hitRate < 0.5) {
       issues.push(`缓存命中率较低: ${(stats.hitRate * 100).toFixed(2)}%`);
       recommendations.push('考虑增加缓存大小或调整缓存策略');
     }
 
-    // 检查内存使用
+    // Check内存使用
     if (stats.maxMemoryUsage > 0 && stats.memoryUsage > stats.maxMemoryUsage * 0.9) {
       issues.push(`内存使用率较高: ${((stats.memoryUsage / stats.maxMemoryUsage) * 100).toFixed(2)}%`);
       recommendations.push('考虑增加最大内存限制或优化缓存清理策略');
     }
 
-    // 检查淘汰次数
+    // Check淘汰次数
     if (stats.evictions > stats.writes * 0.5) {
       issues.push(`缓存淘汰频繁: ${stats.evictions} 次淘汰，${stats.writes} 次写入`);
       recommendations.push('考虑增加缓存容量');

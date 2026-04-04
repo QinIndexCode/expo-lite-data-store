@@ -1,7 +1,9 @@
-// src/core/file/FileHandlerFactory.ts
-// 文件处理器工厂类，用于创建不同类型的文件处理器
-// 创建于: 2025-11-28
-// 最后修改: 2025-12-11
+/**
+ * @module FileHandlerFactory
+ * @description Factory class for creating different types of file handlers
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
 import { IMetadataManager } from '../../types/metadataManagerInfc';
 import ROOT from '../../utils/ROOTPath';
@@ -57,11 +59,11 @@ export class FileHandlerFactory {
    * @returns 是否应该使用分片模式
    */
   shouldUseChunkedMode(data: Record<string, any>[]): boolean {
-    // 根据数据量决定是否使用分片模式
+    // Decide whether to use chunked mode based on data size
     const estimatedSize = data.reduce((acc, item) => acc + JSON.stringify(item).length, 0);
     return estimatedSize > (this.chunkSize || 1024 * 1024) / 2;
   }
-  
+
   /**
    * 更新分片大小
    * @param chunkSize 新的分片大小

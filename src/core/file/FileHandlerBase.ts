@@ -1,7 +1,9 @@
-// src/core/file/FileHandlerBase.ts
-// 文件处理器抽象基类，包含公共方法
-// 创建于: 2025-11-28
-// 最后修改: 2025-12-11
+/**
+ * @module FileHandlerBase
+ * @description Abstract base class for file handlers with common functionality
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
 import * as Crypto from 'expo-crypto';
 import { StorageError } from '../../types/storageErrorInfc';
@@ -35,7 +37,7 @@ export abstract class FileHandlerBase {
   /**
    * 批量处理大小
    */
-  protected readonly BATCH_SIZE = 100; // 每批次处理100条数据
+  protected readonly BATCH_SIZE = 100; // Process 100 records per batch
 
   /**
    * 验证数据是否为数组

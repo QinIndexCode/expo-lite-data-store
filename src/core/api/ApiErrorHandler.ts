@@ -1,10 +1,12 @@
-// src/core/api/ErrorHandler.ts
-// 错误处理器，负责统一的错误处理和响应格式化
-// 创建于: 2025-12-11
-// 最后修改: 2025-12-11
+/**
+ * @module ApiErrorHandler
+ * @description Error handler providing unified error handling and response formatting
+ * @since 2025-12-11
+ * @version 1.0.0
+ */
 
-import { ApiResponse } from '../../types/apiResponse.js';
-import { StorageError } from '../../types/storageErrorInfc.js';
+import { ApiResponse } from '../../types/apiResponse';
+import { StorageError } from '../../types/storageErrorInfc';
 import logger from '../../utils/logger';
 
 /**
@@ -26,7 +28,7 @@ export class ErrorHandler {
     const duration = endTime - startTime;
 
     if (error instanceof StorageError) {
-      // 存储错误 - 返回结构化错误信息
+      // Store错误 - 返回结构化错误信息
       return {
         success: false,
         data: null,
@@ -46,7 +48,7 @@ export class ErrorHandler {
       };
     }
 
-    // 未知错误 - 返回通用错误信息
+    // Unknown error - return generic error
     logger.error(`[ApiWrapper] Unhandled error in request ${requestId}:`, error);
 
     return {

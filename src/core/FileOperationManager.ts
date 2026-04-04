@@ -1,7 +1,9 @@
-// src/core/FileOperationManager.ts
-// 文件操作管理器，负责协调文件系统相关操作，包括单文件和分片文件处理
-// 创建于: 2025-11-28
-// 最后修改: 2025-12-11
+/**
+ * @module FileOperationManager
+ * @description File operation manager coordinating single and chunked file handling
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
 import * as FileSystem from 'expo-file-system';
 import ROOT from '../utils/ROOTPath';
@@ -45,7 +47,7 @@ export class FileOperationManager {
     this.permissionChecker = new PermissionChecker();
     this.fileHandlerFactory = new FileHandlerFactory(chunkSize, metadataManager);
   }
-  
+
   /**
    * 更新分片大小
    * @param chunkSize 新的分片大小

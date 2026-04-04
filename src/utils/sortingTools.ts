@@ -1,16 +1,18 @@
 /**
- * 排序工具模块
- * 提供多种排序算法，适用于不同场景
+ * @module sortingTools
+ * @description Multiple sorting algorithms for different use cases
+ * @since 2025-11-19
+ * @version 1.0.0
  */
 
 /**
- * 1. 原生 slice + sort（默认实现，稳定）
+ * Native slice + sort (default implementation, stable)
  * @param data 要排序的数据数组
  * @param column 排序的列名
  * @param order 排序顺序（asc 升序，desc 降序），默认升序
  * @returns T[] 排序后的新数组（原数组不变）
  * @example
- * // 对用户数组按年龄升序排序
+ * // Sort user array by age ascending
  * const sortedUsers = sortByColumn(users, 'age', 'asc');
  */
 export function sortByColumn<T>(data: T[], column: keyof T, order: 'asc' | 'desc' = 'asc'): T[] {
@@ -38,7 +40,7 @@ export function sortByColumn<T>(data: T[], column: keyof T, order: 'asc' | 'desc
  * @param order 排序顺序（asc 升序，desc 降序），默认升序
  * @returns T[] 排序后的新数组（原数组不变）
  * @example
- * // 对已知无脏数据的数组按名称快速排序
+ * // Fast sort clean array by name
  * const sortedItems = sortByColumnFast(items, 'name', 'desc');
  */
 export function sortByColumnFast<T>(data: T[], column: keyof T, order: 'asc' | 'desc' = 'asc'): T[] {
@@ -68,7 +70,7 @@ export function sortByColumnFast<T>(data: T[], column: keyof T, order: 'asc' | '
  * @param order 排序顺序（asc 升序，desc 降序），默认升序
  * @returns T[] 排序后的新数组（原数组不变）
  * @example
- * // 对订单数组按状态码排序（状态码取值范围有限）
+ * // Sort order array by status code (limited range)
  * const sortedOrders = sortByColumnCounting(orders, 'status', 'asc');
  */
 export function sortByColumnCounting<T>(data: T[], column: keyof T, order: 'asc' | 'desc' = 'asc'): T[] {
@@ -92,7 +94,7 @@ export function sortByColumnCounting<T>(data: T[], column: keyof T, order: 'asc'
   const result: T[] = [];
   for (const k of keys) {
     const items = map.get(k)!;
-    // 使用循环而不是展开运算符，避免大数据量时的栈溢出
+    // Use loop instead of spread to avoid stack overflow on large data
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (item !== undefined) {
@@ -110,7 +112,7 @@ export function sortByColumnCounting<T>(data: T[], column: keyof T, order: 'asc'
  * @param order 排序顺序（asc 升序，desc 降序），默认升序
  * @returns T[] 排序后的新数组（原数组不变）
  * @example
- * // 对大数据量数组按日期排序，保持稳定顺序
+ * // Sort large array by date, maintain stable order
  * const sortedLogs = sortByColumnMerge(logs, 'timestamp', 'desc');
  */
 export function sortByColumnMerge<T>(data: T[], column: keyof T, order: 'asc' | 'desc' = 'asc'): T[] {
@@ -171,7 +173,7 @@ export function sortByColumnMerge<T>(data: T[], column: keyof T, order: 'asc' | 
  * @param order 排序顺序（asc 升序，desc 降序），默认升序
  * @returns T[] 排序后的新数组（原数组不变）
  * @example
- * // 对包含中文名称的数组排序
+ * // Sort array with Chinese names
  * const sortedProducts = sortByColumnSlow(products, 'name', 'asc');
  */
 export function sortByColumnSlow<T>(data: T[], column: keyof T, order: 'asc' | 'desc' = 'asc'): T[] {

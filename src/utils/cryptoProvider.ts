@@ -1,124 +1,154 @@
-import ExpoConstants from 'expo-constants'
-import * as ExpoCrypto from 'expo-crypto'
-import { pbkdf2 as noblePbkdf2 } from '@noble/hashes/pbkdf2'
-import { sha256 } from '@noble/hashes/sha256'
-import { sha512 } from '@noble/hashes/sha512'
-import { bytesToHex } from '@noble/hashes/utils'
-import logger from './logger'
+/**
+ * @module cryptoProvider
+ * @description Cryptographic primitives provider with Expo Go compatibility
+ * @since 2025-11-17
+ * @version 2.0.0
+ */
 
-let nativePBKDF2Sync: any
-let nativeRandomBytes: any
-let nativeCreateHash: any
-let warned = false
-let nativeChecked = false
-let nativeEnabled = false
+import ExpoConstants from 'expo-constants';
+import * as ExpoCrypto from 'expo-crypto';
+import { pbkdf2 as noblePbkdf2 } from '@noble/hashes/pbkdf2';
+import { hkdf } from '@noble/hashes/hkdf';
+import { sha256 } from '@noble/hashes/sha256';
+import { sha512 } from '@noble/hashes/sha512';
+import { bytesToHex } from '@noble/hashes/utils';
+import logger from './logger';
+
+let nativePBKDF2Sync: any;
+let nativeRandomBytes: any;
+let nativeCreateHash: any;
+let warned = false;
+let nativeChecked = false;
+let nativeEnabled = false;
 
 const isExpoGo = () => {
   try {
-    return typeof ExpoConstants !== 'undefined' && (ExpoConstants as any)?.appOwnership === 'expo'
+    return typeof ExpoConstants !== 'undefined' && (ExpoConstants as any)?.appOwnership === 'expo';
   } catch {
-    return false
+    return false;
   }
-}
+};
 
 const devWarnOnce = () => {
-  const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : true
+  const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : true;
   if (isDev && isExpoGo() && !warned) {
-    warned = true
-    logger.warn('Expo Go detected. Using JavaScript crypto fallback. Build a standalone APK/IPA for native performance.')
+    warned = true;
+    logger.warn(
+      'Expo Go detected. Using JavaScript crypto fallback. Build a standalone APK/IPA for native performance.'
+    );
   }
-}
+};
 
 const tryLoadNative = () => {
-  if (nativeChecked) return nativeEnabled
+  if (nativeChecked) return nativeEnabled;
   if (nativePBKDF2Sync && nativeRandomBytes && nativeCreateHash) {
-    nativeChecked = true
-    nativeEnabled = true
-    return true
+    nativeChecked = true;
+    nativeEnabled = true;
+    return true;
   }
   if (isExpoGo()) {
-    nativeChecked = true
-    nativeEnabled = false
-    return false
+    nativeChecked = true;
+    nativeEnabled = false;
+    return false;
   }
   try {
-    const moduleName = ['react-native-quick-crypto'].join('')
-    const reqFn = (global as any).require ?? require
-    const qcrypto = reqFn(moduleName)
-    nativePBKDF2Sync = qcrypto.pbkdf2Sync
-    nativeRandomBytes = qcrypto.randomBytes
-    nativeCreateHash = qcrypto.createHash
-    nativeChecked = true
-    nativeEnabled = true
-    return true
+    const moduleName = ['react-native-quick-crypto'].join('');
+    const reqFn = (global as any).require ?? require;
+    const qcrypto = reqFn(moduleName);
+    nativePBKDF2Sync = qcrypto.pbkdf2Sync;
+    nativeRandomBytes = qcrypto.randomBytes;
+    nativeCreateHash = qcrypto.createHash;
+    nativeChecked = true;
+    nativeEnabled = true;
+    return true;
   } catch {
     if (!warned) {
-      warned = true
-      logger.warn('Native crypto module not found. Using JavaScript fallback. Install react-native-quick-crypto for better performance.')
+      warned = true;
+      logger.warn(
+        'Native crypto module not found. Using JavaScript fallback. Install react-native-quick-crypto for better performance.'
+      );
     }
-    nativeChecked = true
-    nativeEnabled = false
-    return false
+    nativeChecked = true;
+    nativeEnabled = false;
+    return false;
   }
-}
+};
 
 export const useNative = () => {
-  return tryLoadNative()
-}
+  return tryLoadNative();
+};
 
 export const __resetDevWarnForTest = () => {
-  warned = false
-}
+  warned = false;
+};
 
-export const pbkdf2 = (password: string, salt: Uint8Array, iterations: number, dkLen: number, digest: 'sha256' | 'sha512'): Uint8Array => {
-  devWarnOnce()
+export const pbkdf2 = (
+  password: string,
+  salt: Uint8Array,
+  iterations: number,
+  dkLen: number,
+  digest: 'sha256' | 'sha512'
+): Uint8Array => {
+  devWarnOnce();
   if (useNative()) {
-    const buf = nativePBKDF2Sync(password, salt, iterations, dkLen, digest)
-    return new Uint8Array(buf)
+    const buf = nativePBKDF2Sync(password, salt, iterations, dkLen, digest);
+    return new Uint8Array(buf);
   }
-  const hashFn = digest === 'sha256' ? sha256 : sha512
-  const out = noblePbkdf2(hashFn, password, salt, { c: iterations, dkLen })
-  return out
-}
+  const hashFn = digest === 'sha256' ? sha256 : sha512;
+  const out = noblePbkdf2(hashFn, password, salt, { c: iterations, dkLen });
+  return out;
+};
+
+/**
+ * HKDF key derivation (extract + expand) for fast per-record key derivation.
+ * This is orders of magnitude faster than PBKDF2 (~3μs vs ~2s).
+ *
+ * @param ikm Input keying material (already high-entropy, e.g. from PBKDF2)
+ * @param salt Salt for key derivation
+ * @param dkLen Desired output key length
+ * @returns Derived key material
+ */
+export const hkdfDerive = (ikm: Uint8Array, salt: Uint8Array, dkLen: number): Uint8Array => {
+  // Use SHA-256 for HKDF (fast, sufficient security when IKM is already high-entropy)
+  return hkdf(sha256, ikm, salt, undefined, dkLen);
+};
 
 export const randomBytes = (length: number): Uint8Array => {
-  devWarnOnce()
+  devWarnOnce();
   if (useNative()) {
-    const buf = nativeRandomBytes(length)
-    return new Uint8Array(buf)
+    const buf = nativeRandomBytes(length);
+    return new Uint8Array(buf);
   }
-  const getRB =
-    (ExpoCrypto as any)?.getRandomBytes ??
-    (ExpoCrypto as any)?.default?.getRandomBytes
+  const getRB = (ExpoCrypto as any)?.getRandomBytes ?? (ExpoCrypto as any)?.default?.getRandomBytes;
   if (typeof getRB === 'function') {
-    const out = getRB(length)
-    if (out instanceof Uint8Array) return out
-    if (Array.isArray(out)) return new Uint8Array(out)
-    if (out instanceof ArrayBuffer) return new Uint8Array(out)
-    if ((out as any)?.buffer instanceof ArrayBuffer) return new Uint8Array((out as any).buffer)
+    const out = getRB(length);
+    if (out instanceof Uint8Array) return out;
+    if (Array.isArray(out)) return new Uint8Array(out);
+    if (out instanceof ArrayBuffer) return new Uint8Array(out);
+    if ((out as any)?.buffer instanceof ArrayBuffer) return new Uint8Array((out as any).buffer);
   }
   if (typeof crypto !== 'undefined' && (crypto as any).getRandomValues) {
-    return (crypto as any).getRandomValues(new Uint8Array(length))
+    return (crypto as any).getRandomValues(new Uint8Array(length));
   }
-  const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test'
-  const isProduction = typeof process !== 'undefined' && process.env.NODE_ENV === 'production'
+  const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
+  const isProduction = typeof process !== 'undefined' && process.env.NODE_ENV === 'production';
   if (!isTestEnvironment && isProduction) {
-    throw new Error('Secure random generation not available')
+    throw new Error('Secure random generation not available');
   }
-  const bytes = new Uint8Array(length)
-  for (let i = 0; i < length; i++) bytes[i] = Math.floor(Math.random() * 256)
-  return bytes
-}
+  const bytes = new Uint8Array(length);
+  for (let i = 0; i < length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return bytes;
+};
 
 export const hash = async (data: string, algorithm: 'SHA-256' | 'SHA-512' = 'SHA-512'): Promise<string> => {
-  devWarnOnce()
+  devWarnOnce();
   if (useNative()) {
-    const nativeAlgorithm = algorithm === 'SHA-256' ? 'sha256' : 'sha512'
-    const hasher = nativeCreateHash(nativeAlgorithm)
-    hasher.update(data)
-    return hasher.digest('hex')
+    const nativeAlgorithm = algorithm === 'SHA-256' ? 'sha256' : 'sha512';
+    const hasher = nativeCreateHash(nativeAlgorithm);
+    hasher.update(data);
+    return hasher.digest('hex');
   }
-  const fn = algorithm === 'SHA-256' ? sha256 : sha512
-  const encoded = new TextEncoder().encode(data)
-  return bytesToHex(fn(encoded))
-}
+  const fn = algorithm === 'SHA-256' ? sha256 : sha512;
+  const encoded = new TextEncoder().encode(data);
+  return bytesToHex(fn(encoded));
+};

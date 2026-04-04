@@ -87,10 +87,10 @@ export interface IStorageAdapter {
    * @param tableName table name / 表名
    * @param data data to overwrite / 要覆盖的数据
    * @returns Promise<{
-   *         written: number; // 实际写入的条数
-   *         totalAfterWrite: number; // 写入后表总条数
-   *         chunked: boolean; // 是否触发了分片
-   *         chunks?: number; // 如果分片了，有几个 chunk
+   *         written: number; // Actual records written
+   *         totalAfterWrite: number; // Write后表总条数
+   *         chunked: boolean; // Whether chunking was triggered
+   *         chunks?: number; // Number of chunks if chunked
    * }>
    **/
 

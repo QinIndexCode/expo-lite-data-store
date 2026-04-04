@@ -42,7 +42,7 @@ export class DbInstanceManager {
       return this.defaultInstance;
     }
 
-    // 根据requireAuthOnAccess参数获取或创建对应的加密实例
+    // Get or create encrypted instance based on requireAuthOnAccess
     const instanceKey = requireAuthOnAccess;
     if (!this.encryptedInstances.has(instanceKey)) {
       this.encryptedInstances.set(instanceKey, new EncryptedStorageAdapter({ requireAuthOnAccess }));

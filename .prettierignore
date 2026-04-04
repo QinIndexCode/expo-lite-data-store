@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+coverage/
+
+# Expo
+.expo/
+web-build/
+
+# TypeScript
+*.tsbuildinfo
+.tsbuildinfo
+.tsbuildinfo.esm
+.tsbuildinfo.cjs
+
+# IDE
+.vscode/
+.trae/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local env files
+.env*.local
+
+# Test
+__mocks__/
+
+# Misc
+*.pem
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+npm-debug.*
+yarn-debug.*
+yarn-error.*

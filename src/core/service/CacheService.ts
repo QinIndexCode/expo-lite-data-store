@@ -1,7 +1,9 @@
-// src/core/service/CacheService.ts
-// 缓存服务，负责管理数据缓存
-// 创建于: 2025-11-28
-// 最后修改: 2025-12-11
+/**
+ * @module CacheService
+ * @description Cache service managing data caching operations
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 import { CacheManager } from '../cache/CacheManager';
 
 /**
@@ -129,16 +131,16 @@ export class CacheService {
    * 清除与特定表相关的所有缓存
    */
   clearTableCache(tableName: string): void {
-    // 使用特殊的缓存键来记录所有与该表相关的缓存键
+    // Use special cache key to track all cache keys for this table
     const tableCacheKeysKey = `${tableName}_cache_keys`;
     const tableCacheKeys = (this.cacheManager.get(tableCacheKeysKey) as string[]) || [];
 
-    // 删除所有相关缓存条目
+    // Delete所有相关缓存条目
     for (const key of tableCacheKeys) {
       this.cacheManager.delete(key);
     }
 
-    // 清除缓存键列表
+    // Clear cache key list
     this.cacheManager.delete(tableCacheKeysKey);
   }
 

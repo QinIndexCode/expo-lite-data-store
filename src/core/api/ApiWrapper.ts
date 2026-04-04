@@ -1,13 +1,15 @@
-// src/core/api/ApiWrapper.ts
-// API包装器，使用外观模式协调各个组件
-// 创建于: 2025-11-28
-// 最后修改: 2025-12-11
+/**
+ * @module ApiWrapper
+ * @description API wrapper using facade pattern to coordinate components
+ * @since 2025-11-28
+ * @version 1.0.0
+ */
 
 import { ApiResponse } from '../../types/apiResponse';
 import { IStorageAdapter } from '../../types/storageAdapterInfc';
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from '../../types/storageTypes';
 import { ApiRouter } from './ApiRouter';
-import { ErrorHandler } from './ErrorHandler';
+import { ErrorHandler as ApiErrorHandler } from './ApiErrorHandler';
 import { RateLimitWrapper } from './RateLimitWrapper';
 import { ValidationWrapper } from './ValidationWrapper';
 
@@ -19,7 +21,7 @@ export class ApiWrapper {
   private apiRouter: ApiRouter;
   private rateLimitWrapper: RateLimitWrapper;
   private validationWrapper: ValidationWrapper;
-  private errorHandler: ErrorHandler;
+  private errorHandler: ApiErrorHandler;
   private storageAdapter: IStorageAdapter;
 
   /**
@@ -41,7 +43,7 @@ export class ApiWrapper {
   ) {
     this.storageAdapter = storageAdapter;
 
-    // 初始化各个组件
+    // Initialize各个组件
     this.apiRouter = new ApiRouter({
       defaultVersion: options.defaultVersion,
       supportedVersions: options.supportedVersions,
@@ -49,7 +51,7 @@ export class ApiWrapper {
 
     this.rateLimitWrapper = new RateLimitWrapper(options.rateLimit);
     this.validationWrapper = new ValidationWrapper();
-    this.errorHandler = new ErrorHandler();
+    this.errorHandler = new ApiErrorHandler();
   }
 
   /**
@@ -75,8 +77,8 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // 检查限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 5); // 创建表消耗5个令牌
+      // Check限流
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 5); // Create表消耗5个令牌
       if (!rateLimitStatus.allowed) {
         return this.errorHandler.handleError(
           {
@@ -91,7 +93,7 @@ export class ApiWrapper {
         );
       }
 
-      // 请求验证
+      // Request validation
       this.validationWrapper.validateTableName(tableName);
 
       await this.storageAdapter.createTable(tableName, options);
@@ -126,8 +128,8 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // 检查限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 3); // 删除表消耗3个令牌
+      // Check限流
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 3); // Delete表消耗3个令牌
       if (!rateLimitStatus.allowed) {
         return this.errorHandler.handleError(
           {
@@ -142,7 +144,7 @@ export class ApiWrapper {
         );
       }
 
-      // 请求验证
+      // Request validation
       this.validationWrapper.validateTableName(tableName);
 
       await this.storageAdapter.deleteTable(tableName);
@@ -177,8 +179,8 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // 检查限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1); // 检查表存在性消耗1个令牌
+      // Check限流
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1); // Check表存在性消耗1个令牌
       if (!rateLimitStatus.allowed) {
         return {
           success: false,
@@ -199,7 +201,7 @@ export class ApiWrapper {
         };
       }
 
-      // 请求验证
+      // Request validation
       this.validationWrapper.validateTableName(tableName);
 
       const result = await this.storageAdapter.hasTable(tableName);
@@ -233,8 +235,8 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // 检查限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2); // 列出表消耗2个令牌
+      // Check限流
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2); // List tables costs 2 tokens
       if (!rateLimitStatus.allowed) {
         return {
           success: false,
@@ -361,8 +363,8 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // 检查限流
-      const tokens = Array.isArray(data) ? Math.min(data.length, 10) : 3; // 写入操作消耗3-10个令牌
+      // Check限流
+      const tokens = Array.isArray(data) ? Math.min(data.length, 10) : 3; // Write操作消耗3-10个令牌
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, tokens);
       if (!rateLimitStatus.allowed) {
         return {
@@ -384,7 +386,7 @@ export class ApiWrapper {
         };
       }
 
-      // 请求验证
+      // Request validation
       this.validationWrapper.validateTableName(tableName);
       this.validationWrapper.validateWriteData(data);
 
@@ -426,8 +428,8 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // 检查限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2); // 读取操作消耗2个令牌
+      // Check限流
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2); // Read操作消耗2个令牌
       if (!rateLimitStatus.allowed) {
         return {
           success: false,
@@ -448,7 +450,7 @@ export class ApiWrapper {
         };
       }
 
-      // 请求验证
+      // Request validation
       this.validationWrapper.validateTableName(tableName);
 
       const result = await this.storageAdapter.read(tableName, options);
@@ -483,8 +485,8 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // 检查限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1); // 计数操作消耗1个令牌
+      // Check限流
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1); // Count operation costs 1 token
       if (!rateLimitStatus.allowed) {
         return {
           success: false,
@@ -505,7 +507,7 @@ export class ApiWrapper {
         };
       }
 
-      // 请求验证
+      // Request validation
       this.validationWrapper.validateTableName(tableName);
 
       const result = await this.storageAdapter.count(tableName);
@@ -546,8 +548,8 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // 检查限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1); // 查找单条记录消耗1个令牌
+      // Check限流
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1); // Find单条记录消耗1个令牌
       if (!rateLimitStatus.allowed) {
         return {
           success: false,
@@ -568,7 +570,7 @@ export class ApiWrapper {
         };
       }
 
-      // 请求验证
+      // Request validation
       this.validationWrapper.validateTableName(tableName);
       this.validationWrapper.validateFilter(filter);
 
@@ -612,8 +614,8 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // 检查限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2); // 查找多条记录消耗2个令牌
+      // Check限流
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2); // Find多条记录消耗2个令牌
       if (!rateLimitStatus.allowed) {
         return {
           success: false,
@@ -634,7 +636,7 @@ export class ApiWrapper {
         };
       }
 
-      // 请求验证
+      // Request validation
       this.validationWrapper.validateTableName(tableName);
       if (filter) {
         this.validationWrapper.validateFilter(filter);
@@ -692,7 +694,7 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // 检查限流
+      // Check限流
       const totalOperations = operations.reduce((count, op) => {
         if (op.type === 'insert') {
           const insertOp = op as { type: 'insert'; data: Record<string, any> | Record<string, any>[] };
@@ -700,7 +702,7 @@ export class ApiWrapper {
         }
         return count + 1;
       }, 0);
-      const tokens = Math.min(totalOperations * 2, 20); // 批量操作消耗2-20个令牌
+      const tokens = Math.min(totalOperations * 2, 20); // Batch operation costs 2-20 tokens
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, tokens);
       if (!rateLimitStatus.allowed) {
         return {
@@ -722,7 +724,7 @@ export class ApiWrapper {
         };
       }
 
-      // 请求验证
+      // Request validation
       this.validationWrapper.validateTableName(tableName);
       this.validationWrapper.validateBulkOperations(operations);
 
@@ -762,8 +764,8 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // 检查限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 10); // 迁移操作消耗10个令牌
+      // Check限流
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 10); // Migration operation costs 10 tokens
       if (!rateLimitStatus.allowed) {
         return {
           success: false,
@@ -784,7 +786,7 @@ export class ApiWrapper {
         };
       }
 
-      // 请求验证
+      // Request validation
       this.validationWrapper.validateTableName(tableName);
 
       await this.storageAdapter.migrateToChunked(tableName);
