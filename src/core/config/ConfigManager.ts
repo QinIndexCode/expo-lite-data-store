@@ -15,9 +15,10 @@ import logger from '../../utils/logger';
  * 支持从多个来源加载配置，具有明确的优先级顺序
  */
 export class ConfigManager {
+  private static readonly UNSAFE_CONFIG_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
   private static instance: ConfigManager | null = null;
   private currentConfig: LiteStoreConfig;
-  private customConfig: DeepPartial<LiteStoreConfig> = {};
+  private customConfig: DeepPartial<LiteStoreConfig> = Object.create(null) as DeepPartial<LiteStoreConfig>;
 
   /**
    * 私有构造函数，单例模式
@@ -37,6 +38,40 @@ export class ConfigManager {
       ConfigManager.instance = new ConfigManager();
     }
     return ConfigManager.instance;
+  }
+
+  private createConfigContainer<T extends object>(): T {
+    return Object.create(null) as T;
+  }
+
+  private isUnsafeConfigKey(key: string): boolean {
+    return ConfigManager.UNSAFE_CONFIG_KEYS.has(key);
+  }
+
+  private assertSafeConfigKey(key: string): void {
+    if (this.isUnsafeConfigKey(key)) {
+      throw new Error(`Invalid configuration key: ${key}`);
+    }
+  }
+
+  private sanitizeConfigValue<T>(value: T): T {
+    if (Array.isArray(value)) {
+      return value.map(item => this.sanitizeConfigValue(item)) as T;
+    }
+
+    if (value && typeof value === 'object') {
+      const sanitized = this.createConfigContainer<Record<string, unknown>>();
+      for (const [key, nestedValue] of Object.entries(value)) {
+        if (this.isUnsafeConfigKey(key)) {
+          logger.warn(`Ignoring unsafe configuration key during merge: ${key}`);
+          continue;
+        }
+        sanitized[key] = this.sanitizeConfigValue(nestedValue);
+      }
+      return sanitized as T;
+    }
+
+    return value;
   }
 
   /**
@@ -266,26 +301,31 @@ export class ConfigManager {
   private mergeConfig<T extends object>(baseConfig: T, newConfig: DeepPartial<T>): T {
     const merged = { ...baseConfig } as T;
 
-    for (const key in newConfig) {
-      if (newConfig.hasOwnProperty(key)) {
-        const baseValue = merged[key as keyof T];
-        const newValue = newConfig[key as keyof T];
+    for (const key of Object.keys(newConfig) as string[]) {
+      if (this.isUnsafeConfigKey(key)) {
+        logger.warn(`Ignoring unsafe configuration key during merge: ${key}`);
+        continue;
+      }
 
-        if (
-          typeof newValue === 'object' &&
-          newValue !== null &&
-          !Array.isArray(newValue) &&
-          typeof baseValue === 'object'
-        ) {
-          // Recursive合并对象
-          merged[key as keyof T] = this.mergeConfig(
-            baseValue as object,
-            newValue as DeepPartial<object>
-          ) as typeof baseValue;
-        } else if (newValue !== undefined) {
-          // Only replace if newValue is not undefined
-          merged[key as keyof T] = newValue as typeof baseValue;
-        }
+      const typedKey = key as keyof T;
+      const baseValue = merged[typedKey];
+      const newValue = newConfig[typedKey];
+
+      if (
+        typeof newValue === 'object' &&
+        newValue !== null &&
+        !Array.isArray(newValue) &&
+        typeof baseValue === 'object' &&
+        baseValue !== null
+      ) {
+        // Recursive合并对象
+        merged[typedKey] = this.mergeConfig(
+          baseValue as object,
+          newValue as DeepPartial<object>
+        ) as typeof baseValue;
+      } else if (newValue !== undefined) {
+        // Only replace if newValue is not undefined
+        merged[typedKey] = this.sanitizeConfigValue(newValue) as typeof baseValue;
       }
     }
 
@@ -305,7 +345,7 @@ export class ConfigManager {
    * @param customConfig 自定义配置
    */
   public setConfig(customConfig: DeepPartial<LiteStoreConfig>): void {
-    this.customConfig = { ...customConfig };
+    this.customConfig = this.sanitizeConfigValue(customConfig);
     this.loadConfig();
   }
 
@@ -314,7 +354,7 @@ export class ConfigManager {
    * @param partialConfig 部分配置
    */
   public updateConfig(partialConfig: DeepPartial<LiteStoreConfig>): void {
-    this.customConfig = this.mergeConfig(this.customConfig, partialConfig);
+    this.customConfig = this.mergeConfig(this.customConfig, this.sanitizeConfigValue(partialConfig));
     this.loadConfig();
   }
 
@@ -322,7 +362,7 @@ export class ConfigManager {
    * 重置配置到默认值
    */
   public resetConfig(): void {
-    this.customConfig = {};
+    this.customConfig = this.createConfigContainer<DeepPartial<LiteStoreConfig>>();
     this.loadConfig();
   }
 
@@ -363,26 +403,28 @@ export class ConfigManager {
     const lastKey = keys.pop();
     if (!lastKey) return;
 
-    // Check所有键名，防止原型污染
-    const validateKey = (key: string) => {
-      // Reject特殊键名，防止原型污染
-      if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
-        throw new Error(`Invalid configuration key: ${key}`);
-      }
-    };
-
     // Validate所有键名
-    keys.forEach(validateKey);
-    validateKey(lastKey);
+    keys.forEach(key => this.assertSafeConfigKey(key));
+    this.assertSafeConfigKey(lastKey);
 
-    let config: any = this.customConfig;
+    let config = this.customConfig as Record<string, any>;
     for (const key of keys) {
-      if (!config[key]) {
-        config[key] = {};
+      if (!Object.prototype.hasOwnProperty.call(config, key) || typeof config[key] !== 'object' || config[key] === null) {
+        Object.defineProperty(config, key, {
+          value: this.createConfigContainer<Record<string, any>>(),
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
       }
       config = config[key];
     }
-    config[lastKey] = value;
+    Object.defineProperty(config, lastKey, {
+      value: this.sanitizeConfigValue(value),
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
     this.loadConfig();
   }
 }

@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 
 jest.mock('child_process', () => ({
-  execSync: jest.fn(),
+  spawnSync: jest.fn(),
 }));
 
 describe('smoke expo consumer helpers', () => {
@@ -23,8 +23,14 @@ describe('smoke expo consumer helpers', () => {
 
   beforeEach(() => {
     jest.resetModules();
-    const { execSync } = require('child_process') as { execSync: jest.Mock };
-    execSync.mockReset();
+    const { spawnSync } = require('child_process') as { spawnSync: jest.Mock };
+    spawnSync.mockReset();
+    spawnSync.mockReturnValue({
+      status: 0,
+      stdout: '',
+      stderr: '',
+      error: null,
+    });
   });
 
   it('detects when required build artifacts are missing', () => {
@@ -42,11 +48,11 @@ describe('smoke expo consumer helpers', () => {
     const smokeModule = require(scriptPath) as {
       ensureBuiltArtifacts: (root: string) => void;
     };
-    const { execSync } = require('child_process') as { execSync: jest.Mock };
+    const { spawnSync } = require('child_process') as { spawnSync: jest.Mock };
 
     smokeModule.ensureBuiltArtifacts(tempRoot);
 
-    expect(execSync).not.toHaveBeenCalled();
+    expect(spawnSync).not.toHaveBeenCalled();
   });
 
   it('rebuilds when required build artifacts are missing', () => {
@@ -54,25 +60,34 @@ describe('smoke expo consumer helpers', () => {
     const smokeModule = require(scriptPath) as {
       ensureBuiltArtifacts: (root: string) => void;
     };
-    const { execSync } = require('child_process') as { execSync: jest.Mock };
+    const { spawnSync } = require('child_process') as { spawnSync: jest.Mock };
 
     smokeModule.ensureBuiltArtifacts(tempRoot);
 
-    expect(execSync).toHaveBeenCalledWith(expect.stringContaining('npm.cmd run build'), expect.any(Object));
+    expect(spawnSync).toHaveBeenCalledWith(
+      expect.stringMatching(/npm(?:\.cmd)?$/),
+      ['run', 'build'],
+      expect.objectContaining({
+        cwd: tempRoot,
+      })
+    );
   });
 
   it('rejects tarballs that omit required build artifacts', () => {
     const tempRoot = createTempRepo();
     writeArtifacts(tempRoot);
-    const { execSync } = require('child_process') as { execSync: jest.Mock };
-    execSync.mockReturnValueOnce(
-      JSON.stringify([
+    const { spawnSync } = require('child_process') as { spawnSync: jest.Mock };
+    spawnSync.mockReturnValueOnce({
+      status: 0,
+      stdout: JSON.stringify([
         {
           filename: 'expo-lite-data-store-2.0.0.tgz',
           files: [{ path: 'README.md' }],
         },
-      ])
-    );
+      ]),
+      stderr: '',
+      error: null,
+    });
     const smokeModule = require(scriptPath) as {
       packRepoTarball: (root: string) => string;
     };

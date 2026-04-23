@@ -1,21 +1,16 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const repoRoot = path.resolve(__dirname, '..');
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const requiredBuiltArtifacts = ['dist/js/index.js', 'dist/cjs/index.js', 'dist/types/index.d.ts'];
 
-const quoteArg = value => {
-  if (/[\s"]/u.test(value)) {
-    return `"${value.replace(/"/g, '\\"')}"`;
-  }
-  return value;
-};
+const needsShell = command => process.platform === 'win32' && /\.(cmd|bat)$/iu.test(command);
 
-const buildCommand = (command, args) => [command, ...args.map(quoteArg)].join(' ');
+const formatCommand = (command, args) => [command, ...args].join(' ');
 
 const createCommandEnv = () => {
   const env = {
@@ -29,23 +24,39 @@ const createCommandEnv = () => {
   return env;
 };
 
-const run = (command, args, cwd) => {
-  execSync(buildCommand(command, args), {
+const runCommand = (command, args, cwd, options = {}) => {
+  const result = spawnSync(command, args, {
     cwd,
-    stdio: 'inherit',
-    shell: process.platform === 'win32',
+    stdio: options.captureOutput ? 'pipe' : 'inherit',
+    encoding: 'utf8',
+    shell: needsShell(command),
+    windowsHide: true,
     env: createCommandEnv(),
   });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (typeof result.status === 'number' && result.status !== 0) {
+    const error = new Error(`Command failed (${result.status}): ${formatCommand(command, args)}`);
+    error.stdout = result.stdout || '';
+    error.stderr = result.stderr || '';
+    throw error;
+  }
+
+  return result;
+};
+
+const run = (command, args, cwd) => {
+  runCommand(command, args, cwd);
 };
 
 const runJson = (command, args, cwd) => {
-  const output = execSync(buildCommand(command, args), {
-    cwd,
-    encoding: 'utf8',
-    shell: process.platform === 'win32',
-    env: createCommandEnv(),
+  const result = runCommand(command, args, cwd, {
+    captureOutput: true,
   });
-  return JSON.parse(output);
+  return JSON.parse(result.stdout);
 };
 
 const readRepoPackage = () => JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
