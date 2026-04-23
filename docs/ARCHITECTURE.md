@@ -1,5 +1,7 @@
 # Expo Lite Data Store Architecture
 
+[简体中文](./ARCHITECTURE.zh-CN.md) | [English Alias](./ARCHITECTURE.en.md) | [Consumer Guide](../README.md)
+
 ## 1. System Overview
 
 Expo Lite Data Store is a lightweight local database solution based on Expo File System, supporting single-file and sharded storage modes, providing complete CRUD operations, transaction support, caching mechanism, indexing functionality, API routing, and data encryption.

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Encryption utility module
  * Expo SDK 54 compliant version (AES-256-CTR + HMAC-SHA512 emulates GCM)
  * Dependencies: expo-crypto (randomness) + @noble/ciphers (encryption) + @noble/hashes (HMAC & hashing)
@@ -22,15 +22,18 @@ import { hmac } from '@noble/hashes/hmac';
 import { sha256 } from '@noble/hashes/sha256';
 import { sha512 } from '@noble/hashes/sha512';
 import { bytesToHex } from '@noble/hashes/utils';
-import * as ExpoCrypto from 'expo-crypto';
-import * as ExpoSecureStore from 'expo-secure-store';
-import ExpoConstants from 'expo-constants';
 import { pbkdf2 as providerPbkdf2, randomBytes as providerRandomBytes, hkdfDerive } from './cryptoProvider';
 import { encryptGCM, decryptGCM, encryptGCMBulk, decryptGCMBulk } from './crypto-gcm';
 import { CryptoError } from './crypto-errors';
+import { loadOptionalExpoModule, loadRequiredExpoModule } from './expoModuleLoader';
+import { StorageError } from '../types/storageErrorInfc';
 
 // Re-export for backward compatibility
 export { CryptoError };
+
+type ExpoCryptoModule = typeof import('expo-crypto');
+type ExpoSecureStoreModule = typeof import('expo-secure-store');
+type ExpoConstantsModule = typeof import('expo-constants').default;
 
 /**
  * Converts Uint8Array to Base64 string using Buffer or btoa.
@@ -66,13 +69,45 @@ const base64ToBytes = (base64: string): Uint8Array => {
   }
 };
 
-// Dynamic导入 Expo 模块，避免在非 Expo 环境中崩溃
-let Crypto: any;
-let SecureStore: any;
-let Constants: any;
-Crypto = ExpoCrypto;
-SecureStore = ExpoSecureStore;
-Constants = ExpoConstants;
+// Dynamic Expo module access keeps import-time side effects out of consumer apps
+let Crypto: ExpoCryptoModule | undefined;
+let SecureStore: ExpoSecureStoreModule | undefined;
+let Constants: ExpoConstantsModule | undefined;
+let hasLoadedCryptoModule = false;
+let hasLoadedSecureStoreModule = false;
+let hasLoadedConstantsModule = false;
+
+const getExpoCryptoModule = (): ExpoCryptoModule | undefined => {
+  if (!hasLoadedCryptoModule) {
+    Crypto = loadOptionalExpoModule<ExpoCryptoModule>('expo-crypto');
+    hasLoadedCryptoModule = true;
+  }
+  return Crypto;
+};
+
+const getOptionalSecureStore = (): ExpoSecureStoreModule | undefined => {
+  if (!hasLoadedSecureStoreModule) {
+    SecureStore = loadOptionalExpoModule<ExpoSecureStoreModule>('expo-secure-store');
+    hasLoadedSecureStoreModule = true;
+  }
+  return SecureStore;
+};
+
+const getRequiredSecureStore = (): ExpoSecureStoreModule => {
+  const secureStore = getOptionalSecureStore();
+  if (secureStore) {
+    return secureStore;
+  }
+  return loadRequiredExpoModule<ExpoSecureStoreModule>('expo-secure-store');
+};
+
+const getExpoConstants = (): ExpoConstantsModule | undefined => {
+  if (!hasLoadedConstantsModule) {
+    Constants = loadOptionalExpoModule<ExpoConstantsModule>('expo-constants');
+    hasLoadedConstantsModule = true;
+  }
+  return Constants;
+};
 
 /**
  * Converts Uint8Array to Base64 string using Buffer or btoa.
@@ -136,12 +171,11 @@ interface EncryptedPayload {
 }
 
 /**
- * 主密钥别名
- */
+ * 涓诲瘑閽ュ埆鍚? */
 const MASTER_KEY_ALIAS = 'expo_litedb_master_key_v2025';
 
 /**
- * 非 Expo 环境下的内存存储回退
+ * 闈?Expo 鐜涓嬬殑鍐呭瓨瀛樺偍鍥為€€
  */
 let inMemoryStore: Map<string, string> = new Map();
 
@@ -153,13 +187,53 @@ let inMemoryStore: Map<string, string> = new Map();
  */
 const isExpoGoEnvironment = (): boolean => {
   try {
-    if (typeof Constants !== 'undefined' && Constants.appOwnership === 'expo') {
+    const constants = getExpoConstants();
+    if (constants?.appOwnership === 'expo') {
       return true;
     }
   } catch {
     return false;
   }
   return false;
+};
+
+const createAuthOnAccessUnsupportedError = (details: string, cause?: unknown): StorageError =>
+  new StorageError('requireAuthOnAccess is not supported in the current runtime', 'AUTH_ON_ACCESS_UNSUPPORTED', {
+    cause,
+    details,
+    suggestion:
+      'Use encrypted storage without requireAuthOnAccess in Expo Go, or run in a development build / standalone app with biometric support.',
+  });
+
+const ensureAuthOnAccessSupported = async (): Promise<ExpoSecureStoreModule> => {
+  const secureStore = getRequiredSecureStore();
+
+  if (isExpoGoEnvironment()) {
+    throw createAuthOnAccessUnsupportedError(
+      'Expo Go does not support SecureStore requireAuthentication, so strict access authentication cannot be enforced.'
+    );
+  }
+
+  if (typeof secureStore.canUseBiometricAuthentication === 'function') {
+    try {
+      const canUseBiometricAuthentication = await secureStore.canUseBiometricAuthentication();
+      if (!canUseBiometricAuthentication) {
+        throw createAuthOnAccessUnsupportedError(
+          'Biometric authentication is unavailable on this device or has not been configured.'
+        );
+      }
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      throw createAuthOnAccessUnsupportedError(
+        'Unable to verify biometric authentication capability for requireAuthOnAccess.',
+        error
+      );
+    }
+  }
+
+  return secureStore;
 };
 
 /**
@@ -379,39 +453,36 @@ class SmartKeyCache {
 const keyCache = new SmartKeyCache(50, 30 * 60 * 1000);
 
 /**
- * 获取密钥缓存统计信息
+ * 鑾峰彇瀵嗛挜缂撳瓨缁熻淇℃伅
  */
 export const getKeyCacheStats = (): KeyCacheStats => {
   return keyCache.getStats();
 };
 
 /**
- * 获取密钥缓存命中率
- */
+ * 鑾峰彇瀵嗛挜缂撳瓨鍛戒腑鐜? */
 export const getKeyCacheHitRate = (): number => {
   return keyCache.getHitRate();
 };
 
 /**
- * 清除密钥缓存（用于登出或重置）
- */
+ * 娓呴櫎瀵嗛挜缂撳瓨锛堢敤浜庣櫥鍑烘垨閲嶇疆锛? */
 export const clearKeyCache = (): void => {
   keyCache.clear();
   rootKeyCache.clear();
 };
 
 /**
- * 密钥缓存自动清理间隔（10分钟）
- */
+ * 瀵嗛挜缂撳瓨鑷姩娓呯悊闂撮殧锛?0鍒嗛挓锛? */
 const KEY_CACHE_CLEANUP_INTERVAL = 10 * 60 * 1000;
 
-// Save定时器 ID - 兼容 Node.js 和浏览器环境
-// Node.js 中 setInterval 返回 number，浏览器中返回 Timeout 对象
+// Save瀹氭椂鍣?ID - 鍏煎 Node.js 鍜屾祻瑙堝櫒鐜
+// Node.js 涓?setInterval 杩斿洖 number锛屾祻瑙堝櫒涓繑鍥?Timeout 瀵硅薄
 let keyCacheCleanupTimer: number | NodeJS.Timeout | undefined;
+let keyCacheCleanupInitialized = false;
 
 /**
- * 初始化密钥缓存自动清理
- */
+ * 鍒濆鍖栧瘑閽ョ紦瀛樿嚜鍔ㄦ竻鐞? */
 const initializeKeyCacheCleanup = (): void => {
   // Periodically clean expired key cache (every 10 minutes)
   keyCacheCleanupTimer = setInterval(() => {
@@ -419,7 +490,7 @@ const initializeKeyCacheCleanup = (): void => {
   }, KEY_CACHE_CLEANUP_INTERVAL);
 
   // Clear cache on page unload
-  // Explicitly check if window.addEventListener exists，防止React Native环境报错
+  // Explicitly check if window.addEventListener exists锛岄槻姝eact Native鐜鎶ラ敊
   // Use complex check to prevent compiler optimization
   if (typeof window !== 'undefined') {
     // In React Native, window exists but addEventListener does not
@@ -432,8 +503,7 @@ const initializeKeyCacheCleanup = (): void => {
 };
 
 /**
- * 停止密钥缓存清理定时器
- */
+ * 鍋滄瀵嗛挜缂撳瓨娓呯悊瀹氭椂鍣? */
 export const stopKeyCacheCleanup = (): void => {
   // Clear timer
   if (keyCacheCleanupTimer) {
@@ -442,25 +512,32 @@ export const stopKeyCacheCleanup = (): void => {
   }
 
   // Clear page unload event listener
-  // Explicitly check if window.removeEventListener exists，防止React Native环境报错
+  // Explicitly check if window.removeEventListener exists锛岄槻姝eact Native鐜鎶ラ敊
   // Use bracket syntax to prevent compiler optimization
   if (typeof window !== 'undefined' && typeof window['removeEventListener'] === 'function') {
     window['removeEventListener']('beforeunload', clearKeyCache);
   }
+
+  keyCacheCleanupInitialized = false;
 };
 
-// Initialize时启动自动清理
-// But not auto-start in test to avoid Jest open handle detection
+// Initialize鏃跺惎鍔ㄨ嚜鍔ㄦ竻鐞?// But not auto-start in test to avoid Jest open handle detection
 // Ensure correct detection in all environments including browser
 const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
-if (!isTestEnvironment) {
+
+const ensureKeyCacheCleanupInitialized = (): void => {
+  if (isTestEnvironment || keyCacheCleanupInitialized) {
+    return;
+  }
+
   initializeKeyCacheCleanup();
-}
+  keyCacheCleanupInitialized = true;
+};
 
 /**
  * Root key cache: stores PBKDF2-derived root keys per masterKey.
  * This is the expensive one-time operation. Once we have the root key,
- * all subsequent per-record key derivations use fast HKDF (~3μs vs ~2s).
+ * all subsequent per-record key derivations use fast HKDF (~3渭s vs ~2s).
  */
 const rootKeyCache = new Map<string, Uint8Array>();
 
@@ -468,8 +545,8 @@ const rootKeyCache = new Map<string, Uint8Array>();
  * Derives AES and HMAC keys from master key and salt.
  *
  * Two-tier architecture for performance:
- * 1. PBKDF2 (one-time, slow ~2s): masterKey + fixed_salt → rootKey (64 bytes)
- * 2. HKDF (per-record, fast ~3μs): rootKey + salt → AES+HMAC keys (64 bytes)
+ * 1. PBKDF2 (one-time, slow ~2s): masterKey + fixed_salt 鈫?rootKey (64 bytes)
+ * 2. HKDF (per-record, fast ~3渭s): rootKey + salt 鈫?AES+HMAC keys (64 bytes)
  *
  * This eliminates the ~2s stall on every unique salt in Expo Go.
  *
@@ -481,6 +558,8 @@ const rootKeyCache = new Map<string, Uint8Array>();
  */
 const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey: Uint8Array; hmacKey: Uint8Array }> => {
   try {
+    ensureKeyCacheCleanupInitialized();
+
     // Step 1: Get or derive root key (PBKDF2, one-time per masterKey)
     const masterKeyHash = bytesToHex(sha256(masterKey));
     let rootKey = rootKeyCache.get(masterKeyHash);
@@ -494,7 +573,7 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
       rootKeyCache.set(masterKeyHash, rootKey);
     }
 
-    // Step 2: Fast HKDF-expand for per-record keys (~3μs)
+    // Step 2: Fast HKDF-expand for per-record keys (~3渭s)
     const derivedBytes = hkdfDerive(rootKey, salt, 64);
 
     // Split derived key: first 32 bytes for AES, last 32 bytes for HMAC
@@ -543,9 +622,8 @@ const getSecureRandomBytes = (length: number): Uint8Array => {
 };
 
 /**
- * 根据数据大小和配置选择HMAC算法
- * 小数据使用SHA-256（更快），大数据使用SHA-512（更安全）
- */
+ * 鏍规嵁鏁版嵁澶у皬鍜岄厤缃€夋嫨HMAC绠楁硶
+ * 灏忔暟鎹娇鐢⊿HA-256锛堟洿蹇級锛屽ぇ鏁版嵁浣跨敤SHA-512锛堟洿瀹夊叏锛? */
 const selectHMACAlgorithm = (dataSize: number): 'SHA-256' | 'SHA-512' => {
   const config = configManager.getConfig();
 
@@ -759,96 +837,90 @@ const decryptCTR = async (encryptedBase64: string, masterKey: string): Promise<s
  * - Supports biometric authentication when required
  */
 export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promise<string> => {
-  let key;
   const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
+  ensureKeyCacheCleanupInitialized();
 
   try {
-    // Check SecureStore 是否可用
-    if (typeof SecureStore !== 'undefined') {
-      try {
-        // Try to get key with biometric
-        key = await SecureStore.getItemAsync(MASTER_KEY_ALIAS, {
-          requireAuthentication: requireAuthOnAccess,
-          authenticationPrompt: '验证身份访问数据库', // Authenticate to access database
-        });
-
-        if (!key) {
-          key = await generateMasterKey();
-          // Try to store key with biometric
-          await SecureStore.setItemAsync(MASTER_KEY_ALIAS, key, {
-            requireAuthentication: requireAuthOnAccess,
-            authenticationPrompt: '设置加密密钥', // Set encryption key
-          });
-        }
-      } catch (error) {
-        logger.warn('Biometric authentication failed, retrying without biometrics:', error);
-        try {
-          // Biometric failed, fallback to non-biometric
-          key = await SecureStore.getItemAsync(MASTER_KEY_ALIAS);
-
-          if (!key) {
-            key = await generateMasterKey();
-            // Store key without biometric
-            await SecureStore.setItemAsync(MASTER_KEY_ALIAS, key);
-          }
-        } catch (secureStoreError) {
-          // SecureStore 完全不可用，回退到内存存储
-          logger.warn('SecureStore completely unavailable, using in-memory key storage:', secureStoreError);
-          key = inMemoryStore.get(MASTER_KEY_ALIAS);
-          if (!key) {
-            key = await generateMasterKey();
-            inMemoryStore.set(MASTER_KEY_ALIAS, key);
-          }
-        }
-      }
-    } else {
-      if (!isTestEnvironment) {
-        logger.warn('SecureStore not available, using in-memory master key storage');
-      }
-
-      // Get key from memory storage
-      key = inMemoryStore.get(MASTER_KEY_ALIAS);
+    if (requireAuthOnAccess) {
+      const secureStore = await ensureAuthOnAccessSupported();
+      let key = await secureStore.getItemAsync(MASTER_KEY_ALIAS, {
+        requireAuthentication: true,
+        authenticationPrompt: 'Authenticate to access database',
+      });
 
       if (!key) {
         key = await generateMasterKey();
-        // Store到内存存储
-        inMemoryStore.set(MASTER_KEY_ALIAS, key);
+        await secureStore.setItemAsync(MASTER_KEY_ALIAS, key, {
+          requireAuthentication: true,
+          authenticationPrompt: 'Set encryption key',
+        });
       }
+
+      return key;
     }
-  } catch (error) {
-    logger.error('Failed to retrieve encryption key:', error);
-    // Final fallback: Generate in-memory key
-    logger.warn('All key retrieval methods failed, generating in-memory key as last resort');
-    key = inMemoryStore.get(MASTER_KEY_ALIAS);
+
+    const secureStore = getOptionalSecureStore();
+    if (secureStore) {
+      try {
+        let key = await secureStore.getItemAsync(MASTER_KEY_ALIAS);
+
+        if (!key) {
+          key = await generateMasterKey();
+          await secureStore.setItemAsync(MASTER_KEY_ALIAS, key);
+        }
+
+        return key;
+      } catch (secureStoreError) {
+        logger.warn('SecureStore unavailable, using in-memory key storage fallback:', secureStoreError);
+      }
+    } else if (!isTestEnvironment) {
+      logger.warn('SecureStore not available, using in-memory master key storage');
+    }
+
+    let key = inMemoryStore.get(MASTER_KEY_ALIAS);
     if (!key) {
       key = await generateMasterKey();
       inMemoryStore.set(MASTER_KEY_ALIAS, key);
     }
-  }
 
-  return key;
+    return key;
+  } catch (error) {
+    if (requireAuthOnAccess) {
+      throw error;
+    }
+
+    logger.error('Failed to retrieve encryption key:', error);
+    logger.warn('All key retrieval methods failed, generating in-memory key as last resort');
+
+    let key = inMemoryStore.get(MASTER_KEY_ALIAS);
+    if (!key) {
+      key = await generateMasterKey();
+      inMemoryStore.set(MASTER_KEY_ALIAS, key);
+    }
+
+    return key;
+  }
 };
 
 // resetMasterKey for logout/reset
 export const resetMasterKey = async (): Promise<void> => {
   try {
-    if (typeof SecureStore !== 'undefined') {
-      await SecureStore.deleteItemAsync(MASTER_KEY_ALIAS);
+    const secureStore = getOptionalSecureStore();
+    if (secureStore) {
+      await secureStore.deleteItemAsync(MASTER_KEY_ALIAS);
     } else {
-      // SecureStore 不可用，清除内存存储
       inMemoryStore.delete(MASTER_KEY_ALIAS);
     }
   } catch (error) {
     logger.warn('Failed to reset master key:', error);
-    // Ensure in-memory key cache is cleared
     inMemoryStore.delete(MASTER_KEY_ALIAS);
   }
-  // Clear key cache
+
   clearKeyCache();
 };
 
 /**
- * 预计算常用密钥，减少首次加密时的密钥派生时间
+ * 棰勮绠楀父鐢ㄥ瘑閽ワ紝鍑忓皯棣栨鍔犲瘑鏃剁殑瀵嗛挜娲剧敓鏃堕棿
  *
  * @returns Promise<void>
  */
@@ -865,8 +937,7 @@ export const precomputeCommonKeys = async (): Promise<void> => {
 
     logger.info(`Precomputing ${commonSalts.length} common keys for better performance`);
 
-    // Parallel预计算所有密钥
-    await Promise.all(commonSalts.map(salt => deriveKey(masterKey, salt)));
+    // Parallel棰勮绠楁墍鏈夊瘑閽?    await Promise.all(commonSalts.map(salt => deriveKey(masterKey, salt)));
 
     logger.info('Key precomputation completed');
   } catch (error) {
@@ -875,9 +946,7 @@ export const precomputeCommonKeys = async (): Promise<void> => {
 };
 
 /**
- * 生成主密钥（32 字节随机）
- * @returns 主密钥
- */
+ * 鐢熸垚涓诲瘑閽ワ紙32 瀛楄妭闅忔満锛? * @returns 涓诲瘑閽? */
 export const generateMasterKey = async (): Promise<string> => {
   try {
     const bytes = getSecureRandomBytes(32);
@@ -896,13 +965,13 @@ export const generateMasterKey = async (): Promise<string> => {
   }
 };
 
-// ==================== bcrypt 密码哈希功能 ====================
+// ==================== bcrypt 瀵嗙爜鍝堝笇鍔熻兘 ====================
 
 /**
- * 生成密码哈希
- * @param password 原始密码
- * @param saltRounds 盐值轮数（默认12轮）
- * @returns 密码哈希
+ * 鐢熸垚瀵嗙爜鍝堝笇
+ * @param password 鍘熷瀵嗙爜
+ * @param saltRounds 鐩愬€艰疆鏁帮紙榛樿12杞級
+ * @returns 瀵嗙爜鍝堝笇
  */
 export const hashPassword = async (password: string, saltRounds: number = 12): Promise<string> => {
   try {
@@ -913,10 +982,10 @@ export const hashPassword = async (password: string, saltRounds: number = 12): P
 };
 
 /**
- * 验证密码哈希
- * @param password 原始密码
- * @param hash 密码哈希
- * @returns 是否匹配
+ * 楠岃瘉瀵嗙爜鍝堝笇
+ * @param password 鍘熷瀵嗙爜
+ * @param hash 瀵嗙爜鍝堝笇
+ * @returns 鏄惁鍖归厤
  */
 export const verifyPassword = async (password: string, hash: string): Promise<boolean> => {
   try {
@@ -927,10 +996,7 @@ export const verifyPassword = async (password: string, hash: string): Promise<bo
 };
 
 /**
- * 生成随机盐值
- * @param rounds 盐值轮数
- * @returns 随机盐值
- */
+ * 鐢熸垚闅忔満鐩愬€? * @param rounds 鐩愬€艰疆鏁? * @returns 闅忔満鐩愬€? */
 export const generateSalt = async (rounds: number = 12): Promise<string> => {
   try {
     return await bcrypt.genSalt(rounds);
@@ -957,10 +1023,9 @@ interface BulkEncryptionResult {
 }
 
 /**
- * 批量加密多个文本（重用密钥派生）
- * @param plainTexts 要加密的明文数组
- * @param masterKey 主密钥
- * @returns Promise<string[]> 加密后的文本数组
+ * 鎵归噺鍔犲瘑澶氫釜鏂囨湰锛堥噸鐢ㄥ瘑閽ユ淳鐢燂級
+ * @param plainTexts 瑕佸姞瀵嗙殑鏄庢枃鏁扮粍
+ * @param masterKey 涓诲瘑閽? * @returns Promise<string[]> 鍔犲瘑鍚庣殑鏂囨湰鏁扮粍
  */
 export const encryptBulk = async (plainTexts: string[], masterKey: string): Promise<string[]> => {
   if (plainTexts.length === 0) return [];
@@ -1019,10 +1084,9 @@ const encryptBulkCTR = async (plainTexts: string[], masterKey: string): Promise<
 };
 
 /**
- * 批量解密多个文本
- * @param encryptedTexts 要解密的密文数组
- * @param masterKey 主密钥
- * @returns Promise<string[]> 解密后的明文数组
+ * 鎵归噺瑙ｅ瘑澶氫釜鏂囨湰
+ * @param encryptedTexts 瑕佽В瀵嗙殑瀵嗘枃鏁扮粍
+ * @param masterKey 涓诲瘑閽? * @returns Promise<string[]> 瑙ｅ瘑鍚庣殑鏄庢枃鏁扮粍
  */
 export const decryptBulk = async (encryptedTexts: string[], masterKey: string): Promise<string[]> => {
   if (encryptedTexts.length === 0) return [];
@@ -1076,23 +1140,23 @@ const decryptBulkCTR = async (encryptedTexts: string[], masterKey: string): Prom
   }
 };
 
-// ==================== 通用哈希功能 ====================
+// ==================== 閫氱敤鍝堝笇鍔熻兘 ====================
 
 /**
- * 生成数据哈希
- * @param data 要哈希的数据
- * @param algorithm 哈希算法（默认SHA-512）
- * @returns Promise<string> 哈希值（十六进制）
- */
+ * 鐢熸垚鏁版嵁鍝堝笇
+ * @param data 瑕佸搱甯岀殑鏁版嵁
+ * @param algorithm 鍝堝笇绠楁硶锛堥粯璁HA-512锛? * @returns Promise<string> 鍝堝笇鍊硷紙鍗佸叚杩涘埗锛? */
 export const generateHash = async (data: string, algorithm: 'SHA-256' | 'SHA-512' = 'SHA-512'): Promise<string> => {
   try {
-    // Check Crypto 是否可用（Expo 环境）
-    if (typeof Crypto !== 'undefined' && Crypto.digestStringAsync) {
+    ensureKeyCacheCleanupInitialized();
+
+    const crypto = getExpoCryptoModule();
+    if (crypto?.digestStringAsync) {
       switch (algorithm) {
         case 'SHA-256':
-          return await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, data);
+          return await crypto.digestStringAsync(crypto.CryptoDigestAlgorithm.SHA256, data);
         case 'SHA-512':
-          return await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA512, data);
+          return await crypto.digestStringAsync(crypto.CryptoDigestAlgorithm.SHA512, data);
         default:
           throw new CryptoError(`Unsupported hash algorithm: ${algorithm}`, 'HASH_FAILED');
       }
@@ -1130,11 +1194,9 @@ interface FieldEncryptionConfig {
 }
 
 /**
- * 字段级加密
- * @param data 要加密的对象
- * @param config 加密配置
- * @returns Promise<Record<string, any>> 字段级加密后的对象
- */
+ * 瀛楁绾у姞瀵? * @param data 瑕佸姞瀵嗙殑瀵硅薄
+ * @param config 鍔犲瘑閰嶇疆
+ * @returns Promise<Record<string, any>> 瀛楁绾у姞瀵嗗悗鐨勫璞? */
 export const encryptFields = async (
   data: Record<string, any>,
   fieldConfig: FieldEncryptionConfig
@@ -1158,11 +1220,9 @@ export const encryptFields = async (
   return result;
 };
 /**
- * 字段级解密
- * @param data 要解密的对象
- * @param config 解密配置
- * @returns Promise<Record<string, any>> 字段级解密后的对象
- */
+ * 瀛楁绾цВ瀵? * @param data 瑕佽В瀵嗙殑瀵硅薄
+ * @param config 瑙ｅ瘑閰嶇疆
+ * @returns Promise<Record<string, any>> 瀛楁绾цВ瀵嗗悗鐨勫璞? */
 export const decryptFields = async (
   data: Record<string, any>,
   fieldConfig: FieldEncryptionConfig
@@ -1174,15 +1234,15 @@ export const decryptFields = async (
 
   if (fieldsToDecrypt.length === 0) return result;
 
-  // 1. 批量处理所有加密字段
+  // 1. Batch process all encrypted fields
   const decryptPromises = fieldsToDecrypt.map(async field => {
     try {
       const encryptedValue = result[field] as string;
 
-      // 2. 使用现有的解密函数（它会利用缓存）
+      // 2. Reuse the existing decrypt function so key caches still apply
       const decryptedStr = await decrypt(encryptedValue, fieldConfig.masterKey);
 
-      // 3. 类型恢复逻辑保持不变
+      // 3. 绫诲瀷鎭㈠閫昏緫淇濇寔涓嶅彉
       if (/^[\{\[]/.test(decryptedStr.trim())) {
         result[field] = JSON.parse(decryptedStr);
       } else {
@@ -1210,11 +1270,9 @@ export const decryptFields = async (
   return result;
 };
 /**
- * 批量字段级加密
- * @param dataArray 要加密的对象数组
- * @param fieldConfig 加密配置
- * @returns Promise<Record<string, any>[]> 批量字段级加密后的对象数组
- */
+ * 鎵归噺瀛楁绾у姞瀵? * @param dataArray 瑕佸姞瀵嗙殑瀵硅薄鏁扮粍
+ * @param fieldConfig 鍔犲瘑閰嶇疆
+ * @returns Promise<Record<string, any>[]> 鎵归噺瀛楁绾у姞瀵嗗悗鐨勫璞℃暟缁? */
 export const encryptFieldsBulk = async (
   dataArray: Record<string, any>[],
   fieldConfig: FieldEncryptionConfig
@@ -1262,11 +1320,9 @@ export const encryptFieldsBulk = async (
 };
 
 /**
- * 批量字段级解密
- * @param dataArray 要解密的对象数组
- * @param config 解密配置
- * @returns Promise<Record<string, any>[]> 批量字段级解密后的对象数组
- */
+ * 鎵归噺瀛楁绾цВ瀵? * @param dataArray 瑕佽В瀵嗙殑瀵硅薄鏁扮粍
+ * @param config 瑙ｅ瘑閰嶇疆
+ * @returns Promise<Record<string, any>[]> 鎵归噺瀛楁绾цВ瀵嗗悗鐨勫璞℃暟缁? */
 export const decryptFieldsBulk = async (
   dataArray: Record<string, any>[],
   fieldConfig: FieldEncryptionConfig

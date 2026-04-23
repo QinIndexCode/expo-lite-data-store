@@ -5,8 +5,8 @@
  * @version 1.0.0
  */
 
-import * as FileSystem from 'expo-file-system';
-import ROOT from '../utils/ROOTPath';
+import { getFileSystem } from '../utils/fileSystemCompat';
+import { getRootPathSync } from '../utils/ROOTPath';
 import withTimeout from '../utils/withTimeout';
 import { ChunkedFileHandler } from './file/ChunkedFileHandler';
 import { FileHandlerFactory } from './file/FileHandlerFactory';
@@ -173,7 +173,7 @@ export class FileOperationManager {
    * @param tableName 表名
    */
   async deleteDirectory(tableName: string): Promise<void> {
-    const directoryPath = `${ROOT}/${tableName}`;
-    await FileSystem.deleteAsync(directoryPath, { idempotent: true });
+    const directoryPath = `${getRootPathSync()}${tableName}`;
+    await getFileSystem().deleteAsync(directoryPath, { idempotent: true });
   }
 }

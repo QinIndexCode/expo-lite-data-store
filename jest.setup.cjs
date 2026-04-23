@@ -315,7 +315,10 @@ jest.mock('expo-file-system', () => {
     },
     readAsStringAsync: async uri => {
       if (uri in global.__expo_file_system_mock__.mockFileSystem) {
-        return global.__expo_file_system_mock__.mockFileSystem[uri];
+        const value = global.__expo_file_system_mock__.mockFileSystem[uri];
+        if (typeof value === 'string') {
+          return value;
+        }
       }
       throw new Error(`File not found: ${uri}`);
     },
@@ -350,7 +353,9 @@ jest.mock('expo-file-system', () => {
       }
     },
     makeDirectoryAsync: async (uri, options) => {
-      // Do nothing for mock
+      global.__expo_file_system_mock__.mockFileSystem[uri] = {
+        __type: 'directory',
+      };
     },
     deleteDirectoryAsync: async (uri, options) => {
       // Do nothing for mock
@@ -363,12 +368,22 @@ jest.mock('expo-file-system', () => {
         .filter(filePath => !filePath.includes('/'));
     },
     getInfoAsync: async uri => {
+      const value = global.__expo_file_system_mock__.mockFileSystem[uri];
       return {
         exists: uri in global.__expo_file_system_mock__.mockFileSystem,
-        size: global.__expo_file_system_mock__.mockFileSystem[uri]?.length,
+        size: typeof value === 'string' ? value.length : 0,
+        isDirectory: Boolean(value && typeof value === 'object' && value.__type === 'directory'),
         modificationTime: Date.now(),
       };
     },
+  };
+});
+
+jest.mock('expo-file-system/legacy', () => jest.requireMock('expo-file-system'));
+
+jest.mock('expo-modules-core', () => {
+  return {
+    requireOptionalNativeModule: () => null,
   };
 });
 
@@ -424,6 +439,7 @@ jest.mock('expo-crypto', () => {
 if (!global.__expo_secure_store_mock__) {
   global.__expo_secure_store_mock__ = {
     mockStore: {},
+    canUseBiometricAuthentication: true,
   };
 }
 
@@ -452,18 +468,7 @@ jest.mock('expo-secure-store', () => {
       // 返回所有键
       return Object.keys(mockStore);
     },
-  };
-});
-
-// Mock getMasterKey function to always return the same key
-jest.mock('./src/utils/crypto', () => {
-  const original = jest.requireActual('./src/utils/crypto');
-  return {
-    ...original,
-    // 总是返回相同的密钥
-    getMasterKey: async () => {
-      return 'test_master_key_12345678901234567890123456789012';
-    },
+    canUseBiometricAuthentication: async () => global.__expo_secure_store_mock__.canUseBiometricAuthentication,
   };
 });
 
@@ -507,5 +512,6 @@ jest.mock('expo-constants', () => {
     deviceName: 'Test Device',
     // Mock deviceId method
     deviceId: 'test-device-id',
+    appOwnership: 'standalone',
   };
 });

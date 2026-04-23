@@ -8,6 +8,7 @@
 import * as Crypto from 'expo-crypto';
 import { StorageError } from '../../types/storageErrorInfc';
 import logger from '../../utils/logger';
+import { getFileSystem } from '../../utils/fileSystemCompat';
 
 /**
  * 文件处理器抽象基类，包含公共方法
@@ -89,8 +90,7 @@ export abstract class FileHandlerBase {
     }
 
     try {
-      const FileSystem = await import('expo-file-system');
-      const info = await FileSystem.getInfoAsync(path);
+      const info = await getFileSystem().getInfoAsync(path);
       this.fileInfoCache.set(key, {
         info,
         timestamp: Date.now(),

@@ -1,4 +1,4 @@
-import { PerformanceMonitor, PerformanceMetrics } from '../PerformanceMonitor';
+import { PerformanceMonitor, type PerformanceMetrics } from '../PerformanceMonitor';
 
 describe('PerformanceMonitor', () => {
   let monitor: PerformanceMonitor;
@@ -6,194 +6,124 @@ describe('PerformanceMonitor', () => {
   beforeEach(() => {
     monitor = new PerformanceMonitor();
     monitor.clear();
-    monitor.setEnabled(true);
-    (monitor as any).sampleRate = 1.0;
+    monitor.configure({
+      enabled: true,
+      sampleRate: 1,
+      maxRecords: 100,
+      thresholds: {
+        minSuccessRate: 95,
+        maxAverageDuration: 500,
+        maxP95Duration: 1000,
+      },
+    });
   });
 
   afterEach(() => {
     monitor.destroy();
   });
 
-  describe('基本功能测试', () => {
-    it('应该能够创建性能监控器实例', () => {
-      expect(monitor).toBeInstanceOf(PerformanceMonitor);
-    });
-
-    it('应该能够启用和禁用监控', () => {
-      monitor.setEnabled(false);
-      expect(monitor.isEnabled()).toBe(false);
-      
-      monitor.setEnabled(true);
-      expect(monitor.isEnabled()).toBe(true);
-    });
-
-    it('应该能够清除所有指标', () => {
-      const metrics: PerformanceMetrics = {
-        operation: 'test',
-        duration: 100,
-        timestamp: Date.now(),
-        success: true,
-      };
-      
-      monitor.record(metrics);
-      monitor.clear();
-      
-      expect(monitor.getMetrics()).toHaveLength(0);
-    });
+  const createMetric = (overrides: Partial<PerformanceMetrics> = {}): PerformanceMetrics => ({
+    operation: 'read',
+    duration: 50,
+    timestamp: Date.now(),
+    success: true,
+    group: 'functional',
+    profile: 'expo-go-js',
+    ...overrides,
   });
 
-  describe('性能指标记录测试', () => {
-    it('应该能够记录成功的性能指标', () => {
-      const metrics: PerformanceMetrics = {
-        operation: 'read',
-        duration: 50,
-        timestamp: Date.now(),
-        success: true,
-        dataSize: 100,
-      };
-      
-      monitor.record(metrics);
-      const recordedMetrics = monitor.getMetrics();
-      
-      expect(recordedMetrics.length).toBeGreaterThan(0);
-    });
-
-    it('应该能够记录失败的性能指标', () => {
-      const metrics: PerformanceMetrics = {
-        operation: 'write',
-        duration: 200,
-        timestamp: Date.now(),
-        success: false,
-        error: 'Test error',
-      };
-      
-      monitor.record(metrics);
-      const recordedMetrics = monitor.getMetrics();
-      
-      expect(recordedMetrics.length).toBeGreaterThan(0);
-    });
+  it('records metrics when enabled', () => {
+    monitor.record(createMetric());
+    expect(monitor.getMetrics()).toHaveLength(1);
   });
 
-  describe('统计信息测试', () => {
-    it('应该能够获取总体统计信息', () => {
-      const stats = monitor.getOverallStats();
-      
-      expect(stats).toHaveProperty('totalOperations');
-      expect(stats).toHaveProperty('successfulOperations');
-      expect(stats).toHaveProperty('failedOperations');
-      expect(stats).toHaveProperty('averageDuration');
-      expect(stats).toHaveProperty('minDuration');
-      expect(stats).toHaveProperty('maxDuration');
-      expect(stats).toHaveProperty('totalDuration');
-      expect(stats).toHaveProperty('successRate');
-    });
+  it('filters metrics by operation and group', () => {
+    monitor.record(createMetric({ operation: 'read', group: 'functional' }));
+    monitor.record(createMetric({ operation: 'write', group: 'concurrency' }));
 
-    it('应该能够按操作类型获取统计信息', () => {
-      const stats = monitor.getOperationStats('read');
-      
-      expect(stats).toHaveProperty('totalOperations');
-      expect(stats).toHaveProperty('successfulOperations');
-      expect(stats).toHaveProperty('failedOperations');
-    });
-
-    it('应该能够获取所有操作的统计信息', () => {
-      const allStats = monitor.getOperationStats();
-      
-      expect(allStats).toBeInstanceOf(Map);
-    });
+    expect(monitor.getMetrics({ operation: 'read' })).toHaveLength(1);
+    expect(monitor.getMetrics({ group: 'concurrency' })).toHaveLength(1);
   });
 
-  describe('健康检查测试', () => {
-    it('应该能够执行健康检查', () => {
-      const result = monitor.performHealthCheck();
-      
-      expect(result).toHaveProperty('timestamp');
-      expect(result).toHaveProperty('healthy');
-      expect(result).toHaveProperty('details');
-      expect(result).toHaveProperty('message');
-      
-      expect(result.details).toHaveProperty('performance');
-      expect(result.details).toHaveProperty('resources');
-      expect(result.details).toHaveProperty('components');
-    });
+  it('calculates operation stats with percentiles and throughput', () => {
+    monitor.record(createMetric({ operation: 'write', duration: 10 }));
+    monitor.record(createMetric({ operation: 'write', duration: 20 }));
+    monitor.record(createMetric({ operation: 'write', duration: 40 }));
 
-    it('健康检查应该包含性能指标', () => {
-      const result = monitor.performHealthCheck();
-      
-      expect(result.details.performance).toHaveProperty('averageDuration');
-      expect(result.details.performance).toHaveProperty('successRate');
-    });
+    const stats = monitor.getOperationStats('write');
+    if (stats instanceof Map) {
+      throw new Error('Expected getOperationStats(operation) to return PerformanceStats');
+    }
 
-    it('健康检查应该包含组件状态', () => {
-      const result = monitor.performHealthCheck();
-      
-      expect(result.details.components).toHaveProperty('cache');
-      expect(result.details.components).toHaveProperty('storage');
-      expect(result.details.components).toHaveProperty('encryption');
-    });
+    expect(stats.totalOperations).toBe(3);
+    expect(stats.averageDuration).toBeCloseTo(70 / 3, 5);
+    expect(stats.p50Duration).toBe(20);
+    expect(stats.p95Duration).toBe(40);
+    expect(stats.p99Duration).toBe(40);
+    expect(stats.throughputOpsPerSec).toBeGreaterThan(0);
   });
 
-  describe('统计计算测试', () => {
-    it('应该正确计算平均耗时', () => {
-      const metrics1: PerformanceMetrics = {
-        operation: 'test',
-        duration: 100,
-        timestamp: Date.now(),
-        success: true,
-      };
-      
-      const metrics2: PerformanceMetrics = {
-        operation: 'test',
-        duration: 200,
-        timestamp: Date.now(),
-        success: true,
-      };
-      
-      monitor.record(metrics1);
-      monitor.record(metrics2);
-      
-      const stats = monitor.getOverallStats();
-      expect(stats.totalOperations).toBeGreaterThan(0);
-    });
+  it('calculates group stats', () => {
+    monitor.record(createMetric({ group: 'functional', duration: 20 }));
+    monitor.record(createMetric({ group: 'functional', duration: 30 }));
+    monitor.record(createMetric({ group: 'large-file', duration: 500 }));
 
-    it('应该正确计算成功率', () => {
-      const successMetrics: PerformanceMetrics = {
-        operation: 'test',
-        duration: 100,
-        timestamp: Date.now(),
-        success: true,
-      };
-      
-      const failureMetrics: PerformanceMetrics = {
-        operation: 'test',
-        duration: 100,
-        timestamp: Date.now(),
-        success: false,
-      };
-      
-      monitor.record(successMetrics);
-      monitor.record(failureMetrics);
-      
-      const stats = monitor.getOverallStats();
-      expect(stats.totalOperations).toBeGreaterThan(0);
-    });
+    const stats = monitor.getGroupStats('functional');
+    if (stats instanceof Map) {
+      throw new Error('Expected getGroupStats(group) to return PerformanceStats');
+    }
+
+    expect(stats.totalOperations).toBe(2);
+    expect(stats.averageDuration).toBe(25);
   });
 
-  describe('静态方法测试', () => {
-    it('应该能够检查性能跟踪是否启用', () => {
-      const enabled = PerformanceMonitor.isPerformanceTrackingEnabled();
-      expect(typeof enabled).toBe('boolean');
+  it('honors sample rate changes', () => {
+    monitor.clear();
+    monitor.configure({ sampleRate: 0 });
+    monitor.record(createMetric());
+    expect(monitor.getMetrics()).toHaveLength(0);
+  });
+
+  it('enforces max record retention', () => {
+    monitor.clear();
+    monitor.configure({ maxRecords: 2 });
+
+    monitor.record(createMetric({ duration: 10 }));
+    monitor.record(createMetric({ duration: 20 }));
+    monitor.record(createMetric({ duration: 30 }));
+
+    const metrics = monitor.getMetrics();
+    expect(metrics).toHaveLength(2);
+    expect(metrics.map(metric => metric.duration)).toEqual([20, 30]);
+  });
+
+  it('reports unhealthy health checks when thresholds are exceeded', () => {
+    monitor.record(createMetric({ duration: 800 }));
+    monitor.record(createMetric({ duration: 900 }));
+    monitor.record(createMetric({ duration: 1200, success: false }));
+
+    const result = monitor.performHealthCheck();
+
+    expect(result.healthy).toBe(false);
+    expect(result.details.performance.averageDuration).toBeGreaterThan(500);
+    expect(result.details.performance.p95Duration).toBe(1200);
+    expect(result.details.performance.thresholds.maxAverageDuration).toBe(500);
+  });
+
+  it('resets runtime options to defaults', () => {
+    monitor.configure({
+      enabled: false,
+      sampleRate: 1,
+      maxRecords: 10,
+      thresholds: {
+        minSuccessRate: 50,
+      },
     });
 
-    it('应该能够检查健康检查是否启用', () => {
-      const enabled = PerformanceMonitor.isHealthChecksEnabled();
-      expect(typeof enabled).toBe('boolean');
-    });
+    monitor.resetRuntimeOptions();
 
-    it('应该能够获取指标保留时间', () => {
-      const retention = PerformanceMonitor.getMetricsRetention();
-      expect(typeof retention).toBe('number');
-      expect(retention).toBeGreaterThan(0);
-    });
+    expect(typeof monitor.isEnabled()).toBe('boolean');
+    expect(monitor.getSampleRate()).toBe(0.1);
+    expect(monitor.getThresholds().minSuccessRate).toBe(90);
   });
 });

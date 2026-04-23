@@ -14,12 +14,72 @@ import { sha512 } from '@noble/hashes/sha512';
 import { bytesToHex } from '@noble/hashes/utils';
 import logger from './logger';
 
+type NativeCryptoModule = {
+  pbkdf2Sync?: (...args: any[]) => unknown;
+  randomBytes?: (length: number) => unknown;
+  createHash?: (algorithm: string) => {
+    update(data: string): void;
+    digest(encoding: string): string;
+  };
+};
+
 let nativePBKDF2Sync: any;
 let nativeRandomBytes: any;
 let nativeCreateHash: any;
 let warned = false;
 let nativeChecked = false;
 let nativeEnabled = false;
+const NATIVE_CRYPTO_GLOBAL_KEY = '__expoLiteDataStoreNativeCrypto';
+
+const getGlobalScope = (): Record<string, unknown> | undefined => {
+  if (typeof globalThis !== 'undefined') {
+    return globalThis as Record<string, unknown>;
+  }
+  if (typeof global !== 'undefined') {
+    return global as Record<string, unknown>;
+  }
+  return undefined;
+};
+
+const normalizeNativeCryptoModule = (moduleValue: unknown): NativeCryptoModule | undefined => {
+  if (moduleValue && typeof moduleValue === 'object' && 'default' in moduleValue) {
+    const defaultValue = (moduleValue as { default?: unknown }).default;
+    if (defaultValue && defaultValue !== moduleValue && typeof defaultValue === 'object') {
+      return defaultValue as NativeCryptoModule;
+    }
+  }
+  if (!moduleValue || typeof moduleValue !== 'object') {
+    return undefined;
+  }
+  return moduleValue as NativeCryptoModule;
+};
+
+const hasNativeCryptoPrimitives = (
+  moduleValue: NativeCryptoModule | undefined
+): moduleValue is Required<Pick<NativeCryptoModule, 'pbkdf2Sync' | 'randomBytes' | 'createHash'>> =>
+  !!moduleValue &&
+  typeof moduleValue.pbkdf2Sync === 'function' &&
+  typeof moduleValue.randomBytes === 'function' &&
+  typeof moduleValue.createHash === 'function';
+
+const applyNativeCryptoModule = (moduleValue: unknown): boolean => {
+  const normalizedModule = normalizeNativeCryptoModule(moduleValue);
+  if (!hasNativeCryptoPrimitives(normalizedModule)) {
+    return false;
+  }
+
+  nativePBKDF2Sync = normalizedModule.pbkdf2Sync;
+  nativeRandomBytes = normalizedModule.randomBytes;
+  nativeCreateHash = normalizedModule.createHash;
+  nativeChecked = true;
+  nativeEnabled = true;
+  return true;
+};
+
+const getRegisteredNativeCryptoModule = (): unknown => {
+  const globalScope = getGlobalScope();
+  return globalScope ? globalScope[NATIVE_CRYPTO_GLOBAL_KEY] : undefined;
+};
 
 const isExpoGo = () => {
   try {
@@ -39,11 +99,28 @@ const devWarnOnce = () => {
   }
 };
 
+export const registerNativeCryptoModule = (moduleValue: unknown): boolean => {
+  const normalizedModule = normalizeNativeCryptoModule(moduleValue);
+  if (!hasNativeCryptoPrimitives(normalizedModule)) {
+    return false;
+  }
+
+  const globalScope = getGlobalScope();
+  if (globalScope) {
+    globalScope[NATIVE_CRYPTO_GLOBAL_KEY] = normalizedModule;
+  }
+
+  return applyNativeCryptoModule(normalizedModule);
+};
+
 const tryLoadNative = () => {
   if (nativeChecked) return nativeEnabled;
   if (nativePBKDF2Sync && nativeRandomBytes && nativeCreateHash) {
     nativeChecked = true;
     nativeEnabled = true;
+    return true;
+  }
+  if (applyNativeCryptoModule(getRegisteredNativeCryptoModule())) {
     return true;
   }
   if (isExpoGo()) {
@@ -55,12 +132,10 @@ const tryLoadNative = () => {
     const moduleName = ['react-native-quick-crypto'].join('');
     const reqFn = (global as any).require ?? require;
     const qcrypto = reqFn(moduleName);
-    nativePBKDF2Sync = qcrypto.pbkdf2Sync;
-    nativeRandomBytes = qcrypto.randomBytes;
-    nativeCreateHash = qcrypto.createHash;
-    nativeChecked = true;
-    nativeEnabled = true;
-    return true;
+    if (registerNativeCryptoModule(qcrypto)) {
+      return true;
+    }
+    throw new Error('Native crypto module is missing required primitives');
   } catch {
     if (!warned) {
       warned = true;
@@ -80,6 +155,22 @@ export const useNative = () => {
 
 export const __resetDevWarnForTest = () => {
   warned = false;
+};
+
+export const __resetNativeCryptoForTest = () => {
+  nativePBKDF2Sync = undefined;
+  nativeRandomBytes = undefined;
+  nativeCreateHash = undefined;
+  nativeChecked = false;
+  nativeEnabled = false;
+  const globalScope = getGlobalScope();
+  if (globalScope && NATIVE_CRYPTO_GLOBAL_KEY in globalScope) {
+    try {
+      delete globalScope[NATIVE_CRYPTO_GLOBAL_KEY];
+    } catch {
+      globalScope[NATIVE_CRYPTO_GLOBAL_KEY] = undefined;
+    }
+  }
 };
 
 export const pbkdf2 = (

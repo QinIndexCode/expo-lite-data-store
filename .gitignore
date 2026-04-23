@@ -8,6 +8,7 @@ node_modules/
 dist/
 web-build/
 expo-env.d.ts
+.expo-shared/
 
 # Native
 .kotlin/
@@ -41,6 +42,7 @@ yarn-error.*
 
 # Test coverage
 coverage/
+artifacts/
 
 # Native build folders
 /ios/
@@ -53,6 +55,7 @@ coverage/
 
 # Package lock (optional: remove if you want to commit it)
 package-lock.json
+*.tgz
 
 # Temporary directories
 NexSyncNew/

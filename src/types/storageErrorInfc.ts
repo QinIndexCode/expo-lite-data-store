@@ -83,7 +83,7 @@ export class StorageError extends Error {
       return ErrorCategory.QUERY;
     } else if (code === 'MIGRATION_FAILED') {
       return ErrorCategory.MIGRATION;
-    } else if (code === 'PERMISSION_DENIED') {
+    } else if (code === 'PERMISSION_DENIED' || code === 'AUTH_ON_ACCESS_UNSUPPORTED') {
       return ErrorCategory.PERMISSION;
     } else if (code === 'DISK_FULL') {
       return ErrorCategory.DISK;

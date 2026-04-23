@@ -1,5 +1,7 @@
 # Comment Specification
 
+[简体中文](./COMMENT_SPECIFICATION.zh-CN.md) | [English Alias](./COMMENT_SPECIFICATION.en.md) | [Consumer Guide](../README.md)
+
 ## 1. File Header Comment
 
 Every source file should include a file header comment describing the file's purpose, creation date, and last modified date.

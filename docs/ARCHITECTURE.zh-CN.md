@@ -1,5 +1,7 @@
 # Expo LiteDBStore 架构设计文档
 
+[English](./ARCHITECTURE.md) | [English Alias](./ARCHITECTURE.en.md) | [消费者文档](../README.zh-CN.md)
+
 // 创建于: 2025-11-28
 // 最后修改: 2026-01-22
 

@@ -2,311 +2,266 @@
  * @module PerformanceMonitor
  * @description Performance monitor collecting and reporting application metrics
  * @since 2025-11-28
- * @version 1.0.0
+ * @version 2.1.0
  */
 import { configManager } from '../config/ConfigManager';
-/**
- * 性能指标接口
- */
+
 export interface PerformanceMetrics {
-  /**
-   * 操作类型
-   */
   operation: string;
-  /**
-   * 操作耗时（毫秒）
-   */
   duration: number;
-  /**
-   * 操作时间戳
-   */
   timestamp: number;
-  /**
-   * 操作是否成功
-   */
   success: boolean;
-  /**
-   * 操作数据量（如记录数）
-   */
   dataSize?: number;
-  /**
-   * 错误信息（如果失败）
-   */
   error?: string;
+  group?: string;
+  channel?: string;
+  profile?: string;
+  provider?: string;
 }
 
-/**
- * 健康检查结果接口
- */
+export interface PerformanceStats {
+  totalOperations: number;
+  successfulOperations: number;
+  failedOperations: number;
+  averageDuration: number;
+  minDuration: number;
+  maxDuration: number;
+  totalDuration: number;
+  successRate: number;
+  p50Duration: number;
+  p95Duration: number;
+  p99Duration: number;
+  throughputOpsPerSec: number;
+}
+
+export interface PerformanceThresholds {
+  minSuccessRate: number;
+  maxAverageDuration: number;
+  maxP95Duration: number;
+}
+
+export interface PerformanceMonitorOptions {
+  enabled?: boolean;
+  sampleRate?: number;
+  maxRecords?: number;
+  metricsRetention?: number;
+  thresholds?: Partial<PerformanceThresholds>;
+}
+
 export interface HealthCheckResult {
-  /**
-   * 健康检查时间戳
-   */
   timestamp: number;
-  /**
-   * 系统是否健康
-   */
   healthy: boolean;
-  /**
-   * 健康状态详情
-   */
   details: {
-    /**
-     * 性能指标状态
-     */
     performance: {
       averageDuration: number;
+      p95Duration: number;
       successRate: number;
+      sampleRate: number;
+      thresholds: PerformanceThresholds;
     };
-    /**
-     * 系统资源状态
-     */
     resources: {
       memoryUsage?: number;
       cpuUsage?: number;
     };
-    /**
-     * 组件状态
-     */
     components: {
       cache: boolean;
       storage: boolean;
       encryption: boolean;
     };
   };
-  /**
-   * 健康检查消息
-   */
   message: string;
 }
 
-/**
- * 性能统计信息
- */
-export interface PerformanceStats {
-  /**
-   * 操作总数
-   */
-  totalOperations: number;
-  /**
-   * 成功操作数
-   */
-  successfulOperations: number;
-  /**
-   * 失败操作数
-   */
-  failedOperations: number;
-  /**
-   * 平均耗时（毫秒）
-   */
-  averageDuration: number;
-  /**
-   * 最小耗时（毫秒）
-   */
-  minDuration: number;
-  /**
-   * 最大耗时（毫秒）
-   */
-  maxDuration: number;
-  /**
-   * 总耗时（毫秒）
-   */
-  totalDuration: number;
-  /**
-   * 成功率（百分比）
-   */
-  successRate: number;
-}
+const DEFAULT_MAX_RECORDS = 1000;
+const DEFAULT_SAMPLE_RATE = 0.1;
+const DEFAULT_THRESHOLDS: PerformanceThresholds = {
+  minSuccessRate: 90,
+  maxAverageDuration: 1000,
+  maxP95Duration: 3000,
+};
 
-/**
- * 性能监控器类
- * 用于收集和统计性能指标
- */
+const quantile = (values: number[], ratio: number): number => {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.max(0, Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1));
+  return sorted[index] ?? 0;
+};
+
+const emptyStats = (): PerformanceStats => ({
+  totalOperations: 0,
+  successfulOperations: 0,
+  failedOperations: 0,
+  averageDuration: 0,
+  minDuration: 0,
+  maxDuration: 0,
+  totalDuration: 0,
+  successRate: 0,
+  p50Duration: 0,
+  p95Duration: 0,
+  p99Duration: 0,
+  throughputOpsPerSec: 0,
+});
+
+const buildStats = (metrics: PerformanceMetrics[]): PerformanceStats => {
+  if (metrics.length === 0) {
+    return emptyStats();
+  }
+
+  const durations = metrics.map(metric => metric.duration);
+  const successfulOperations = metrics.filter(metric => metric.success).length;
+  const totalDuration = durations.reduce((sum, duration) => sum + duration, 0);
+  const totalOperations = metrics.length;
+
+  return {
+    totalOperations,
+    successfulOperations,
+    failedOperations: totalOperations - successfulOperations,
+    averageDuration: totalDuration / totalOperations,
+    minDuration: Math.min(...durations),
+    maxDuration: Math.max(...durations),
+    totalDuration,
+    successRate: (successfulOperations / totalOperations) * 100,
+    p50Duration: quantile(durations, 0.5),
+    p95Duration: quantile(durations, 0.95),
+    p99Duration: quantile(durations, 0.99),
+    throughputOpsPerSec: totalDuration > 0 ? (totalOperations / totalDuration) * 1000 : 0,
+  };
+};
+
 export class PerformanceMonitor {
-  /**
-   * 性能指标历史记录（保留最近配置的记录数）
-   */
   private metrics: PerformanceMetrics[] = [];
-
-  /**
-   * 最大保留记录数
-   */
   private maxRecords: number;
-
-  /**
-   * 操作统计（按操作类型分组）
-   */
-  private operationStats = new Map<string, PerformanceStats>();
-
-  /**
-   * 是否启用监控
-   */
   private enabled: boolean;
-
-  /**
-   * 指标保留时间（毫秒）
-   */
   private metricsRetention: number;
-
-  /**
-   * 采样率（0-1之间），用于减少性能监控开销
-   * 默认10%采样率，减少90%的指标收集开销
-   */
   private sampleRate: number;
-
-  /**
-   * 清理定时器引用
-   */
+  private thresholds: PerformanceThresholds;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
-  /**
-   * 构造函数
-   */
   constructor() {
-    // Get monitoring parameters from config
     this.enabled = PerformanceMonitor.isPerformanceTrackingEnabled();
-    this.maxRecords = 1000; // Default keep 1000 records
+    this.maxRecords = DEFAULT_MAX_RECORDS;
     this.metricsRetention = PerformanceMonitor.getMetricsRetention();
-    this.sampleRate = 0.1; // Default 10% sampling, reduce 90% metrics overhead
+    this.sampleRate = DEFAULT_SAMPLE_RATE;
+    this.thresholds = { ...DEFAULT_THRESHOLDS };
 
-    // Periodically clean old metrics (disabled in test)
     if (typeof process === 'undefined' || process.env?.NODE_ENV !== 'test') {
       this.startMetricsCleanupTimer();
     }
   }
 
-  /**
-   * 记录性能指标
-   * @param metrics 性能指标
-   */
+  configure(options: PerformanceMonitorOptions): void {
+    if (typeof options.enabled === 'boolean') {
+      this.enabled = options.enabled;
+    }
+
+    if (typeof options.sampleRate === 'number') {
+      this.sampleRate = Math.max(0, Math.min(1, options.sampleRate));
+    }
+
+    if (typeof options.maxRecords === 'number' && Number.isFinite(options.maxRecords)) {
+      this.maxRecords = Math.max(1, Math.floor(options.maxRecords));
+      if (this.metrics.length > this.maxRecords) {
+        this.metrics = this.metrics.slice(this.metrics.length - this.maxRecords);
+      }
+    }
+
+    if (typeof options.metricsRetention === 'number' && Number.isFinite(options.metricsRetention)) {
+      this.metricsRetention = Math.max(0, options.metricsRetention);
+    }
+
+    if (options.thresholds) {
+      this.thresholds = {
+        ...this.thresholds,
+        ...options.thresholds,
+      };
+    }
+  }
+
+  resetRuntimeOptions(): void {
+    this.enabled = PerformanceMonitor.isPerformanceTrackingEnabled();
+    this.maxRecords = DEFAULT_MAX_RECORDS;
+    this.metricsRetention = PerformanceMonitor.getMetricsRetention();
+    this.sampleRate = DEFAULT_SAMPLE_RATE;
+    this.thresholds = { ...DEFAULT_THRESHOLDS };
+  }
+
   record(metrics: PerformanceMetrics): void {
     if (!this.enabled) {
       return;
     }
 
-    // Sampling strategy: record partial metrics, reduce 90% overhead
     if (Math.random() > this.sampleRate) {
       return;
     }
 
-    // Add到历史记录
     this.metrics.push(metrics);
 
-    // Limit record count
     if (this.metrics.length > this.maxRecords) {
-      this.metrics.shift();
+      this.metrics.splice(0, this.metrics.length - this.maxRecords);
+    }
+  }
+
+  getMetrics(filter?: Partial<Pick<PerformanceMetrics, 'operation' | 'group' | 'channel' | 'profile' | 'provider'>>): PerformanceMetrics[] {
+    if (!filter) {
+      return [...this.metrics];
     }
 
-    // Update操作统计
-    this.updateOperationStats(metrics);
+    return this.metrics.filter(metric => {
+      return Object.entries(filter).every(([key, value]) => metric[key as keyof PerformanceMetrics] === value);
+    });
   }
 
-  /**
-   * 更新操作统计
-   */
-  private updateOperationStats(metrics: PerformanceMetrics): void {
-    const stats = this.operationStats.get(metrics.operation) || {
-      totalOperations: 0,
-      successfulOperations: 0,
-      failedOperations: 0,
-      averageDuration: 0,
-      minDuration: Infinity,
-      maxDuration: 0,
-      totalDuration: 0,
-      successRate: 0,
-    };
-
-    stats.totalOperations++;
-    if (metrics.success) {
-      stats.successfulOperations++;
-    } else {
-      stats.failedOperations++;
-    }
-
-    stats.totalDuration += metrics.duration;
-    stats.averageDuration = stats.totalDuration / stats.totalOperations;
-    stats.minDuration = Math.min(stats.minDuration, metrics.duration);
-    stats.maxDuration = Math.max(stats.maxDuration, metrics.duration);
-    stats.successRate = (stats.successfulOperations / stats.totalOperations) * 100;
-
-    this.operationStats.set(metrics.operation, stats);
-  }
-
-  /**
-   * 获取所有性能指标
-   */
-  getMetrics(): PerformanceMetrics[] {
-    return [...this.metrics];
-  }
-
-  /**
-   * 获取操作统计信息
-   */
   getOperationStats(operation?: string): PerformanceStats | Map<string, PerformanceStats> {
     if (operation) {
-      return (
-        this.operationStats.get(operation) || {
-          totalOperations: 0,
-          successfulOperations: 0,
-          failedOperations: 0,
-          averageDuration: 0,
-          minDuration: 0,
-          maxDuration: 0,
-          totalDuration: 0,
-          successRate: 0,
-        }
-      );
+      return buildStats(this.metrics.filter(metric => metric.operation === operation));
     }
-    return new Map(this.operationStats);
+
+    const grouped = new Map<string, PerformanceStats>();
+    const operations = Array.from(new Set(this.metrics.map(metric => metric.operation)));
+
+    operations.forEach(name => {
+      grouped.set(name, buildStats(this.metrics.filter(metric => metric.operation === name)));
+    });
+
+    return grouped;
   }
 
-  /**
-   * 获取总体统计信息
-   */
+  getGroupStats(group?: string): PerformanceStats | Map<string, PerformanceStats> {
+    if (group) {
+      return buildStats(this.metrics.filter(metric => metric.group === group));
+    }
+
+    const grouped = new Map<string, PerformanceStats>();
+    const groups = Array.from(new Set(this.metrics.map(metric => metric.group).filter((value): value is string => Boolean(value))));
+
+    groups.forEach(name => {
+      grouped.set(name, buildStats(this.metrics.filter(metric => metric.group === name)));
+    });
+
+    return grouped;
+  }
+
   getOverallStats(): PerformanceStats {
-    const allMetrics = this.metrics;
-    if (allMetrics.length === 0) {
-      return {
-        totalOperations: 0,
-        successfulOperations: 0,
-        failedOperations: 0,
-        averageDuration: 0,
-        minDuration: 0,
-        maxDuration: 0,
-        totalDuration: 0,
-        successRate: 0,
-      };
-    }
-
-    const successful = allMetrics.filter(m => m.success).length;
-    const totalDuration = allMetrics.reduce((sum, m) => sum + m.duration, 0);
-    const durations = allMetrics.map(m => m.duration);
-
-    return {
-      totalOperations: allMetrics.length,
-      successfulOperations: successful,
-      failedOperations: allMetrics.length - successful,
-      averageDuration: totalDuration / allMetrics.length,
-      minDuration: Math.min(...durations),
-      maxDuration: Math.max(...durations),
-      totalDuration,
-      successRate: (successful / allMetrics.length) * 100,
-    };
+    return buildStats(this.metrics);
   }
 
-  /**
-   * 定期清理旧指标
-   */
+  getThresholds(): PerformanceThresholds {
+    return { ...this.thresholds };
+  }
+
+  getSampleRate(): number {
+    return this.sampleRate;
+  }
+
   private startMetricsCleanupTimer(): void {
-    const cleanupInterval = 60000; // Clean up every minute
     this.cleanupTimer = setInterval(() => {
       this.cleanupOldMetrics();
-    }, cleanupInterval);
+    }, 60000);
   }
 
-  /**
-   * 停止清理定时器
-   */
   stopMetricsCleanupTimer(): void {
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
@@ -314,93 +269,42 @@ export class PerformanceMonitor {
     }
   }
 
-  /**
-   * 销毁监控器，释放资源
-   */
   destroy(): void {
     this.stopMetricsCleanupTimer();
     this.clear();
+    this.resetRuntimeOptions();
   }
 
-  /**
-   * 清理超过保留时间的旧指标
-   */
   private cleanupOldMetrics(): void {
-    const now = Date.now();
-    const cutoffTime = now - this.metricsRetention;
-
-    // Filter掉超过保留时间的指标
+    const cutoffTime = Date.now() - this.metricsRetention;
     this.metrics = this.metrics.filter(metric => metric.timestamp >= cutoffTime);
-
-    // If metrics reduced after cleanup, recalculate stats
-    this.recalculateOperationStats();
   }
 
-  /**
-   * 重新计算操作统计
-   */
-  private recalculateOperationStats(): void {
-    // Clear old statistics
-    this.operationStats.clear();
-
-    // Recalculate all metrics statistics
-    for (const metric of this.metrics) {
-      this.updateOperationStats(metric);
-    }
-  }
-
-  /**
-   * 清除所有指标
-   */
   clear(): void {
     this.metrics = [];
-    this.operationStats.clear();
   }
 
-  /**
-   * 启用/禁用监控
-   */
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
   }
 
-  /**
-   * 是否启用监控
-   */
   isEnabled(): boolean {
     return this.enabled;
   }
 
-  /**
-   * 从配置文件获取是否启用性能跟踪
-   * @returns 是否启用性能跟踪
-   */
   static isPerformanceTrackingEnabled(): boolean {
     return configManager.getConfig().monitoring?.enablePerformanceTracking !== false;
   }
 
-  /**
-   * 从配置文件获取是否启用健康检查
-   * @returns 是否启用健康检查
-   */
   static isHealthChecksEnabled(): boolean {
     return configManager.getConfig().monitoring?.enableHealthChecks !== false;
   }
 
-  /**
-   * 从配置文件获取指标保留时间
-   * @returns 指标保留时间（毫秒）
-   */
   static getMetricsRetention(): number {
-    return configManager.getConfig().monitoring?.metricsRetention || 86400000; // Default 24 hours
+    return configManager.getConfig().monitoring?.metricsRetention || 86400000;
   }
 
-  /**
-   * 执行健康检查
-   * @returns 健康检查结果
-   */
   performHealthCheck(): HealthCheckResult {
-    // Check if health checks are enabled in config
     if (!PerformanceMonitor.isHealthChecksEnabled()) {
       return {
         timestamp: Date.now(),
@@ -408,7 +312,10 @@ export class PerformanceMonitor {
         details: {
           performance: {
             averageDuration: 0,
+            p95Duration: 0,
             successRate: 100,
+            sampleRate: this.sampleRate,
+            thresholds: this.getThresholds(),
           },
           resources: {},
           components: {
@@ -421,47 +328,42 @@ export class PerformanceMonitor {
       };
     }
 
-    // Get overall performance stats
     const stats = this.getOverallStats();
+    const thresholds = this.getThresholds();
+    const performanceHealthy =
+      stats.successRate >= thresholds.minSuccessRate
+      && stats.averageDuration <= thresholds.maxAverageDuration
+      && stats.p95Duration <= thresholds.maxP95Duration;
 
-    // Basic health checks
-    const healthy = {
-      performance: stats.successRate >= 90 && stats.averageDuration < 1000, // 90% success rate and <1s average duration
-      components: true, // Assume components are healthy for now
-    };
-
-    // Check system resources if available
     const resources = {
       memoryUsage:
         typeof process !== 'undefined' && process.memoryUsage
           ? Math.round((process.memoryUsage().heapUsed / process.memoryUsage().heapTotal) * 100) / 100
           : undefined,
-      cpuUsage: undefined, // CPU usage is complex to calculate in Node.js
+      cpuUsage: undefined,
     };
-
-    const isHealthy = healthy.performance && healthy.components;
 
     return {
       timestamp: Date.now(),
-      healthy: isHealthy,
+      healthy: performanceHealthy,
       details: {
         performance: {
           averageDuration: stats.averageDuration,
+          p95Duration: stats.p95Duration,
           successRate: stats.successRate,
+          sampleRate: this.sampleRate,
+          thresholds,
         },
-        resources: resources,
+        resources,
         components: {
           cache: true,
           storage: true,
           encryption: true,
         },
       },
-      message: isHealthy ? 'System is healthy' : 'System health check failed',
+      message: performanceHealthy ? 'System is healthy' : 'System health check failed',
     };
   }
 }
 
-/**
- * 全局性能监控器实例
- */
 export const performanceMonitor = new PerformanceMonitor();

@@ -9,7 +9,16 @@
 import { plainStorage, dbManager } from './core/db';
 import { configManager, ConfigManager } from './core/config/ConfigManager';
 import { performanceMonitor } from './core/monitor/PerformanceMonitor';
-import { getKeyCacheStats, getKeyCacheHitRate } from './utils/crypto';
+import {
+  decrypt,
+  decryptBulk,
+  encrypt,
+  encryptBulk,
+  generateHash as hash,
+  getKeyCacheHitRate,
+  getKeyCacheStats,
+  resetMasterKey,
+} from './utils/crypto';
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult, TableOptions } from './types/storageTypes';
 import type { PerformanceStats, HealthCheckResult } from './core/monitor/PerformanceMonitor';
 import type { KeyCacheStats } from './utils/crypto';
@@ -43,6 +52,18 @@ export type { PerformanceStats, HealthCheckResult };
 export { getKeyCacheStats, getKeyCacheHitRate };
 export type { KeyCacheStats };
 export { CryptoService };
+
+export const init = async (options: TableOptions = {}): Promise<void> => {
+  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
+  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess) as any;
+
+  if (typeof adapter.ensureInitialized === 'function') {
+    await adapter.ensureInitialized();
+    return;
+  }
+
+  await adapter.listTables?.(options);
+};
 
 /**
  * Create table
@@ -496,24 +517,8 @@ export const clearTable = async (tableName: string, options: TableOptions = {}):
   return adapter.clearTable(tableName);
 };
 
-// Export types
-export type {
-  CreateTableOptions,
-  ReadOptions,
-  WriteOptions,
-  WriteResult,
-  CommonOptions,
-  TableOptions,
-  FindOptions,
-  FilterCondition,
-} from './types/storageTypes';
-
-export { StorageError } from './types/storageErrorInfc';
-export { StorageErrorCode } from './types/storageErrorCode';
-export type { LiteStoreConfig, DeepPartial } from './types/config';
-export { CryptoError } from './utils/crypto-errors';
-
-export default {
+export const db = {
+  init,
   createTable,
   deleteTable,
   hasTable,
@@ -533,4 +538,52 @@ export default {
   migrateToChunked,
   clearTable,
   update,
+} as const;
+
+// Export types
+export type {
+  CreateTableOptions,
+  ReadOptions,
+  WriteOptions,
+  WriteResult,
+  CommonOptions,
+  TableOptions,
+  FindOptions,
+  FilterCondition,
+} from './types/storageTypes';
+
+export { StorageError } from './types/storageErrorInfc';
+export { StorageErrorCode } from './types/storageErrorCode';
+export type { LiteStoreConfig, DeepPartial } from './types/config';
+export { CryptoError } from './utils/crypto-errors';
+export { encrypt, decrypt, encryptBulk, decryptBulk, hash, resetMasterKey };
+
+export default {
+  init,
+  db,
+  createTable,
+  deleteTable,
+  hasTable,
+  listTables,
+  insert,
+  overwrite,
+  read,
+  countTable,
+  verifyCountTable,
+  findOne,
+  findMany,
+  remove,
+  bulkWrite,
+  beginTransaction,
+  commit,
+  rollback,
+  migrateToChunked,
+  clearTable,
+  update,
+  encrypt,
+  decrypt,
+  encryptBulk,
+  decryptBulk,
+  hash,
+  resetMasterKey,
 } as const;

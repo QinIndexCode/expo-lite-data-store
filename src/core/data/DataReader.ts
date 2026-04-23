@@ -9,7 +9,8 @@ import { configManager } from '../config/ConfigManager';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
 import type { ReadOptions } from '../../types/storageTypes';
 import { ErrorHandler as StorageErrorHandler } from '../../utils/StorageErrorHandler';
-import ROOT from '../../utils/ROOTPath';
+import { getFileSystem } from '../../utils/fileSystemCompat';
+import { getRootPathSync } from '../../utils/ROOTPath';
 import withTimeout from '../../utils/withTimeout';
 import { CacheManager } from '../cache/CacheManager';
 import { ChunkedFileHandler } from '../file/ChunkedFileHandler';
@@ -29,12 +30,88 @@ export class DataReader {
   }
 
   private getSingleFile(tableName: string): SingleFileHandler {
-    const filePath = `${ROOT}${tableName}.ldb`;
+    const filePath = `${getRootPathSync()}${tableName}.ldb`;
     return new SingleFileHandler(filePath);
   }
 
   private getChunkedHandler(tableName: string): ChunkedFileHandler {
     return new ChunkedFileHandler(tableName, this.metadataManager);
+  }
+
+  private async recoverMissingTableMetadata(tableName: string) {
+    const rootPath = getRootPathSync();
+    const fileSystem = getFileSystem();
+    const singleFilePath = `${rootPath}${tableName}.ldb`;
+    const singleInfo = await fileSystem.getInfoAsync(singleFilePath);
+
+    if (singleInfo.exists) {
+      const rawContent = await withTimeout(
+        fileSystem.readAsStringAsync(singleFilePath),
+        10000,
+        `recover single file metadata ${tableName}`
+      );
+      const parsed = JSON.parse(rawContent);
+      if (!parsed || !Array.isArray(parsed.data) || parsed.hash === undefined) {
+        return undefined;
+      }
+
+      const recoveredData = await withTimeout(
+        this.getSingleFile(tableName).read(),
+        10000,
+        `recover single file table ${tableName}`
+      );
+      if (parsed.data.length > 0 && recoveredData.length === 0) {
+        return undefined;
+      }
+
+      this.metadataManager.update(tableName, {
+        mode: 'single',
+        path: `${tableName}.ldb`,
+        count: recoveredData.length,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        columns: {},
+      });
+
+      return this.metadataManager.get(tableName);
+    }
+
+    const chunkedDirPath = `${rootPath}${tableName}/`;
+    const chunkedInfo = await fileSystem.getInfoAsync(chunkedDirPath);
+    if (!chunkedInfo.exists) {
+      return undefined;
+    }
+
+    const chunkEntries = await withTimeout(
+      fileSystem.readDirectoryAsync(chunkedDirPath),
+      10000,
+      `recover chunked metadata ${tableName}`
+    );
+    const chunkFiles = chunkEntries.filter(entry => entry.endsWith('.ldb')).sort();
+    if (chunkFiles.length === 0) {
+      return undefined;
+    }
+
+    const recoveredData = await withTimeout(
+      this.getChunkedHandler(tableName).readAll(),
+      10000,
+      `recover chunked table ${tableName}`
+    );
+    if (recoveredData.length === 0) {
+      return undefined;
+    }
+
+    this.metadataManager.update(tableName, {
+      mode: 'chunked',
+      path: `${tableName}/`,
+      count: recoveredData.length,
+      chunks: chunkFiles.length,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      columns: {},
+    });
+
+    return this.metadataManager.get(tableName);
   }
 
   /**
@@ -63,7 +140,7 @@ export class DataReader {
   async read(tableName: string, options?: ReadOptions & { bypassCache?: boolean }): Promise<Record<string, any>[]> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
-        const tableMeta = this.metadataManager.get(tableName);
+        const tableMeta = this.metadataManager.get(tableName) ?? (await this.recoverMissingTableMetadata(tableName));
         if (!tableMeta) {
           return [];
         }

@@ -1,4 +1,6 @@
-<!-- 更新日志 -->
+# 更新日志
+
+[English](./updatelog.md) | [English Alias](./updatelog.en.md) | [消费者文档](../README.zh-CN.md)
 
 ### 📅 2026-04-02 `v2.0.0-beta.5` 加密方案升级与架构优化
 

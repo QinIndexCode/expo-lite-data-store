@@ -2,20 +2,17 @@
  * @module SingleFileHandler
  * @description Single file handler for small data storage with atomic writes
  * @since 2025-11-28
- * @version 1.0.0
+ * @version 2.0.0
  */
 
-import * as FileSystem from 'expo-file-system';
-import { FileInfo, EncodingType } from 'expo-file-system';
 import { StorageError } from '../../types/storageErrorInfc';
+import { getEncodingType, getFileSystem } from '../../utils/fileSystemCompat';
 import withTimeout from '../../utils/withTimeout';
 import { FileHandlerBase } from './FileHandlerBase';
 import logger from '../../utils/logger';
 
 /**
- * 单文件处理器类
- * 处理单文件存储模式的文件操作，包括数据的写入、读取和删除
- * 继承自FileHandlerBase，实现了单文件存储的核心逻辑
+ * Single file handler for smaller tables.
  */
 export class SingleFileHandler extends FileHandlerBase {
   constructor(private filePath: string) {
@@ -24,52 +21,44 @@ export class SingleFileHandler extends FileHandlerBase {
 
   async write(data: Record<string, any>[]) {
     try {
-      // Use base class validation method
       this.validateArrayData(data);
 
       const hash = await this.computeHash(data);
       const content = JSON.stringify({ data, hash });
 
-      // Retry机制，最多重试3次
       let retries = 3;
-      let lastError: any;
+      let lastError: unknown;
 
       while (retries > 0) {
         try {
-          // Atomic write: Write to temp file, then rename
           const tempFilePath = `${this.filePath}.tmp`;
 
           await withTimeout(
-            FileSystem.writeAsStringAsync(tempFilePath, content, { encoding: EncodingType.UTF8 }),
+            getFileSystem().writeAsStringAsync(tempFilePath, content, { encoding: getEncodingType().UTF8 }),
             10000,
             `write temp file ${tempFilePath}`
           );
 
-          // Rename temp file to target for atomic write
           await withTimeout(
-            FileSystem.moveAsync({ from: tempFilePath, to: this.filePath }),
+            getFileSystem().moveAsync({ from: tempFilePath, to: this.filePath }),
             10000,
             `rename temp file to ${this.filePath}`
           );
 
-          // Write success后清除缓存
           this.clearFileInfoCache(this.filePath);
-          return; // Succeed写入，退出重试循环
+          return;
         } catch (error: any) {
           lastError = error;
           retries--;
 
-          // If file locked error, wait and retry
-          if (error.message && (error.message.includes('locked') || error.message.includes('busy'))) {
-            await new Promise(resolve => setTimeout(resolve, 100)); // Wait100ms后重试
+          if (error?.message && (error.message.includes('locked') || error.message.includes('busy'))) {
+            await new Promise(resolve => setTimeout(resolve, 100));
           } else {
-            // Other errors, throw directly
             throw error;
           }
         }
       }
 
-      // Retry次数用尽，抛出最后一次错误
       throw lastError;
     } catch (error) {
       throw this.formatWriteError(`FILE_WRITE_ERROR: ${this.filePath}:`, error);
@@ -78,11 +67,11 @@ export class SingleFileHandler extends FileHandlerBase {
 
   async read(): Promise<Record<string, any>[]> {
     try {
-      const info: FileInfo = await super.getFileInfo(this.filePath);
+      const info = await super.getFileInfo(this.filePath);
       if (!info.exists) return [];
 
       const text = await withTimeout(
-        FileSystem.readAsStringAsync(this.filePath, { encoding: FileSystem.EncodingType.UTF8 }),
+        getFileSystem().readAsStringAsync(this.filePath, { encoding: getEncodingType().UTF8 }),
         10000,
         `read ${this.filePath} content`
       );
@@ -122,11 +111,9 @@ export class SingleFileHandler extends FileHandlerBase {
 
   async delete() {
     try {
-      const info: FileInfo = await super.getFileInfo(this.filePath);
+      const info = await super.getFileInfo(this.filePath);
       if (info.exists) {
-        await withTimeout(FileSystem.deleteAsync(this.filePath), 10000, `delete ${this.filePath}`);
-
-        // Delete success后清除缓存
+        await withTimeout(getFileSystem().deleteAsync(this.filePath), 10000, `delete ${this.filePath}`);
         this.clearFileInfoCache(this.filePath);
       }
     } catch (error) {

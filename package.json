@@ -5,8 +5,15 @@
   "types": "dist/types/index.d.ts",
   "author": "QinIndexCode",
   "license": "MIT",
-  "description": "A lite data store for Expo; Detail in https://github.com/QinIndexCode/expo-lite-data-store. **Note:** All scripts in this package.json are for development purposes only and may not work in production environments.",
-  "versionDescription": "Major release with enhanced encryption, improved field-level encryption logic, and various performance optimizations.",
+  "description": "Local structured storage for Expo applications with runtime-tested Expo Go and native support.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QinIndexCode/expo-lite-data-store.git"
+  },
+  "homepage": "https://github.com/QinIndexCode/expo-lite-data-store#readme",
+  "bugs": {
+    "url": "https://github.com/QinIndexCode/expo-lite-data-store/issues"
+  },
   "keywords": [
     "expo",
     "data store",
@@ -40,10 +47,19 @@
       "require": "./dist/cjs/*"
     },
     "./utils/*": {
-      "import": "./dist/js/utils/*",
-      "require": "./dist/cjs/utils/*"
+      "types": "./dist/types/utils/*.d.ts",
+      "import": "./dist/js/utils/*.js",
+      "require": "./dist/cjs/utils/*.js"
     }
   },
+  "files": [
+    "dist",
+    "docs",
+    "README.md",
+    "README.en.md",
+    "README.zh-CN.md",
+    "LICENSE.txt"
+  ],
   "scripts": {
     "build": "npm run build:all",
     "build:js": "tsc -p tsconfig.js.json",
@@ -69,28 +85,50 @@
     "format": "prettier --write . --ignore-path .prettierignore",
     "format:check": "prettier --check . --ignore-path .prettierignore",
     "typecheck": "tsc --noEmit",
+    "smoke:expo-consumer": "node ./scripts/smoke-expo-consumer.cjs",
+    "qa:expo-go:contract": "node ./scripts/expo-runtime-qa.cjs --layers=contract",
+    "qa:expo-go": "node ./scripts/expo-runtime-qa.cjs --layers=contract,runtime",
+    "qa:expo-go:full": "node ./scripts/expo-runtime-qa.cjs --layers=contract,runtime,soak --soak-minutes=30",
+    "qa:expo-go:mumu": "node ./scripts/mumu-expo-qa.cjs run-qa --repo . --layers contract,runtime --channels single-package,managed-compatible --cleanup-consumers",
+    "qa:expo-go:mumu:full": "node ./scripts/mumu-expo-qa.cjs run-qa --repo . --layers contract,runtime,soak --channels single-package,managed-compatible --soak-minutes 30 --cleanup-consumers",
+    "qa:flagship:native": "node ./scripts/mumu-expo-qa.cjs run-qa --repo . --layers contract,runtime --channels managed-compatible --cleanup-consumers --extra-arg=--profiles=native-quick-crypto",
+    "qa:baseline:expo-go": "npm run qa:expo-go:mumu",
+    "qa:baseline:native-flagship": "npm run qa:flagship:native",
+    "qa:baseline:release": "npm run qa:baseline:expo-go && npm run qa:baseline:native-flagship",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run build:all && npm run typecheck",
+    "prepublishOnly": "npm run build:all && npm run typecheck && npm run smoke:expo-consumer",
     "publish:safe": "npm run build && npm run typecheck && npm publish",
     "publish:force": "npm publish --ignore-scripts"
   },
   "dependencies": {
     "@noble/ciphers": "~0.6.0",
     "@noble/hashes": "~1.8.0",
-    "bcryptjs": "~2.4.3",
-    "expo-constants": "~18.0.12",
-    "expo-crypto": "~15.0.8",
-    "expo-file-system": "~18.1.11",
-    "expo-secure-store": "~15.0.8"
+    "bcryptjs": "~2.4.3"
   },
   "peerDependencies": {
-    "expo": ">=50.0.0",
-    "react": ">=18.0.0",
-    "react-native": ">=0.73.0",
+    "expo": ">=54 <55",
+    "expo-constants": "~18.0.13",
+    "expo-crypto": "~15.0.8",
+    "expo-file-system": "~19.0.21",
+    "expo-secure-store": "~15.0.8",
+    "react": ">=19.1.0 <20",
+    "react-native": ">=0.81.0 <0.82",
     "react-native-quick-crypto": ">=1.0.0"
   },
   "peerDependenciesMeta": {
     "expo": {
+      "optional": false
+    },
+    "expo-constants": {
+      "optional": false
+    },
+    "expo-crypto": {
+      "optional": false
+    },
+    "expo-file-system": {
+      "optional": false
+    },
+    "expo-secure-store": {
       "optional": false
     },
     "react": {
@@ -102,6 +140,35 @@
     "react-native-quick-crypto": {
       "optional": true
     }
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^24.10.1",
+    "@types/react": "~19.1.10",
+    "@typescript-eslint/eslint-plugin": "^8.48.1",
+    "@typescript-eslint/parser": "^8.48.1",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "expo": "~54.0.33",
+    "expo-constants": "~18.0.13",
+    "expo-crypto": "~15.0.8",
+    "expo-file-system": "~19.0.21",
+    "expo-secure-store": "~15.0.8",
+    "globals": "^16.5.0",
+    "jest": "^29.7.0",
+    "jiti": "^2.6.1",
+    "prettier": "^3.3.3",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "rimraf": "^6.1.2",
+    "ts-jest": "^29.4.5",
+    "typescript": "~5.9.2",
+    "typescript-eslint": "^8.48.1"
   },
   "private": false
 }

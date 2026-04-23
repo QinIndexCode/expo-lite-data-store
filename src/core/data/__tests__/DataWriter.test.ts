@@ -136,6 +136,39 @@ describe('DataWriter', () => {
       expect(result.written).toBe(3);
       expect(result.totalAfterWrite).toBe(3);
     });
+
+    it('should serialize concurrent writes to the same table without losing records', async () => {
+      await dataWriter.createTable(testTableName, {
+        mode: 'single',
+        columns: {
+          id: 'string',
+          name: 'string',
+          age: 'number',
+        },
+      });
+
+      const writeResults = await Promise.all(
+        Array.from({ length: 25 }).map((_, index) =>
+          dataWriter.write(testTableName, {
+            id: `concurrent-${index}`,
+            name: `user-${index}`,
+            age: index,
+          })
+        )
+      );
+
+      expect(writeResults.every(result => result.written === 1)).toBe(true);
+
+      const verified = await dataWriter.verifyCount(testTableName);
+      expect(verified).toEqual({
+        metadata: 25,
+        actual: 25,
+        match: true,
+      });
+
+      const count = await dataWriter.count(testTableName);
+      expect(count).toBe(25);
+    });
   });
 
   describe('delete', () => {
@@ -215,6 +248,34 @@ describe('DataWriter', () => {
 
       // Check result
       expect(count).toBe(0);
+    });
+  });
+
+  describe('verifyCount', () => {
+    it('should return metadata and actual counts separately and repair metadata drift', async () => {
+      await dataWriter.createTable(testTableName, {
+        mode: 'single',
+        columns: {
+          id: 'string',
+          name: 'string',
+        },
+      });
+
+      await dataWriter.write(testTableName, [
+        { id: '1', name: 'Alice' },
+        { id: '2', name: 'Bob' },
+      ]);
+
+      metadataManager.update(testTableName, { count: 99 });
+
+      const result = await dataWriter.verifyCount(testTableName);
+
+      expect(result).toEqual({
+        metadata: 99,
+        actual: 2,
+        match: false,
+      });
+      expect(metadataManager.count(testTableName)).toBe(2);
     });
   });
 

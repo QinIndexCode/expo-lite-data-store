@@ -1,108 +1,131 @@
-# expo-lite-data-store 🍃
+# expo-lite-data-store
 
-> A lightweight, secure local data store for Expo/React Native applications.
+Local structured storage for Expo applications, with runtime-tested support for Expo Go and managed apps on Expo SDK 54.
 
-[![npm version](https://img.shields.io/npm/v/expo-lite-data-store?color=%23ff5555)](https://www.npmjs.com/package/expo-lite-data-store)
-[![GitHub license](https://img.shields.io/github/license/QinIndexCode/expo-lite-data-store)](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/LICENSE.txt)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-blue.svg)](https://www.typescriptlang.org/)
-[![React Native](https://img.shields.io/badge/React%20Native-0.73+-blue.svg)](https://reactnative.dev/)
-[![Expo](https://img.shields.io/badge/Expo-50.0+-blue.svg)](https://expo.dev/)
+[简体中文](./README.zh-CN.md) | [English Alias](./README.en.md) | [API Reference](./docs/API.md) | [Runtime QA Guide](./docs/EXPO_RUNTIME_QA.md) | [Changelog](./docs/CHANGELOG.md)
 
----
+## Support Matrix
 
-## Quick Start
+| Surface | Status |
+| --- | --- |
+| Expo SDK | `54.x` |
+| React | `19.1.x` |
+| React Native | `0.81.x` |
+| Managed apps | Supported |
+| Expo Go | Supported for the documented contract below |
+| Native dev client / standalone app | Supported; recommended for native performance validation |
+
+## Installation
+
+Install the package together with its required Expo peer dependencies inside the consumer application:
 
 ```bash
-npm install expo-lite-data-store
+npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store
 ```
 
-```typescript
+`react-native-quick-crypto` is an optional peer dependency. Install it only when the application is expected to run with the native flagship crypto provider in a development build or standalone app.
+
+The published package ships compiled runtime bundles and type declarations. Expo runtime modules remain peer dependencies so the consumer application retains control over its native dependency tree.
+
+### Installation Contract
+
+| Contract | Status | Notes |
+| --- | --- | --- |
+| `npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store` | Supported | Required managed-compatible contract for Expo SDK 54 |
+| Previous command plus `react-native-quick-crypto` | Supported | Required for native flagship validation in a dev client or standalone build |
+| `npm install expo-lite-data-store` only | Not supported | May leave Expo peer dependencies missing or version-misaligned |
+
+The package metadata intentionally keeps Expo runtime modules in `peerDependencies`. This is the correct model for Expo libraries, but it also means the supported consumer workflow is the explicit `expo install` command above rather than a package-manager-only install.
+
+## Minimal Example
+
+```ts
 import { db } from 'expo-lite-data-store';
 
 await db.init();
-await db.createTable('users', { columns: { name: 'string', email: 'string' } });
-await db.insert('users', { name: 'Alice', email: 'alice@example.com' });
-const users = await db.findMany('users', { name: 'Alice' });
+
+await db.createTable('users', {
+  columns: {
+    id: 'string',
+    name: 'string',
+    email: 'string',
+  },
+});
+
+await db.insert('users', {
+  id: '1',
+  name: 'Alice',
+  email: 'alice@example.com',
+});
+
+const user = await db.findOne('users', {
+  where: { id: '1' },
+});
 ```
 
-## Core Features
+`db.init()` is optional and idempotent. All public APIs follow the same lazy-initialization path on first real use.
 
-| Feature | Description |
-|---------|-------------|
-| 🚀 **Zero Configuration** | Works out of the box with Expo Go |
-| 🔒 **AES-256-GCM Encryption** | NIST SP 800-38D compliant, PBKDF2 + HKDF two-tier key derivation |
-| 📦 **Intelligent Chunking** | Automatically handles >5MB files |
-| 🔄 **Transaction Support** | ACID-compliant transactions with rollback |
-| 📝 **TypeScript Native** | Complete type definitions |
-| 🔍 **Advanced Queries** | $eq, $ne, $gt, $lt, $in, $like, $and, $or operators |
-| 📱 **Fully Offline** | 100% local data storage |
-| 🎯 **Smart Sorting** | 5 algorithms, auto-selected based on data size |
-| ⏰ **Auto Sync** | Periodic dirty data synchronization |
-| 📊 **Performance Monitoring** | Built-in metrics and health checks |
+## Runtime Contract
+
+### Lazy initialization
+
+- Importing the package must not require storage access or Expo native modules immediately.
+- Storage adapters, runtime monitors, and auxiliary services initialize lazily through `db.init()` or the first storage operation.
+
+### Storage folder
+
+- Default root folder: `lite-data-store`
+- Storage folder overrides are supported through `configManager.updateConfig({ storageFolder: 'custom-folder' })`
+- Existing data under the legacy root `expo-lite-data` is migrated automatically when the default root does not already exist
+
+Example:
+
+```ts
+import { configManager } from 'expo-lite-data-store';
+
+configManager.updateConfig({
+  storageFolder: 'my-app-store',
+});
+```
+
+### Compatibility with existing on-device data
+
+Existing beta artifacts remain readable, including metadata files, table files, chunked tables, and encrypted payload variants already produced by earlier beta builds.
+
+## Security Boundary
+
+- Regular encrypted storage works in Expo Go.
+- `requireAuthOnAccess: true` is strict. When the current runtime cannot enforce per-access authentication, the library throws `AUTH_ON_ACCESS_UNSUPPORTED`.
+- Expo Go is therefore suitable for encrypted storage validation, but not for validating biometric or per-access authentication guarantees.
+- Native-performance validation with `react-native-quick-crypto` belongs in a native dev client or standalone app, not in Expo Go.
+
+## Release Validation
+
+The repository ships explicit QA baselines for release and prepublish validation:
+
+```bash
+npm run qa:baseline:expo-go
+npm run qa:baseline:native-flagship
+```
+
+To run both baselines in sequence:
+
+```bash
+npm run qa:baseline:release
+```
+
+These commands generate artifact bundles under `artifacts/expo-runtime-qa/`. The release source of truth is the generated `summary.json`, not a transient device screenshot or manual clipboard capture.
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) - System architecture and module design
-- [API Reference](docs/API.md) - Complete API documentation
-- [Changelog](docs/CHANGELOG.md) - Version history
-- [Comment Specification](docs/COMMENT_SPECIFICATION.md) - Code comment standards
-- [中文文档](README.zh-CN.md) | [English Detailed Doc](README.en.md)
-
-## Security
-
-- AES-256-GCM encryption (NIST SP 800-38D compliant)
-- PBKDF2 key derivation with 600,000 iterations (OWASP 2026)
-- HKDF for fast per-record key derivation (~3μs vs ~2s)
-- Field-level and table-level encryption
-- Biometric authentication support (optional)
-
-## Performance
-
-| Operation | Time |
-|-----------|------|
-| Cache hit read | <1ms |
-| Uncached read (1K records) | 5-20ms |
-| Single write | 10-50ms |
-| Batch write (100 items) | 50-200ms |
-| GCM encryption (first) | ~2s |
-| GCM encryption (subsequent) | ~3μs |
-
-## Expo Go Compatibility
-
-✅ Fully compatible with Expo Go
-✅ Pure JavaScript fallback for crypto operations
-✅ No native dependencies required
-
-## Architecture
-
-```
-Public API Layer (expo-lite-data-store.ts)
-    ↓
-Instance Management (core/db.ts)
-    ↓
-Adapter Layer (FileSystemStorageAdapter / EncryptedStorageAdapter)
-    ↓
-Service Layer (core/service/)
-    ↓
-Core Components (cache, index, meta, query, data, file)
-    ↓
-File System Layer (expo-file-system)
-```
+- Consumer and maintainer API reference: [docs/API.md](./docs/API.md)
+- Simplified Chinese API reference: [docs/API.zh-CN.md](./docs/API.zh-CN.md)
+- Runtime QA process, lanes, verdict semantics, and artifact layout: [docs/EXPO_RUNTIME_QA.md](./docs/EXPO_RUNTIME_QA.md)
+- Changelog: [docs/CHANGELOG.md](./docs/CHANGELOG.md)
+- Simplified Chinese changelog: [docs/CHANGELOG.zh-CN.md](./docs/CHANGELOG.zh-CN.md)
+- Architecture notes: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+- Simplified Chinese guide: [README.zh-CN.md](./README.zh-CN.md)
 
 ## License
 
-[MIT](LICENSE.txt) © QinIndexCode
-
----
-
-## Contributors
-
-Thanks to all contributors!
-
-<a href="https://github.com/QinIndexCode/expo-lite-data-store/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=QinIndexCode/expo-lite-data-store&s=200&columns=12" />
-</a>
-
-Welcome more developers to join and improve the project! 🚀
-
-If you like it, don't forget to give it a ⭐ Star!
+[MIT](./LICENSE.txt)

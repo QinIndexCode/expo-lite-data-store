@@ -1,24 +1,24 @@
-# Expo Lite Data Store API
+# Expo Lite Data Store API 参考
 
-[简体中文](./API.zh-CN.md) | [Consumer Guide](../README.md) | [Runtime QA Guide](./EXPO_RUNTIME_QA.md) | [Changelog](./CHANGELOG.md)
+[English](./API.md) | [消费者文档](../README.zh-CN.md) | [运行时 QA 指南](./EXPO_RUNTIME_QA.zh-CN.md) | [变更日志](./CHANGELOG.zh-CN.md)
 
-## Installation
+## 安装
 
 ```bash
 npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store
 ```
 
-`react-native-quick-crypto` is optional and belongs only in a native dev client or standalone build that needs the native flagship crypto provider.
+`react-native-quick-crypto` 是可选依赖，仅当原生 dev client 或独立构建需要启用原生旗舰加密提供者时才需要安装。
 
-### Supported Install Contract
+### 正式支持的安装契约
 
-- Supported: `npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store`
-- Supported for native flagship validation: the same command plus `react-native-quick-crypto`
-- Not supported: `npm install expo-lite-data-store` as the only installation step
+- 正式支持：`npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store`
+- 用于原生旗舰验证时正式支持：在上一条基础上再安装 `react-native-quick-crypto`
+- 不支持：只执行 `npm install expo-lite-data-store`
 
-Expo runtime packages remain peer dependencies on purpose so the consumer application can keep native versions aligned with Expo SDK 54.
+Expo 运行时模块被保留在 `peerDependencies` 中是有意设计，这样消费应用才能继续与 Expo SDK 54 的原生依赖版本保持对齐。
 
-## Initialization
+## 初始化
 
 ```ts
 import { db } from 'expo-lite-data-store';
@@ -26,8 +26,8 @@ import { db } from 'expo-lite-data-store';
 await db.init();
 ```
 
-- `db.init()` is idempotent
-- `db.init()` is optional because all public APIs auto-initialize
+- `db.init()` 具有幂等性
+- `db.init()` 是可选的，因为所有公开 API 都会在首次真实调用时自动初始化
 
 ## Facade API
 
@@ -153,7 +153,7 @@ await db.bulkWrite('users', [
 ]);
 ```
 
-### Transactions
+### 事务
 
 ```ts
 await db.beginTransaction();
@@ -171,9 +171,9 @@ await db.rollback();
 await db.migrateToChunked('users');
 ```
 
-## Function API
+## 函数式 API
 
-All `db.*` methods also exist as top-level exports:
+所有 `db.*` 方法也都以顶层导出形式提供：
 
 - `init`
 - `createTable`
@@ -196,7 +196,7 @@ All `db.*` methods also exist as top-level exports:
 - `rollback`
 - `migrateToChunked`
 
-## Crypto Helpers
+## 加密辅助函数
 
 ```ts
 import {
@@ -216,16 +216,16 @@ import {
 - `hash(data, algorithm?)`
 - `resetMasterKey()`
 
-## Security Notes
+## 安全说明
 
-- Default encryption for new writes is `AES-GCM`
-- `AES-CTR` is available only for explicit configuration or legacy compatibility
-- `requireAuthOnAccess: true` is strict and throws `AUTH_ON_ACCESS_UNSUPPORTED` if the runtime cannot enforce it
-- Expo Go supports regular encrypted storage, but not strict per-access authentication
+- 新写入数据默认使用 `AES-GCM`
+- `AES-CTR` 只用于显式配置或兼容历史数据
+- `requireAuthOnAccess: true` 采用严格语义；当运行时无法真正强制每次访问都认证时，会抛出 `AUTH_ON_ACCESS_UNSUPPORTED`
+- Expo Go 支持常规加密存储，但不支持严格的逐次访问认证
 
-## Related Documents
+## 相关文档
 
-- Consumer guide: [../README.md](../README.md)
-- Simplified Chinese API reference: [./API.zh-CN.md](./API.zh-CN.md)
-- Runtime QA guide: [./EXPO_RUNTIME_QA.md](./EXPO_RUNTIME_QA.md)
-- Changelog: [./CHANGELOG.md](./CHANGELOG.md)
+- 消费者文档： [../README.zh-CN.md](../README.zh-CN.md)
+- 英文 API 参考： [./API.md](./API.md)
+- 运行时 QA 指南： [./EXPO_RUNTIME_QA.zh-CN.md](./EXPO_RUNTIME_QA.zh-CN.md)
+- 变更日志： [./CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)

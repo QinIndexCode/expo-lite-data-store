@@ -1,5 +1,7 @@
 # 注释规范 / Comment Specification
 
+[English](./COMMENT_SPECIFICATION.md) | [English Alias](./COMMENT_SPECIFICATION.en.md) | [消费者文档](../README.zh-CN.md)
+
 ## 1. 文件头注释 / File Header Comment
 
 每个源文件应包含文件头注释，说明文件用途、创建日期和最后修改日期。

@@ -2,36 +2,69 @@
  * @module PermissionChecker
  * @description Permission checker for file system access validation
  * @since 2025-11-28
- * @version 1.0.0
+ * @version 2.0.0
  */
 
-import * as FileSystem from 'expo-file-system';
-import { EncodingType } from 'expo-file-system';
 import { StorageError } from '../../types/storageErrorInfc';
-import ROOT from '../../utils/ROOTPath';
+import { getEncodingType, getFileSystem } from '../../utils/fileSystemCompat';
+import { ensureStorageRootReady } from '../../utils/ROOTPath';
+
+const formatErrorDetail = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === 'string') {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+};
 
 /**
- * 权限检查器类，用于检查文件系统访问权限
+ * Permission checker for file system access validation.
  */
 export class PermissionChecker {
   /**
-   * 检查文件系统访问权限
+   * Checks whether the storage root is writable.
    */
   async checkPermissions(): Promise<void> {
+    let currentStep = 'bootstrap';
+    let rootPath = '';
+    let tempFilePath = '';
+
     try {
-      // Skip real permission check in test to avoid Expo native API dependency
       if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
         return;
       }
-      // Create临时文件来检查权限
-      const tempFilePath = `${ROOT}/.temp_permission_check`;
-      // Use correctly imported EncodingType.UTF8
-      await FileSystem.writeAsStringAsync(tempFilePath, 'permission check', { encoding: EncodingType.UTF8 });
-      await FileSystem.deleteAsync(tempFilePath);
+
+      const fileSystem = getFileSystem();
+      currentStep = 'ensureStorageRootReady';
+      rootPath = await ensureStorageRootReady();
+
+      currentStep = 'getRootInfo';
+      const rootInfo = await fileSystem.getInfoAsync(rootPath);
+      if (!rootInfo.exists) {
+        currentStep = 'makeRootDirectory';
+        await fileSystem.makeDirectoryAsync(rootPath, { intermediates: true });
+      }
+
+      tempFilePath = `${rootPath}permission-check.tmp`;
+      currentStep = 'writeTempFile';
+      await fileSystem.writeAsStringAsync(tempFilePath, 'permission check', {
+        encoding: getEncodingType().UTF8,
+      });
+
+      currentStep = 'deleteTempFile';
+      await fileSystem.deleteAsync(tempFilePath, { idempotent: true });
     } catch (error) {
       throw new StorageError(`Permission denied when accessing file system`, 'PERMISSION_DENIED', {
         cause: error,
-        details: `Failed to access file system`,
+        details: `Failed during ${currentStep} for rootPath=${rootPath || 'unknown'} tempFilePath=${tempFilePath || 'n/a'}: ${formatErrorDetail(error)}`,
         suggestion: 'Check if your app has permission to access the file system',
       });
     }

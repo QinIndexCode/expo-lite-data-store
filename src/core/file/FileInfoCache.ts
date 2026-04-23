@@ -5,7 +5,7 @@
  * @version 1.0.0
  */
 
-import * as FileSystem from 'expo-file-system';
+import { getFileSystem } from '../../utils/fileSystemCompat';
 
 /**
  * 文件信息缓存类，用于缓存文件信息，减少对文件系统的调用
@@ -40,7 +40,7 @@ export class FileInfoCache {
     }
 
     try {
-      const info = await FileSystem.getInfoAsync(path);
+      const info = await getFileSystem().getInfoAsync(path);
       this.fileInfoCache.set(key, {
         info,
         timestamp: Date.now(),

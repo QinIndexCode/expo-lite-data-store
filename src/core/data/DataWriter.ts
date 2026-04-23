@@ -4,13 +4,13 @@
  * @since 2025-11-19
  * @version 1.0.0
  */
-import * as FileSystem from 'expo-file-system';
 import { configManager } from '../config/ConfigManager';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
 import { StorageError } from '../../types/storageErrorInfc';
 import type { CreateTableOptions, WriteOptions, WriteResult } from '../../types/storageTypes';
 import { ErrorHandler as StorageErrorHandler } from '../../utils/StorageErrorHandler';
-import ROOT from '../../utils/ROOTPath';
+import { getFileSystem } from '../../utils/fileSystemCompat';
+import { getRootPathSync } from '../../utils/ROOTPath';
 import withTimeout from '../../utils/withTimeout';
 import logger from '../../utils/logger';
 
@@ -30,9 +30,8 @@ export class DataWriter {
   private readonly MAX_VALIDATION_CACHE_SIZE = 100;
   private readonly LOCK_TIMEOUT = 30 * 1000;
   private operationLocks = new Map<string, Promise<void>>();
-  private lockPromises = new Map<string, () => void>();
   private activeOperations = 0;
-  private readonly maxConcurrentOperations = 5;
+  private readonly maxConcurrentOperations: number;
   private operationQueue: Array<() => void> = [];
 
   constructor(
@@ -44,6 +43,7 @@ export class DataWriter {
     this.indexManager = indexManager;
     this.fileOperationManager = fileOperationManager;
     this.chunkSize = configManager.getConfig().chunkSize;
+    this.maxConcurrentOperations = configManager.getConfig().performance.maxConcurrentOperations || 5;
   }
 
   private static readonly supportedColumnTypes: ColumnSchema[string][] = [
@@ -94,7 +94,7 @@ export class DataWriter {
   }
 
   private getSingleFile(tableName: string): SingleFileHandler {
-    const filePath = `${ROOT}${tableName}.ldb`;
+    const filePath = `${getRootPathSync()}${tableName}.ldb`;
     return new SingleFileHandler(filePath);
   }
 
@@ -110,52 +110,18 @@ export class DataWriter {
   /**
    * Acquire operation lock for a table to serialize concurrent operations
    */
-  private async acquireLock(tableName: string): Promise<void> {
-    if (this.activeOperations >= this.maxConcurrentOperations) {
-      await new Promise<void>(resolve => {
-        this.operationQueue.push(resolve);
-      });
-    }
-
-    const startTime = Date.now();
-    while (this.operationLocks.has(tableName)) {
-      if (Date.now() - startTime > this.LOCK_TIMEOUT) {
-        this.operationLocks.delete(tableName);
-        this.lockPromises.delete(tableName);
-        throw StorageErrorHandler.createGeneralError(
-          `Lock acquisition timeout for table: ${tableName}`,
-          'LOCK_TIMEOUT',
-          undefined,
-          `Failed to acquire lock within ${this.LOCK_TIMEOUT / 1000} seconds`,
-          'This may indicate a deadlock or long-running operation. Please try again.'
-        );
-      }
-      await this.operationLocks.get(tableName);
-    }
-
-    this.activeOperations++;
-
-    let resolveLock: () => void;
-    const lockPromise = new Promise<void>(resolve => {
-      resolveLock = resolve;
-    });
-
-    this.operationLocks.set(tableName, lockPromise);
-    this.lockPromises.set(tableName, resolveLock!);
+  private createLockTimeoutError(tableName: string): StorageError {
+    return StorageErrorHandler.createGeneralError(
+      `Lock acquisition timeout for table: ${tableName}`,
+      'LOCK_TIMEOUT',
+      undefined,
+      `Failed to acquire lock within ${this.LOCK_TIMEOUT / 1000} seconds`,
+      'This may indicate a deadlock or long-running operation. Please try again.'
+    );
   }
 
-  /**
-   * Release operation lock for a table
-   */
-  private releaseLock(tableName: string): void {
-    const resolveLock = this.lockPromises.get(tableName);
-    if (resolveLock) {
-      resolveLock();
-      this.operationLocks.delete(tableName);
-      this.lockPromises.delete(tableName);
-    }
-
-    this.activeOperations--;
+  private releaseOperationSlot(): void {
+    this.activeOperations = Math.max(0, this.activeOperations - 1);
 
     if (this.operationQueue.length > 0 && this.activeOperations < this.maxConcurrentOperations) {
       const nextOperation = this.operationQueue.shift();
@@ -163,6 +129,63 @@ export class DataWriter {
         nextOperation();
       }
     }
+  }
+
+  private async acquireLock(tableName: string): Promise<() => void> {
+    if (this.activeOperations >= this.maxConcurrentOperations) {
+      await new Promise<void>(resolve => {
+        this.operationQueue.push(resolve);
+      });
+    }
+
+    const previousLock = this.operationLocks.get(tableName);
+
+    let resolveLock: () => void;
+    const lockPromise = new Promise<void>(resolve => {
+      resolveLock = resolve;
+    });
+
+    this.operationLocks.set(tableName, lockPromise);
+
+    if (previousLock) {
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      try {
+        await Promise.race([
+          previousLock,
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(this.createLockTimeoutError(tableName));
+            }, this.LOCK_TIMEOUT);
+          }),
+        ]);
+      } catch (error) {
+        resolveLock!();
+        if (this.operationLocks.get(tableName) === lockPromise) {
+          this.operationLocks.delete(tableName);
+        }
+        throw error;
+      } finally {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      }
+    }
+
+    this.activeOperations++;
+    let released = false;
+
+    return () => {
+      if (released) {
+        return;
+      }
+
+      released = true;
+      resolveLock!();
+      if (this.operationLocks.get(tableName) === lockPromise) {
+        this.operationLocks.delete(tableName);
+      }
+      this.releaseOperationSlot();
+    };
   }
 
   async createTable(
@@ -187,7 +210,7 @@ export class DataWriter {
           );
         }
 
-        await this.acquireLock(tableName);
+        const releaseLock = await this.acquireLock(tableName);
 
         try {
           if (this.metadataManager.get(tableName)) {
@@ -223,7 +246,7 @@ export class DataWriter {
             encryptFullTable: options.encryptFullTable || false,
           });
         } finally {
-          this.releaseLock(tableName);
+          releaseLock();
         }
       },
       error => {
@@ -243,7 +266,7 @@ export class DataWriter {
   async deleteTable(tableName: string): Promise<void> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
-        await this.acquireLock(tableName);
+        const releaseLock = await this.acquireLock(tableName);
 
         try {
           const tableMeta = this.metadataManager.get(tableName);
@@ -255,7 +278,7 @@ export class DataWriter {
             await withTimeout(
               Promise.allSettled([
                 this.getSingleFile(tableName).delete(),
-                FileSystem.deleteAsync(FileSystem.documentDirectory + ROOT + tableName, { idempotent: true }),
+                getFileSystem().deleteAsync(`${getRootPathSync()}${tableName}`, { idempotent: true }),
               ]),
               10000,
               `delete table ${tableName}`
@@ -265,7 +288,7 @@ export class DataWriter {
           this.indexManager.clearTableIndexes(tableName);
           this.metadataManager.delete(tableName);
         } finally {
-          this.releaseLock(tableName);
+          releaseLock();
         }
       },
       error => StorageErrorHandler.createTableError('delete', tableName, error)
@@ -291,7 +314,7 @@ export class DataWriter {
 
         await this.ensureTableExists(tableName);
 
-        await this.acquireLock(tableName);
+        const releaseLock = await this.acquireLock(tableName);
 
         try {
           await this.fileOperationManager.checkPermissions();
@@ -310,7 +333,7 @@ export class DataWriter {
             chunked: writeResult.isChunked,
           };
         } finally {
-          this.releaseLock(tableName);
+          releaseLock();
         }
       },
       error => StorageErrorHandler.createFileError('write', `table ${tableName}`, error)
@@ -585,7 +608,7 @@ export class DataWriter {
       });
     }
 
-    return { metadata: actualCount, actual: actualCount, match };
+    return { metadata: metadataCount, actual: actualCount, match };
   }
 
   async delete(tableName: string, where: Record<string, any>): Promise<number> {
@@ -598,7 +621,7 @@ export class DataWriter {
           return 0;
         }
 
-        await this.acquireLock(tableName);
+        const releaseLock = await this.acquireLock(tableName);
 
         try {
           let data: Record<string, any>[];
@@ -647,7 +670,7 @@ export class DataWriter {
 
           return deletedCount;
         } finally {
-          this.releaseLock(tableName);
+          releaseLock();
         }
       },
       error => StorageErrorHandler.createFileError('delete from', `table ${tableName}`, error)

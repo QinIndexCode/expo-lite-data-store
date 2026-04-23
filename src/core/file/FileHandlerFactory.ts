@@ -6,7 +6,7 @@
  */
 
 import { IMetadataManager } from '../../types/metadataManagerInfc';
-import ROOT from '../../utils/ROOTPath';
+import { getRootPathSync } from '../../utils/ROOTPath';
 import { ChunkedFileHandler } from './ChunkedFileHandler';
 import { SingleFileHandler } from './SingleFileHandler';
 
@@ -40,7 +40,7 @@ export class FileHandlerFactory {
    * @returns 单文件处理器实例
    */
   getSingleFileHandler(tableName: string): SingleFileHandler {
-    const filePath = `${ROOT}/${tableName}.ldb`;
+    const filePath = `${getRootPathSync()}${tableName}.ldb`;
     return new SingleFileHandler(filePath);
   }
 

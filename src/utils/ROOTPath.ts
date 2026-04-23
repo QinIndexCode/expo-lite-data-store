@@ -1,55 +1,26 @@
 /**
  * @module ROOTPath
- * @description Singleton root path manager for application directory
+ * @description Runtime root path helpers
  * @since 2025-11-19
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { pathHelper } from './PathHelper';
 
-/**
- * Singleton root path manager class
- */
-class SingletonRootPath {
-  /**
-   * Singleton instance
-   */
-  private static instance: any = null;
+export const getRootPath = async (): Promise<string> => {
+  return pathHelper.getRootPath();
+};
 
-  /**
-   * Private constructor to prevent external instantiation
-   */
-  private constructor() {}
+export const getRootPathSync = (): string => {
+  return pathHelper.getRootPathSync();
+};
 
-  /**
-   * Get async root path instance
-   * @returns Promise<any> Root directory path string
-   */
-  public static async getInstance(): Promise<any> {
-    if (!SingletonRootPath.instance) {
-      SingletonRootPath.instance = await pathHelper.getRootPath();
-    }
-    return SingletonRootPath.instance;
-  }
+export const ensureStorageRootReady = async (): Promise<string> => {
+  return pathHelper.ensureStorageReady();
+};
 
-  /**
-   * Get sync root path instance
-   * @returns any Root directory path string
-   */
-  public static getInstanceSync(): any {
-    if (!SingletonRootPath.instance) {
-      SingletonRootPath.instance = pathHelper.getRootPathSync();
-    }
-    return SingletonRootPath.instance;
-  }
-}
+export const resetRootPathState = (): void => {
+  pathHelper.reset();
+};
 
-/**
- * Root path instance
- */
-const ROOT = SingletonRootPath.getInstanceSync();
-
-/**
- * Export root path instance
- */
-export default ROOT;
+export default getRootPathSync;

@@ -44,10 +44,24 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
    * 延迟初始化，只有在实际需要使用密钥时才调用getMasterKey()，避免不必要的生物识别/密码识别
    */
   private async getOrInitKey(): Promise<string> {
+    if (this.requireAuthOnAccess) {
+      return getMasterKey(true);
+    }
+
     if (!this.keyPromise) {
-      this.keyPromise = getMasterKey(this.requireAuthOnAccess);
+      this.keyPromise = getMasterKey(false);
     }
     return this.keyPromise;
+  }
+
+  async ensureInitialized(): Promise<void> {
+    if (typeof (storage as any).ensureInitialized === 'function') {
+      await (storage as any).ensureInitialized();
+    }
+
+    if (this.requireAuthOnAccess) {
+      await this.getOrInitKey();
+    }
   }
 
   /**
@@ -93,6 +107,13 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
   private async key() {
     return await this.getOrInitKey();
+  }
+
+  private async getTableMeta(tableName: string) {
+    if (typeof (storage as any).ensureInitialized === 'function') {
+      await (storage as any).ensureInitialized();
+    }
+    return (storage as any).getTableMeta(tableName);
   }
 
   /**
@@ -205,7 +226,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
         // Get配置，优先使用表级配置，然后是全局配置
         const config = configManager.getConfig();
-        const tableMeta = (storage as any).getTableMeta(tableName);
+        const tableMeta = await this.getTableMeta(tableName);
 
         // Decide which encryption strategy to use
         const useFieldLevelEncryption =
@@ -300,7 +321,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
         // Get配置，优先使用表级配置，然后是全局配置
         const config = configManager.getConfig();
-        const tableMeta = (storage as any).getTableMeta(tableName);
+        const tableMeta = await this.getTableMeta(tableName);
 
         // Encrypt写入策略：
         // 1. 优先使用字段级加密（性能更好，支持增量写入）
@@ -504,7 +525,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         const key = await this.key();
 
         // Get table的元数据，以确定是否启用了字段级加密
-        const tableMeta = (storage as any).getTableMeta(tableName);
+        const tableMeta = await this.getTableMeta(tableName);
         const config = configManager.getConfig();
         // Prefer table metadata encrypted fields over global config
         const encryptedFields =
@@ -718,6 +739,16 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   ): Promise<WriteResult> {
     // Clear cache
     this.clearTableCache(tableName);
+    if (operations.length > 0 && operations.every(operation => operation.type === 'insert')) {
+      const insertItems = operations.flatMap(operation =>
+        Array.isArray(operation.data) ? operation.data : [operation.data]
+      );
+      const result = await this.write(tableName, insertItems, options);
+      return {
+        ...result,
+        written: insertItems.length,
+      };
+    }
 
     // 1. 读取所有数据，传递options参数确保正确处理加密数据
     const allData = await this.read(tableName, options);

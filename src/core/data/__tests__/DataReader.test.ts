@@ -4,6 +4,7 @@
 import { CacheManager, CacheStrategy } from '../../cache/CacheManager';
 
 import { IndexManager } from '../../index/IndexManager';
+import { SingleFileHandler } from '../../file/SingleFileHandler';
 import { MetadataManager } from '../../meta/MetadataManager';
 import { DataReader } from '../DataReader';
 
@@ -51,6 +52,43 @@ describe('DataReader', () => {
     it('should be able to read data from non-existent table, return empty array', async () => {
       const result = await dataReader.read('non_existent_table');
       expect(result).toEqual([]);
+    });
+
+    it('should recover single-file data when metadata is missing', async () => {
+      const handler = new SingleFileHandler('/mock/documents/lite-data-store/test_table.ldb');
+      const testData = [
+        { id: '1', name: 'Alice' },
+        { id: '2', name: 'Bob' },
+      ];
+
+      await handler.write(testData);
+      metadataManager.delete(testTableName);
+
+      const result = await dataReader.read(testTableName);
+
+      expect(result).toEqual(testData);
+      expect(metadataManager.get(testTableName)).toMatchObject({
+        mode: 'single',
+        path: 'test_table.ldb',
+        count: 2,
+      });
+    });
+
+    it('should not recover corrupted single-file data when metadata is missing', async () => {
+      if ((global as any).__expo_file_system_mock__) {
+        (global as any).__expo_file_system_mock__.mockFileSystem['/mock/documents/lite-data-store/test_table.ldb'] =
+          JSON.stringify({
+            data: [{ id: '1', name: 'Broken' }],
+            hash: 'not-a-real-hash',
+          });
+      }
+
+      metadataManager.delete(testTableName);
+
+      const result = await dataReader.read(testTableName);
+
+      expect(result).toEqual([]);
+      expect(metadataManager.get(testTableName)).toBeUndefined();
     });
 
     it('should be able to read data from existing table', async () => {

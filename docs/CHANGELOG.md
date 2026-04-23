@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file.
 
+[简体中文](./CHANGELOG.zh-CN.md) | [Consumer Guide](../README.md) | [API Reference](./API.md)
+
 ## [2.0.0-beta.5] - 2026-04-04
 
 ### Added

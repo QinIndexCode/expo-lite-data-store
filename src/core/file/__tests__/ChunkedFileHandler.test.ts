@@ -2,6 +2,7 @@
 
 import { MetadataManager } from '../../meta/MetadataManager';
 import { ChunkedFileHandler } from '../ChunkedFileHandler';
+import logger from '../../../utils/logger';
 
 describe('ChunkedFileHandler', () => {
   let chunkedFileHandler: ChunkedFileHandler;
@@ -198,6 +199,29 @@ describe('ChunkedFileHandler', () => {
       expect(result[0]).toEqual(batch1[0]);
       expect(result[300]).toEqual(batch2[0]);
       expect(result[600]).toEqual(batch3[0]);
+    });
+
+    it('truncates large chunk debug output', async () => {
+      const debugSpy = jest.spyOn(logger, 'debug').mockImplementation(() => {});
+      const payload = 'x'.repeat(6000);
+      let readLog: string | undefined;
+
+      try {
+        await chunkedFileHandler.write([{ id: 'large-debug', payload }]);
+        await chunkedFileHandler.readAll();
+
+        readLog = debugSpy.mock.calls
+          .map(args => String(args[0]))
+          .find(message => message.includes('Read chunk file'));
+      } finally {
+        debugSpy.mockRestore();
+      }
+
+      expect(readLog).toBeDefined();
+      expect(readLog).toContain('contentLength=');
+      expect(readLog).toContain('contentPreview=');
+      expect(readLog).toContain('[truncated ');
+      expect(readLog).not.toContain(payload);
     });
   });
 });
