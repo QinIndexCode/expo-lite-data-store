@@ -6,6 +6,7 @@ const { execSync } = require('child_process');
 const repoRoot = path.resolve(__dirname, '..');
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+const requiredBuiltArtifacts = ['dist/js/index.js', 'dist/cjs/index.js', 'dist/types/index.d.ts'];
 
 const quoteArg = value => {
   if (/[\s"]/u.test(value)) {
@@ -16,15 +17,24 @@ const quoteArg = value => {
 
 const buildCommand = (command, args) => [command, ...args.map(quoteArg)].join(' ');
 
+const createCommandEnv = () => {
+  const env = {
+    ...process.env,
+    CI: '1',
+  };
+
+  delete env.npm_config_dry_run;
+  delete env.NPM_CONFIG_DRY_RUN;
+
+  return env;
+};
+
 const run = (command, args, cwd) => {
   execSync(buildCommand(command, args), {
     cwd,
     stdio: 'inherit',
     shell: process.platform === 'win32',
-    env: {
-      ...process.env,
-      CI: '1',
-    },
+    env: createCommandEnv(),
   });
 };
 
@@ -33,15 +43,46 @@ const runJson = (command, args, cwd) => {
     cwd,
     encoding: 'utf8',
     shell: process.platform === 'win32',
-    env: {
-      ...process.env,
-      CI: '1',
-    },
+    env: createCommandEnv(),
   });
   return JSON.parse(output);
 };
 
 const readRepoPackage = () => JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+
+const hasBuiltArtifacts = root =>
+  requiredBuiltArtifacts.every(relativePath => fs.existsSync(path.join(root, relativePath)));
+
+const ensureBuiltArtifacts = root => {
+  if (!hasBuiltArtifacts(root)) {
+    run(npmCmd, ['run', 'build'], root);
+  }
+};
+
+const packRepoTarball = root => {
+  ensureBuiltArtifacts(root);
+  const packDir = fs.mkdtempSync(path.join(os.tmpdir(), 'expo-lite-data-store-pack-'));
+  const packResult = runJson(npmCmd, ['pack', '--json', '--ignore-scripts', '--pack-destination', packDir], root);
+  const [packMetadata] = packResult;
+  const packagedPaths = Array.isArray(packMetadata?.files)
+    ? packMetadata.files.map(file => file.path)
+    : [];
+
+  if (packagedPaths.length > 0) {
+    const missingPackagedArtifacts = requiredBuiltArtifacts.filter(relativePath => !packagedPaths.includes(relativePath));
+
+    if (missingPackagedArtifacts.length > 0) {
+      throw new Error(
+        `Packed tarball is missing required build artifacts: ${missingPackagedArtifacts.join(', ')}`
+      );
+    }
+  }
+
+  return {
+    packDir,
+    tarballPath: path.join(packDir, packMetadata.filename),
+  };
+};
 
 const writeConsumerFiles = consumerDir => {
   const pkg = readRepoPackage();
@@ -83,11 +124,13 @@ const writeConsumerFiles = consumerDir => {
 
 const main = () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'expo-lite-data-store-smoke-'));
+  let packDir;
   let tarballPath;
 
   try {
-    const packResult = runJson(npmCmd, ['pack', '--json', '--ignore-scripts'], repoRoot);
-    tarballPath = path.join(repoRoot, packResult[0].filename);
+    const packedRepo = packRepoTarball(repoRoot);
+    packDir = packedRepo.packDir;
+    tarballPath = packedRepo.tarballPath;
 
     writeConsumerFiles(tempDir);
 
@@ -103,7 +146,20 @@ const main = () => {
     if (tarballPath && fs.existsSync(tarballPath)) {
       fs.unlinkSync(tarballPath);
     }
+    if (packDir && fs.existsSync(packDir)) {
+      fs.rmSync(packDir, { recursive: true, force: true });
+    }
   }
 };
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  createCommandEnv,
+  ensureBuiltArtifacts,
+  hasBuiltArtifacts,
+  packRepoTarball,
+  requiredBuiltArtifacts,
+};

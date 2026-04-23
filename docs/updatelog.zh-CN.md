@@ -2,6 +2,15 @@
 
 [English](./updatelog.md) | [English Alias](./updatelog.en.md) | [消费者文档](../README.zh-CN.md)
 
+### 📅 2026-04-23 `v2.0.0` 正式版发布加固与发布验证
+
+> 正式发布：在完成 build、typecheck、全量 Jest、Expo consumer smoke 和打包验证后，将包提升为稳定版 `2.0.0`
+> 消费者契约：正式定义 Expo SDK 54 下受支持的 `npx expo install ...` 安装流程，并记录可选的 native flagship 加密依赖路径
+> 打包保护：更新 `smoke:expo-consumer`，在打包前自动补齐缺失构建产物，并拒绝缺少编译产物或类型声明的 tarball
+> 工具链稳定性：显式声明 `babel-preset-expo` 与 `@babel/plugin-transform-modules-commonjs`，确保本地 Jest 与发布验证行为一致
+> 文档统一：统一 README、API、运行时 QA、变更日志和更新日志的消费者与维护者文档
+> 验证结果：`npm run prepublishOnly`、`npm test -- --runInBand`、`npm run typecheck` 和 `npm pack --json --dry-run --ignore-scripts` 已在 Windows 环境通过
+
 ### 📅 2026-04-02 `v2.0.0-beta.5` 加密方案升级与架构优化
 
 > 加密升级：新增 AES-256-GCM 加密模式，符合 NIST SP 800-38D 和 OWASP MASVS 2026 标准

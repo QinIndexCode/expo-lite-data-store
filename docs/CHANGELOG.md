@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 [简体中文](./CHANGELOG.zh-CN.md) | [Consumer Guide](../README.md) | [API Reference](./API.md)
 
+## [2.0.0] - 2026-04-23
+
+### Added
+- Formalized the Expo SDK 54 consumer installation contract in the root documentation, including managed-compatible and native flagship dependency paths
+- Added a smoke-test regression suite for the Expo consumer packaging workflow
+
+### Changed
+- Promoted the package from beta to the stable `2.0.0` line
+- Standardized the developer-facing documentation set across the root README, API reference, runtime QA guide, changelog, and update log
+- Declared `babel-preset-expo` and `@babel/plugin-transform-modules-commonjs` explicitly for reproducible local Jest execution
+
+### Fixed
+- `smoke:expo-consumer` now self-heals missing build artifacts before packing and rejects tarballs that omit `dist/js`, `dist/cjs`, or `dist/types`
+- Release verification now passes end to end with `npm run prepublishOnly`, full Jest coverage for the current suite set, and `npm pack --dry-run --ignore-scripts`
+
 ## [2.0.0-beta.5] - 2026-04-04
 
 ### Added

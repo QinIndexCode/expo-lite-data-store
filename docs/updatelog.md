@@ -2,6 +2,15 @@
 
 [简体中文](./updatelog.zh-CN.md) | [English Alias](./updatelog.en.md) | [Consumer Guide](../README.md)
 
+### 📅 2026-04-23 `v2.0.0` Stable Release Hardening and Publish Validation
+
+> Stable Release: Promoted the package to the `2.0.0` stable line after completing build, typecheck, full Jest, Expo consumer smoke, and pack validation
+> Consumer Contract: Formalized the supported `npx expo install ...` workflow for Expo SDK 54 and documented the optional native flagship crypto dependency path
+> Packaging Guard: Updated `smoke:expo-consumer` to rebuild missing artifacts before packing and to reject tarballs that omit compiled runtime bundles or type declarations
+> Tooling Reliability: Declared `babel-preset-expo` and `@babel/plugin-transform-modules-commonjs` explicitly so local Jest runs match CI and release validation behavior
+> Documentation: Standardized the consumer and maintainer documentation set across README, API, runtime QA, changelog, and update log
+> Verification: `npm run prepublishOnly`, `npm test -- --runInBand`, `npm run typecheck`, and `npm pack --json --dry-run --ignore-scripts` all passed on Windows
+
 ### 📅 2026-04-02 `v2.0.0-beta.5` Encryption Upgrade and Architecture Optimization
 
 > Encryption Upgrade: Added AES-256-GCM encryption mode, compliant with NIST SP 800-38D and OWASP MASVS 2026

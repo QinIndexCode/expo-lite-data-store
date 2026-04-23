@@ -4,6 +4,21 @@
 
 [English](./CHANGELOG.md) | [消费者文档](../README.zh-CN.md) | [API 参考](./API.zh-CN.md)
 
+## [2.0.0] - 2026-04-23
+
+### 新增
+- 在根文档中正式定义 Expo SDK 54 的消费者安装契约，明确 managed-compatible 与 native flagship 两条依赖路径
+- 新增加面向 Expo consumer 打包流程的 smoke 回归测试
+
+### 变更
+- 将包从 beta 阶段提升到稳定版 `2.0.0`
+- 统一根 README、API 参考、运行时 QA 指南、变更日志与更新日志的开发者文档体系
+- 显式声明 `babel-preset-expo` 与 `@babel/plugin-transform-modules-commonjs`，确保本地 Jest 运行可复现
+
+### 修复
+- `smoke:expo-consumer` 现在会在打包前自修复缺失的构建产物，并拒绝缺少 `dist/js`、`dist/cjs` 或 `dist/types` 的 tarball
+- 发布验证链现已端到端通过：`npm run prepublishOnly`、当前全量 Jest 用例以及 `npm pack --dry-run --ignore-scripts`
+
 ## [2.0.0-beta.5] - 2026-04-04
 
 ### 新增
