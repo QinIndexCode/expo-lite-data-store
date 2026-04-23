@@ -1,85 +1,84 @@
 # Security Policy
 
+`expo-lite-data-store` is a local storage library for Expo applications. Security reports are handled privately and should not be opened as public GitHub issues until the maintainers confirm disclosure timing.
+
+[简体中文](./SECURITY.zh-CN.md) | [README](./README.md) | [Contributing Guide](./CONTRIBUTING.md)
+
 ## Supported Versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+Only the current stable major line receives security fixes.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 2.0.x   | :white_check_mark: |
-| 1.1.x   | :x:                |
-| 1.0.x   | :x:                |
-| < 1.0   | :x:                |
+| Version | Supported |
+| --- | --- |
+| `2.0.x` | Yes |
+| `< 2.0.0` | No |
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+Report vulnerabilities by email to [qinindexcode@gmail.com](mailto:qinindexcode@gmail.com).
 
-### How to Report
+Use a subject line similar to:
 
-To report a security vulnerability, please email the maintainers at [qinindexcode@example.com](mailto:qinindexcode@example.com) with the following information:
+```text
+[expo-lite-data-store][security] short summary
+```
 
-- Description of the vulnerability
-- Steps to reproduce the issue
-- Potential impact of the vulnerability
-- Any known workarounds
-- Your contact information for follow-up
+Include the following information whenever possible:
 
-### Response Timeline
+- affected package version,
+- Expo SDK, React Native, and platform details,
+- runtime surface such as Expo Go, managed app, native dev client, or standalone build,
+- crypto provider in use, for example `expo-go-js-fallback` or `react-native-quick-crypto`,
+- reproduction steps or a minimal repository,
+- relevant logs, `summary.json`, `events.jsonl`, or stack traces,
+- a description of potential impact.
 
-- **Initial Response**: You will receive an acknowledgment of your report within 48 hours.
-- **Investigation**: We will investigate the vulnerability and determine its severity within 7 days.
-- **Update**: You will receive regular updates on the status of your report at least once every 14 days.
-- **Resolution**: We will work to fix the vulnerability and release a security update as soon as possible.
+Please do not publish proof-of-concept exploits, screenshots, or reproduction repositories in public before coordinated disclosure is agreed.
 
-### What to Expect
+## Response Targets
 
-- **Accepted Vulnerabilities**: If the vulnerability is accepted, we will:
-  - Fix the issue in a timely manner
-  - Credit you in the release notes (if you wish)
-  - Publish a security advisory
-  - Release a security update for all supported versions
+The maintainers currently aim for the following response windows:
 
-- **Declined Vulnerabilities**: If the vulnerability is declined, we will:
-  - Provide a clear explanation of why the issue is not considered a security vulnerability
-  - Offer guidance on how to address the issue if it is a non-security issue
+- initial acknowledgment within 2 business days,
+- severity and scope triage within 7 calendar days,
+- status updates at least every 14 days while a fix is in progress.
 
-### Disclosure Policy
+These are targets, not legal guarantees, but reports should not remain unanswered without notice.
 
-We follow a coordinated disclosure policy:
+## Coordinated Disclosure
 
-1. We will notify you when we plan to publicly disclose the vulnerability
-2. We will give you at least 30 days to address the vulnerability in your own projects
-3. We will work with you to coordinate the disclosure timeline
-4. We will not publicly disclose the vulnerability until we have released a fix
+When a report is accepted as a security issue, the project follows coordinated disclosure:
 
-## Security Update Process
+1. The maintainers confirm the issue privately.
+2. A fix or mitigation is prepared.
+3. Supported releases are updated.
+4. A public disclosure or advisory is published after the fix is available.
 
-- Security updates are released as patch versions for all supported major versions
-- All security updates are thoroughly tested before release
-- Security updates include detailed release notes describing the vulnerability and fix
-- We recommend all users upgrade to the latest security patch as soon as possible
+Researchers may be credited in release notes or the advisory if they request attribution.
 
-## Supported Security Features
+## In-Scope Examples
 
-- Encrypted storage for sensitive data
-- Secure key management
-- Field-level encryption
-- Access control mechanisms
-- Regular security audits
+The following are generally treated as security issues when they are reproducible and impact real consumers:
 
-## Best Practices
+- unauthorized access to encrypted or protected data,
+- incorrect key handling or secret exposure,
+- integrity failures that allow silent data tampering,
+- storage path or temporary-file exposure that leaks sensitive content,
+- packaging or install-contract issues that cause the wrong runtime security behavior to be shipped.
 
-To help ensure the security of your application when using expo-lite-data-store:
+## Out-of-Scope Examples
 
-- Always use the latest security patch version
-- Follow secure coding practices
-- Implement proper access controls
-- Regularly audit your application's security
-- Keep your dependencies up to date
+The following usually belong in the normal bug tracker unless they also create a concrete exploit path:
 
----
+- performance regressions without a security impact,
+- unsupported runtime configurations,
+- missing optional native dependencies in an unsupported install flow,
+- documentation wording issues without a security consequence.
 
-**Last Updated**: 2025-12-23
-**Version**: 1.0.0
+## Consumer Guidance
+
+Consumers should keep the following constraints in mind:
+
+- Expo Go supports encrypted storage validation, but it does not guarantee per-access authentication.
+- `requireAuthOnAccess: true` intentionally throws `AUTH_ON_ACCESS_UNSUPPORTED` when the current runtime cannot enforce that guarantee.
+- Native-performance and native-crypto validation should be performed in a native dev client or standalone build.

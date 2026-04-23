@@ -17,11 +17,15 @@ Local structured storage for Expo applications, with runtime-tested support for 
 
 ## Installation
 
-Install the package together with its required Expo peer dependencies inside the consumer application:
+This package does not support `npm install expo-lite-data-store` as a standalone installation step.
+
+The only supported base install command for Expo SDK 54 is:
 
 ```bash
 npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store
 ```
+
+Treat `npm install expo-lite-data-store` on its own as an incomplete installation, even if the package manager finishes without error.
 
 `react-native-quick-crypto` is an optional peer dependency. Install it only when the application is expected to run with the native flagship crypto provider in a development build or standalone app.
 
@@ -36,6 +40,18 @@ The published package ships compiled runtime bundles and type declarations. Expo
 | `npm install expo-lite-data-store` only | Not supported | May leave Expo peer dependencies missing or version-misaligned |
 
 The package metadata intentionally keeps Expo runtime modules in `peerDependencies`. This is the correct model for Expo libraries, but it also means the supported consumer workflow is the explicit `expo install` command above rather than a package-manager-only install.
+
+### Missing Runtime Packages
+
+If the host Expo application is missing a required runtime package, the library throws `StorageError` with code `EXPO_MODULE_MISSING`.
+
+The error details identify the missing module, and the suggestion points back to the supported install command:
+
+```bash
+npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store
+```
+
+This error should be treated as an installation-contract failure in the consumer app, not as a recoverable runtime warning.
 
 ## Minimal Example
 
@@ -124,6 +140,8 @@ These commands generate artifact bundles under `artifacts/expo-runtime-qa/`. The
 - Changelog: [docs/CHANGELOG.md](./docs/CHANGELOG.md)
 - Simplified Chinese changelog: [docs/CHANGELOG.zh-CN.md](./docs/CHANGELOG.zh-CN.md)
 - Architecture notes: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+- Contributing guide: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Security policy: [SECURITY.md](./SECURITY.md)
 - Simplified Chinese guide: [README.zh-CN.md](./README.zh-CN.md)
 
 ## License

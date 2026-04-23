@@ -4,9 +4,13 @@
 
 ## 安装
 
+本 API 文档基于正式支持的安装契约编写。单独执行 `npm install expo-lite-data-store` 不属于受支持的安装方式。
+
 ```bash
 npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store
 ```
+
+如果消费应用只安装包名本身，而没有同时安装上面的 Expo 运行时包，那么即使包管理器显示成功，运行时模块解析仍然可能失败。
 
 `react-native-quick-crypto` 是可选依赖，仅当原生 dev client 或独立构建需要启用原生旗舰加密提供者时才需要安装。
 
@@ -17,6 +21,14 @@ npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypt
 - 不支持：只执行 `npm install expo-lite-data-store`
 
 Expo 运行时模块被保留在 `peerDependencies` 中是有意设计，这样消费应用才能继续与 Expo SDK 54 的原生依赖版本保持对齐。
+
+### 运行时缺包错误
+
+当必需的 Expo 运行时包无法解析时，库会抛出 `StorageError`，错误码为 `EXPO_MODULE_MISSING`。
+
+- 错误消息会指出缺失的模块。
+- 错误建议会指向 `npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store`。
+- 这说明消费应用没有按文档中的安装契约完成安装。
 
 ## 初始化
 

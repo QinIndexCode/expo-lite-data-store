@@ -1,7 +1,58 @@
 import { StorageError } from '../types/storageErrorInfc';
 
-const PEER_INSTALL_HINT =
-  'Install Expo peer dependencies with `npx expo install expo-file-system expo-constants expo-crypto expo-secure-store`.';
+const REQUIRED_EXPO_INSTALL_PACKAGES = [
+  'expo-lite-data-store',
+  'expo-file-system',
+  'expo-constants',
+  'expo-crypto',
+  'expo-secure-store',
+] as const;
+
+export const normalizeExpoRuntimePackageName = (moduleName: string): string => {
+  switch (moduleName) {
+    case 'expo-file-system/legacy':
+      return 'expo-file-system';
+    default:
+      return moduleName;
+  }
+};
+
+export const getSupportedExpoInstallCommand = (additionalPackages: string[] = []): string => {
+  const seenPackages = new Set<string>();
+  const packages = [...REQUIRED_EXPO_INSTALL_PACKAGES, ...additionalPackages]
+    .map(item => normalizeExpoRuntimePackageName(item))
+    .filter(item => {
+      if (seenPackages.has(item)) {
+        return false;
+      }
+      seenPackages.add(item);
+      return true;
+    });
+
+  return `npx expo install ${packages.join(' ')}`;
+};
+
+export const buildExpoPeerInstallHint = (moduleName?: string): string => {
+  const missingPackage = moduleName ? normalizeExpoRuntimePackageName(moduleName) : null;
+  const baseCommand = getSupportedExpoInstallCommand();
+  const parts = [
+    missingPackage ? `Missing Expo runtime package: "${missingPackage}".` : null,
+    `Supported install command: \`${baseCommand}\`.`,
+    '`npm install expo-lite-data-store` alone is not a supported installation flow for this library.',
+    'Install the Expo runtime packages in the consumer application so their native versions stay aligned with the app Expo SDK.',
+  ].filter(Boolean);
+
+  return parts.join(' ');
+};
+
+const buildExpoModuleMissingDetails = (moduleName: string): string => {
+  const missingPackage = normalizeExpoRuntimePackageName(moduleName);
+  if (missingPackage === moduleName) {
+    return `The package depends on "${moduleName}" at runtime, but the host Expo application could not resolve it.`;
+  }
+
+  return `The package depends on "${moduleName}" at runtime. That entry point is provided by the consumer package "${missingPackage}", but the host Expo application could not resolve it.`;
+};
 
 type RuntimeRequire = (moduleName: string) => unknown;
 
@@ -82,11 +133,11 @@ export const loadRequiredExpoModule = <T>(moduleName: string, installHint?: stri
   const moduleValue = loadOptionalExpoModule<T>(moduleName);
   if (!moduleValue) {
     throw new StorageError(`Required Expo module "${moduleName}" is missing`, 'EXPO_MODULE_MISSING', {
-      details: `The package depends on "${moduleName}" at runtime, but it could not be resolved.`,
-      suggestion: installHint || PEER_INSTALL_HINT,
+      details: buildExpoModuleMissingDetails(moduleName),
+      suggestion: installHint || buildExpoPeerInstallHint(moduleName),
     });
   }
   return moduleValue;
 };
 
-export const getExpoPeerInstallHint = (): string => PEER_INSTALL_HINT;
+export const getExpoPeerInstallHint = (moduleName?: string): string => buildExpoPeerInstallHint(moduleName);

@@ -1,4 +1,4 @@
-# Expo LiteDBStore 架构设计文档
+# Expo Lite Data Store 架构设计文档
 
 [English](./ARCHITECTURE.md) | [English Alias](./ARCHITECTURE.en.md) | [消费者文档](../README.zh-CN.md)
 
@@ -431,4 +431,4 @@ Expo Lite Data Store 采用分层架构设计，主要分为以下几层：
 
 ## 9. 总结
 
-Expo LiteDBStore 是一个设计良好的本地数据库解决方案，具有清晰的模块化设计、良好的性能优化和较高的代码可维护性。通过采用分层架构、缓存机制、索引优化、分片存储等技术，它能够提供高效、可靠的数据存储服务，适用于各种规模的应用程序。
+Expo Lite Data Store 是一个设计良好的本地数据库解决方案，具有清晰的模块化设计、良好的性能优化和较高的代码可维护性。通过采用分层架构、缓存机制、索引优化、分片存储等技术，它能够提供高效、可靠的数据存储服务，适用于各种规模的应用程序。

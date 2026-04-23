@@ -11,5 +11,7 @@ Use the following entry points:
 - Runtime QA guide for contributors and maintainers: [docs/EXPO_RUNTIME_QA.md](./docs/EXPO_RUNTIME_QA.md)
 - Changelog: [docs/CHANGELOG.md](./docs/CHANGELOG.md)
 - Simplified Chinese changelog: [docs/CHANGELOG.zh-CN.md](./docs/CHANGELOG.zh-CN.md)
+- Contributing guide: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Security policy: [SECURITY.md](./SECURITY.md)
 
 This alias page exists only to keep older links working without maintaining two separate English manuals.

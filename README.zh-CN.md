@@ -17,11 +17,15 @@
 
 ## 安装
 
-请在消费应用中同时安装本库及其必需的 Expo peer 依赖：
+本库不支持把 `npm install expo-lite-data-store` 当作唯一安装步骤。
+
+对 Expo SDK 54 而言，唯一受支持的基础安装命令是：
 
 ```bash
 npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store
 ```
+
+即使包管理器成功完成安装，也应将“只执行 `npm install expo-lite-data-store`”视为不完整安装。
 
 `react-native-quick-crypto` 为可选 peer 依赖。只有在开发构建或独立应用中需要启用原生旗舰加密提供者时，才需要安装它。
 
@@ -36,6 +40,18 @@ npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypt
 | 仅执行 `npm install expo-lite-data-store` | 不支持 | 可能导致 Expo peer 依赖缺失或版本未对齐 |
 
 包元数据刻意将 Expo 运行时模块保留为 `peerDependencies`。这对 Expo 库来说是正确做法，但也意味着正式支持的安装方式是上面的 `expo install`，而不是只用包管理器安装本库本身。
+
+### 运行时缺包提示
+
+如果宿主 Expo 应用缺少必需运行时包，库会抛出 `StorageError`，错误码为 `EXPO_MODULE_MISSING`。
+
+错误详情会指出当前缺失的模块，错误建议会回到唯一受支持的安装命令：
+
+```bash
+npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store
+```
+
+这类错误应被视为消费应用安装契约失败，而不是可忽略的运行时警告。
 
 ## 最小示例
 
@@ -124,6 +140,8 @@ npm run qa:baseline:release
 - 变更日志： [docs/CHANGELOG.zh-CN.md](./docs/CHANGELOG.zh-CN.md)
 - 英文变更日志： [docs/CHANGELOG.md](./docs/CHANGELOG.md)
 - 架构说明： [docs/ARCHITECTURE.zh-CN.md](./docs/ARCHITECTURE.zh-CN.md)
+- 贡献指南： [CONTRIBUTING.zh-CN.md](./CONTRIBUTING.zh-CN.md)
+- 安全策略： [SECURITY.zh-CN.md](./SECURITY.zh-CN.md)
 - 英文开发者文档： [README.md](./README.md)
 
 ## 许可证

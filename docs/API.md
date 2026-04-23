@@ -4,9 +4,13 @@
 
 ## Installation
 
+This API is documented against the supported install contract. `npm install expo-lite-data-store` on its own is not a supported setup.
+
 ```bash
 npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store
 ```
+
+If the consumer app installs only the package tarball name and skips the Expo runtime packages above, runtime module resolution may fail even though the package manager reports success.
 
 `react-native-quick-crypto` is optional and belongs only in a native dev client or standalone build that needs the native flagship crypto provider.
 
@@ -17,6 +21,14 @@ npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypt
 - Not supported: `npm install expo-lite-data-store` as the only installation step
 
 Expo runtime packages remain peer dependencies on purpose so the consumer application can keep native versions aligned with Expo SDK 54.
+
+### Missing Runtime Package Errors
+
+When a required Expo runtime package cannot be resolved, the library throws `StorageError` with code `EXPO_MODULE_MISSING`.
+
+- The error message identifies the missing module.
+- The error suggestion points to `npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store`.
+- The condition means the consumer application was installed outside the documented contract.
 
 ## Initialization
 
