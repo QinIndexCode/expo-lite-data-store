@@ -65,12 +65,47 @@ describe('smoke expo consumer helpers', () => {
     smokeModule.ensureBuiltArtifacts(tempRoot);
 
     expect(spawnSync).toHaveBeenCalledWith(
-      expect.stringMatching(/npm(?:\.cmd)?$/),
-      ['run', 'build'],
+      expect.any(String),
+      expect.arrayContaining(['run', 'build']),
       expect.objectContaining({
         cwd: tempRoot,
+        shell: false,
       })
     );
+  });
+
+  it('wraps Windows batch commands through cmd.exe without using shell mode', () => {
+    const smokeModule = require(scriptPath) as {
+      resolveCommandInvocation: (
+        command: string,
+        args: string[],
+        platform?: string,
+        comspec?: string
+      ) => { command: string; args: string[] };
+    };
+
+    expect(
+      smokeModule.resolveCommandInvocation('npm.cmd', ['run', 'build'], 'win32', 'C:\\Windows\\System32\\cmd.exe')
+    ).toEqual({
+      command: 'C:\\Windows\\System32\\cmd.exe',
+      args: ['/d', '/c', 'npm.cmd', 'run', 'build'],
+    });
+  });
+
+  it('keeps non-Windows commands unchanged', () => {
+    const smokeModule = require(scriptPath) as {
+      resolveCommandInvocation: (
+        command: string,
+        args: string[],
+        platform?: string,
+        comspec?: string
+      ) => { command: string; args: string[] };
+    };
+
+    expect(smokeModule.resolveCommandInvocation('npm', ['run', 'build'], 'linux')).toEqual({
+      command: 'npm',
+      args: ['run', 'build'],
+    });
   });
 
   it('rejects tarballs that omit required build artifacts', () => {

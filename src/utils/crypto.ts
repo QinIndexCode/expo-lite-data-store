@@ -21,7 +21,7 @@ import { ctr } from '@noble/ciphers/aes';
 import { hmac } from '@noble/hashes/hmac';
 import { sha256 } from '@noble/hashes/sha256';
 import { sha512 } from '@noble/hashes/sha512';
-import { bytesToHex } from '@noble/hashes/utils';
+import { bytesToHex } from './byteEncoding';
 import { pbkdf2 as providerPbkdf2, randomBytes as providerRandomBytes, hkdfDerive } from './cryptoProvider';
 import { encryptGCM, decryptGCM, encryptGCMBulk, decryptGCMBulk } from './crypto-gcm';
 import { CryptoError } from './crypto-errors';

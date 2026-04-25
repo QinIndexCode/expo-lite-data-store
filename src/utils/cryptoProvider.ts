@@ -11,7 +11,7 @@ import { pbkdf2 as noblePbkdf2 } from '@noble/hashes/pbkdf2';
 import { hkdf } from '@noble/hashes/hkdf';
 import { sha256 } from '@noble/hashes/sha256';
 import { sha512 } from '@noble/hashes/sha512';
-import { bytesToHex } from '@noble/hashes/utils';
+import { bytesToHex } from './byteEncoding';
 import logger from './logger';
 
 type NativeCryptoModule = {

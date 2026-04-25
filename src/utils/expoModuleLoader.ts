@@ -101,7 +101,6 @@ const getRuntimeRequire = (): RuntimeRequire | undefined => {
 
   try {
     // Hermes/Metro can resolve peers here even when direct dynamic require(moduleName) is unsupported.
-    // eslint-disable-next-line no-new-func
     const runtimeRequire = Function('return require')() as RuntimeRequire;
     if (typeof runtimeRequire === 'function') {
       return runtimeRequire;

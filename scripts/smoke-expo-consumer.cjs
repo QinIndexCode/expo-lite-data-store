@@ -8,9 +8,26 @@ const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const requiredBuiltArtifacts = ['dist/js/index.js', 'dist/cjs/index.js', 'dist/types/index.d.ts'];
 
-const needsShell = command => process.platform === 'win32' && /\.(cmd|bat)$/iu.test(command);
-
 const formatCommand = (command, args) => [command, ...args].join(' ');
+
+const resolveCommandInvocation = (
+  command,
+  args,
+  platform = process.platform,
+  comspec = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe'
+) => {
+  if (platform === 'win32' && /\.(cmd|bat)$/iu.test(command)) {
+    return {
+      command: comspec,
+      args: ['/d', '/c', command, ...args],
+    };
+  }
+
+  return {
+    command,
+    args,
+  };
+};
 
 const createCommandEnv = () => {
   const env = {
@@ -25,11 +42,12 @@ const createCommandEnv = () => {
 };
 
 const runCommand = (command, args, cwd, options = {}) => {
-  const result = spawnSync(command, args, {
+  const invocation = resolveCommandInvocation(command, args);
+  const result = spawnSync(invocation.command, invocation.args, {
     cwd,
     stdio: options.captureOutput ? 'pipe' : 'inherit',
     encoding: 'utf8',
-    shell: needsShell(command),
+    shell: false,
     windowsHide: true,
     env: createCommandEnv(),
   });
@@ -172,5 +190,6 @@ module.exports = {
   ensureBuiltArtifacts,
   hasBuiltArtifacts,
   packRepoTarball,
+  resolveCommandInvocation,
   requiredBuiltArtifacts,
 };

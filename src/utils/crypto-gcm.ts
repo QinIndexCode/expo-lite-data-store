@@ -9,7 +9,7 @@
 
 import { gcm } from '@noble/ciphers/aes';
 import { sha256 } from '@noble/hashes/sha256';
-import { bytesToHex } from '@noble/hashes/utils';
+import { bytesToHex } from './byteEncoding';
 import { pbkdf2, randomBytes } from './cryptoProvider';
 import { CryptoError } from './crypto-errors';
 import { performanceMonitor } from '../core/monitor/PerformanceMonitor';
