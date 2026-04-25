@@ -154,7 +154,7 @@ describe('ConfigValidator', () => {
     expect(fixedConfig.chunkSize).toBe(5 * 1024 * 1024);
 
     expect(typeof fixedConfig.storageFolder).toBe('string');
-    expect(fixedConfig.storageFolder).toBe('expo-litedatastore');
+    expect(fixedConfig.storageFolder).toBe('lite-data-store');
 
     expect(typeof fixedConfig.sortMethods).toBe('string');
     expect(['default', 'fast', 'counting', 'merge', 'slow']).toContain(fixedConfig.sortMethods);
@@ -163,7 +163,7 @@ describe('ConfigValidator', () => {
     expect(fixedConfig.timeout).toBe(10000);
 
     expect(typeof fixedConfig.encryption.algorithm).toBe('string');
-    expect(fixedConfig.encryption.algorithm).toBe('AES-CTR');
+    expect(fixedConfig.encryption.algorithm).toBe('auto');
 
     expect(typeof fixedConfig.encryption.keySize).toBe('number');
     expect(fixedConfig.encryption.keySize).toBe(256);

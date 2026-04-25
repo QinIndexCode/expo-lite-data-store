@@ -1186,8 +1186,8 @@ interface FieldEncryptionConfig {
   encryption?: {
     /** HMAC algorithm to use (default: auto-select based on data size) */
     hmacAlgorithm?: 'SHA-256' | 'SHA-512';
-    /** Encryption algorithm to use (default: AES-CTR) */
-    encryptionAlgorithm?: 'AES-CTR';
+    /** Encryption algorithm to use (default: auto, which routes new writes through the GCM path) */
+    encryptionAlgorithm?: 'AES-CTR' | 'AES-GCM' | 'auto';
     /** Key size in bits (default: 256) */
     keySize?: 256;
   };

@@ -5,6 +5,7 @@
  * @version 1.0.0
  */
 import { configManager } from '../core/config/ConfigManager';
+import defaultConfig from '../defaultConfig';
 
 /**
  * 配置验证结果接口
@@ -123,7 +124,7 @@ export class ConfigValidator {
           result.errors.push('encryption.algorithm must be a string');
           result.isValid = false;
         } else {
-          const validAlgorithms = ['AES-CTR'];
+          const validAlgorithms = ['auto', 'AES-GCM', 'AES-CTR'];
           if (!validAlgorithms.includes(encryption.algorithm)) {
             result.warnings.push(`encryption.algorithm should be one of ${validAlgorithms.join(', ')}`);
           }
@@ -391,7 +392,7 @@ export class ConfigValidator {
     }
 
     if (typeof config.storageFolder !== 'string') {
-      config.storageFolder = 'expo-litedatastore';
+      config.storageFolder = defaultConfig.storageFolder;
     }
 
     const validSortMethods = ['default', 'fast', 'counting', 'merge', 'slow'];
@@ -413,8 +414,11 @@ export class ConfigValidator {
       config.encryption = {};
     }
 
-    if (typeof config.encryption.algorithm !== 'string' || !['AES-CTR'].includes(config.encryption.algorithm)) {
-      config.encryption.algorithm = 'AES-CTR';
+    if (
+      typeof config.encryption.algorithm !== 'string' ||
+      !['auto', 'AES-GCM', 'AES-CTR'].includes(config.encryption.algorithm)
+    ) {
+      config.encryption.algorithm = defaultConfig.encryption.algorithm;
     }
 
     if (typeof config.encryption.keySize !== 'number' || config.encryption.keySize !== 256) {

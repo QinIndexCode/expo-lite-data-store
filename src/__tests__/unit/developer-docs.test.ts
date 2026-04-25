@@ -6,7 +6,9 @@ describe('developer documentation contract', () => {
   const repoRoot = path.resolve(__dirname, '../../..');
   const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
     scripts: Record<string, string>;
+    homepage?: string;
   };
+  const githubBlobBase = 'https://github.com/QinIndexCode/expo-lite-data-store/blob/main';
   const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
   const readmeEn = fs.readFileSync(path.join(repoRoot, 'README.en.md'), 'utf8');
   const readmeZh = fs.readFileSync(path.join(repoRoot, 'README.zh-CN.md'), 'utf8');
@@ -67,15 +69,22 @@ describe('developer documentation contract', () => {
   });
 
   it('keeps the English consumer guide aligned with the release baseline and developer links', () => {
-    expect(readme).toContain('(./README.zh-CN.md)');
-    expect(readme).toContain('(./docs/EXPO_RUNTIME_QA.md)');
+    expect(packageJson.homepage).toContain('github.com/QinIndexCode/expo-lite-data-store');
+    expect(readme).toContain(`${githubBlobBase}/README.zh-CN.md`);
+    expect(readme).toContain(`${githubBlobBase}/docs/EXPO_RUNTIME_QA.md`);
     expect(readme).toContain('AUTH_ON_ACCESS_UNSUPPORTED');
     expect(readme).toContain('EXPO_MODULE_MISSING');
+    expect(readme).toContain('app.json');
+    expect(readme).toContain('configManager.updateConfig');
+    expect(readme).toContain('performanceMonitor');
+    expect(readme).toContain('$like');
+    expect(readme).toContain('$inc');
     expect(readme).toContain('npm run qa:baseline:expo-go');
     expect(readme).toContain('npm run qa:baseline:native-flagship');
     expect(readme).toContain('not support `npm install expo-lite-data-store` as a standalone installation step');
-    expect(readme).toContain('(./CONTRIBUTING.md)');
-    expect(readme).toContain('(./SECURITY.md)');
+    expect(readme).toContain(`${githubBlobBase}/CONTRIBUTING.md`);
+    expect(readme).toContain(`${githubBlobBase}/SECURITY.md`);
+    expect(readme).toContain(`${githubBlobBase}/LICENSE.txt`);
   });
 
   it('keeps the English alias page lightweight and linked to the canonical guide set', () => {
@@ -91,6 +100,11 @@ describe('developer documentation contract', () => {
     expect(readmeZh).toContain('(./docs/EXPO_RUNTIME_QA.zh-CN.md)');
     expect(readmeZh).toContain('AUTH_ON_ACCESS_UNSUPPORTED');
     expect(readmeZh).toContain('EXPO_MODULE_MISSING');
+    expect(readmeZh).toContain('app.json');
+    expect(readmeZh).toContain('configManager.updateConfig');
+    expect(readmeZh).toContain('performanceMonitor');
+    expect(readmeZh).toContain('$like');
+    expect(readmeZh).toContain('$inc');
     expect(readmeZh).toContain('npm run qa:baseline:expo-go');
     expect(readmeZh).toContain('npm run qa:baseline:native-flagship');
     expect(readmeZh).toContain('不支持把 `npm install expo-lite-data-store` 当作唯一安装步骤');
@@ -101,9 +115,21 @@ describe('developer documentation contract', () => {
   it('keeps the API guides explicit about the supported install contract and missing module errors', () => {
     expect(apiGuide).toContain('not a supported setup');
     expect(apiGuide).toContain('EXPO_MODULE_MISSING');
+    expect(apiGuide).toContain('WriteResult');
+    expect(apiGuide).toContain('configManager');
+    expect(apiGuide).toContain('performanceMonitor');
+    expect(apiGuide).toContain('app.json');
+    expect(apiGuide).toContain('$like');
+    expect(apiGuide).toContain('$inc');
     expect(apiGuide).toContain('npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store');
     expect(apiGuideZh).toContain('不属于受支持的安装方式');
     expect(apiGuideZh).toContain('EXPO_MODULE_MISSING');
+    expect(apiGuideZh).toContain('WriteResult');
+    expect(apiGuideZh).toContain('configManager');
+    expect(apiGuideZh).toContain('performanceMonitor');
+    expect(apiGuideZh).toContain('app.json');
+    expect(apiGuideZh).toContain('$like');
+    expect(apiGuideZh).toContain('$inc');
     expect(apiGuideZh).toContain('npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store');
   });
 

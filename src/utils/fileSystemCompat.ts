@@ -1,5 +1,3 @@
-import { requireOptionalNativeModule } from 'expo-modules-core';
-
 import { loadRequiredExpoModule } from './expoModuleLoader';
 
 type EncodingTypeShape = {
@@ -40,8 +38,11 @@ type NativeModernFileSystemModule = {
   documentDirectory?: string | null;
 };
 
+type RequireOptionalNativeModule = <T>(moduleName: string) => T | null;
+
 let cachedFileSystemModule: ExpoFileSystemCompat | null = null;
 let cachedModernFileSystemModule: any | null = null;
+let cachedRequireOptionalNativeModule: RequireOptionalNativeModule | null | undefined;
 
 const normalizeDirectoryUri = (uri?: string | null): string | null => {
   if (typeof uri !== 'string' || uri.length === 0) {
@@ -57,6 +58,26 @@ const createEncodingTypeShape = (): EncodingTypeShape => ({
   Base64WebSafe: 'base64web-safe',
   UTF16: 'utf16',
 });
+
+const getRequireOptionalNativeModule = (): RequireOptionalNativeModule | null => {
+  if (cachedRequireOptionalNativeModule !== undefined) {
+    return cachedRequireOptionalNativeModule;
+  }
+
+  try {
+    const expoModulesCore = require('expo-modules-core') as {
+      requireOptionalNativeModule?: RequireOptionalNativeModule;
+    };
+    cachedRequireOptionalNativeModule =
+      typeof expoModulesCore.requireOptionalNativeModule === 'function'
+        ? expoModulesCore.requireOptionalNativeModule
+        : null;
+  } catch {
+    cachedRequireOptionalNativeModule = null;
+  }
+
+  return cachedRequireOptionalNativeModule;
+};
 
 const hasLegacyFileSystemShape = (
   moduleValue: NativeLegacyFileSystemModule | null | undefined
@@ -87,6 +108,11 @@ const hasLegacyFileSystemShape = (
 
 const loadNativeLegacyFileSystemModule = (): ExpoFileSystemCompat | null => {
   try {
+    const requireOptionalNativeModule = getRequireOptionalNativeModule();
+    if (!requireOptionalNativeModule) {
+      return null;
+    }
+
     const nativeModule = requireOptionalNativeModule<NativeLegacyFileSystemModule>('ExponentFileSystem');
     if (!hasLegacyFileSystemShape(nativeModule)) {
       return null;
@@ -135,6 +161,11 @@ const loadModernFileSystemModule = (): any | null => {
   }
 
   try {
+    const requireOptionalNativeModule = getRequireOptionalNativeModule();
+    if (!requireOptionalNativeModule) {
+      return null;
+    }
+
     const nativeModernModule = requireOptionalNativeModule<NativeModernFileSystemModule>('FileSystem');
     if (nativeModernModule) {
       cachedModernFileSystemModule = {
