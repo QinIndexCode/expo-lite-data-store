@@ -16,12 +16,16 @@ import { performanceMonitor } from '../core/monitor/PerformanceMonitor';
 import { configManager } from '../core/config/ConfigManager';
 import ExpoConstants from 'expo-constants';
 
+const expoConstantsWithOwnership = ExpoConstants as typeof ExpoConstants & {
+  appOwnership?: string;
+};
+
 /**
  * Detects if running in Expo Go
  */
 const isExpoGo = (): boolean => {
   try {
-    return typeof ExpoConstants !== 'undefined' && (ExpoConstants as any)?.appOwnership === 'expo';
+    return typeof ExpoConstants !== 'undefined' && expoConstantsWithOwnership.appOwnership === 'expo';
   } catch {
     return false;
   }

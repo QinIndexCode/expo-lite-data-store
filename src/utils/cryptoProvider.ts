@@ -14,22 +14,55 @@ import { sha512 } from '@noble/hashes/sha512';
 import { bytesToHex } from './byteEncoding';
 import logger from './logger';
 
-type NativeCryptoModule = {
-  pbkdf2Sync?: (...args: any[]) => unknown;
-  randomBytes?: (length: number) => unknown;
-  createHash?: (algorithm: string) => {
-    update(data: string): void;
-    digest(encoding: string): string;
-  };
+type BinaryLike = ArrayBuffer | ArrayBufferView | ArrayLike<number>;
+type NativeHashAlgorithm = 'sha256' | 'sha512';
+type NativeDigest = 'sha256' | 'sha512';
+type GlobalRequire = (moduleName: string) => unknown;
+
+type NativeHashInstance = {
+  update(data: string): void;
+  digest(encoding: 'hex'): string;
 };
 
-let nativePBKDF2Sync: any;
-let nativeRandomBytes: any;
-let nativeCreateHash: any;
+type NativeCryptoModule = {
+  pbkdf2Sync?: (
+    password: string,
+    salt: Uint8Array,
+    iterations: number,
+    dkLen: number,
+    digest: NativeDigest
+  ) => BinaryLike;
+  randomBytes?: (length: number) => BinaryLike;
+  createHash?: (algorithm: NativeHashAlgorithm) => NativeHashInstance;
+};
+
+let nativePBKDF2Sync: NativeCryptoModule['pbkdf2Sync'];
+let nativeRandomBytes: NativeCryptoModule['randomBytes'];
+let nativeCreateHash: NativeCryptoModule['createHash'];
 let warned = false;
 let nativeChecked = false;
 let nativeEnabled = false;
 const NATIVE_CRYPTO_GLOBAL_KEY = '__expoLiteDataStoreNativeCrypto';
+
+const expoConstantsWithOwnership = ExpoConstants as typeof ExpoConstants & {
+  appOwnership?: string;
+};
+const expoCryptoWithFallback = ExpoCrypto as typeof ExpoCrypto & {
+  default?: typeof ExpoCrypto;
+};
+
+const toUint8Array = (value: BinaryLike): Uint8Array => {
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  return Uint8Array.from(value);
+};
 
 const getGlobalScope = (): Record<string, unknown> | undefined => {
   if (typeof globalThis !== 'undefined') {
@@ -83,7 +116,7 @@ const getRegisteredNativeCryptoModule = (): unknown => {
 
 const isExpoGo = () => {
   try {
-    return typeof ExpoConstants !== 'undefined' && (ExpoConstants as any)?.appOwnership === 'expo';
+    return typeof ExpoConstants !== 'undefined' && expoConstantsWithOwnership.appOwnership === 'expo';
   } catch {
     return false;
   }
@@ -130,7 +163,7 @@ const tryLoadNative = () => {
   }
   try {
     const moduleName = ['react-native-quick-crypto'].join('');
-    const reqFn = (global as any).require ?? require;
+    const reqFn = (typeof getGlobalScope()?.require === 'function' ? getGlobalScope()?.require : require) as GlobalRequire;
     const qcrypto = reqFn(moduleName);
     if (registerNativeCryptoModule(qcrypto)) {
       return true;
@@ -182,8 +215,12 @@ export const pbkdf2 = (
 ): Uint8Array => {
   devWarnOnce();
   if (useNative()) {
-    const buf = nativePBKDF2Sync(password, salt, iterations, dkLen, digest);
-    return new Uint8Array(buf);
+    const pbkdf2Sync = nativePBKDF2Sync;
+    if (!pbkdf2Sync) {
+      throw new Error('Native PBKDF2 is unavailable after native crypto initialization');
+    }
+    const buf = pbkdf2Sync(password, salt, iterations, dkLen, digest);
+    return toUint8Array(buf);
   }
   const hashFn = digest === 'sha256' ? sha256 : sha512;
   const out = noblePbkdf2(hashFn, password, salt, { c: iterations, dkLen });
@@ -207,19 +244,20 @@ export const hkdfDerive = (ikm: Uint8Array, salt: Uint8Array, dkLen: number): Ui
 export const randomBytes = (length: number): Uint8Array => {
   devWarnOnce();
   if (useNative()) {
-    const buf = nativeRandomBytes(length);
-    return new Uint8Array(buf);
+    const randomBytesFn = nativeRandomBytes;
+    if (!randomBytesFn) {
+      throw new Error('Native randomBytes is unavailable after native crypto initialization');
+    }
+    const buf = randomBytesFn(length);
+    return toUint8Array(buf);
   }
-  const getRB = (ExpoCrypto as any)?.getRandomBytes ?? (ExpoCrypto as any)?.default?.getRandomBytes;
+  const getRB = expoCryptoWithFallback.getRandomBytes ?? expoCryptoWithFallback.default?.getRandomBytes;
   if (typeof getRB === 'function') {
     const out = getRB(length);
-    if (out instanceof Uint8Array) return out;
-    if (Array.isArray(out)) return new Uint8Array(out);
-    if (out instanceof ArrayBuffer) return new Uint8Array(out);
-    if ((out as any)?.buffer instanceof ArrayBuffer) return new Uint8Array((out as any).buffer);
+    return toUint8Array(out);
   }
-  if (typeof crypto !== 'undefined' && (crypto as any).getRandomValues) {
-    return (crypto as any).getRandomValues(new Uint8Array(length));
+  if (typeof globalThis.crypto !== 'undefined' && typeof globalThis.crypto.getRandomValues === 'function') {
+    return globalThis.crypto.getRandomValues(new Uint8Array(length));
   }
   const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
   const isProduction = typeof process !== 'undefined' && process.env.NODE_ENV === 'production';
@@ -235,7 +273,11 @@ export const hash = async (data: string, algorithm: 'SHA-256' | 'SHA-512' = 'SHA
   devWarnOnce();
   if (useNative()) {
     const nativeAlgorithm = algorithm === 'SHA-256' ? 'sha256' : 'sha512';
-    const hasher = nativeCreateHash(nativeAlgorithm);
+    const createHash = nativeCreateHash;
+    if (!createHash) {
+      throw new Error('Native createHash is unavailable after native crypto initialization');
+    }
+    const hasher = createHash(nativeAlgorithm);
     hasher.update(data);
     return hasher.digest('hex');
   }
