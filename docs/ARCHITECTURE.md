@@ -67,7 +67,7 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 - Field-level and bulk encryption/decryption
 
 #### cryptoProvider.ts
-- Pure JavaScript fallback for Expo Go
+- Pure JavaScript fallback for Expo Go via `crypto-js`
 - Native acceleration via react-native-quick-crypto (optional)
 - expo-crypto integration for secure random bytes
 
@@ -209,7 +209,7 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 | Feature | Expo Go | Standalone APK/IPA |
 |---------|---------|-------------------|
 | File System | ✅ expo-file-system | ✅ expo-file-system |
-| Crypto | ✅ @noble/hashes (JS) | ✅ + native acceleration |
+| Crypto | ✅ crypto-js/native helpers (JS) | ✅ + native acceleration |
 | Secure Store | ✅ expo-secure-store | ✅ expo-secure-store |
 | Constants | ✅ expo-constants | ✅ expo-constants |
 | Native Crypto | ❌ (falls back to JS) | ✅ react-native-quick-crypto |

@@ -10,6 +10,25 @@ import { LiteStoreConfig, DeepPartial } from '../../types/config';
 import logger from '../../utils/logger';
 // Inline basic logger to avoid Metro bundler import issues
 
+type LiteStoreExtraConfig = {
+  extra?: {
+    liteStore?: DeepPartial<LiteStoreConfig>;
+  };
+};
+
+type ExpoConstantsConfigLike = LiteStoreExtraConfig & {
+  getConfig?: () => LiteStoreExtraConfig | null;
+  expoConfig?: LiteStoreExtraConfig | null;
+  manifest?: LiteStoreExtraConfig | null;
+  default?: ExpoConstantsConfigLike;
+};
+
+type LiteStoreGlobals = {
+  __expoConfig?: LiteStoreExtraConfig;
+  expo?: LiteStoreExtraConfig;
+  liteStoreConfig?: DeepPartial<LiteStoreConfig>;
+};
+
 /**
  * 配置管理器类
  * 支持从多个来源加载配置，具有明确的优先级顺序
@@ -74,6 +93,19 @@ export class ConfigManager {
     return value;
   }
 
+  private getGlobalLiteStoreConfig(): LiteStoreGlobals | undefined {
+    if (typeof global === 'undefined') {
+      return undefined;
+    }
+
+    return global as LiteStoreGlobals;
+  }
+
+  private extractLiteStoreConfig(config: LiteStoreExtraConfig | null | undefined): DeepPartial<LiteStoreConfig> | undefined {
+    const liteStoreConfig = config?.extra?.liteStore;
+    return liteStoreConfig && typeof liteStoreConfig === 'object' ? liteStoreConfig : undefined;
+  }
+
   /**
    * 加载配置
    * 按优先级顺序加载配置：默认配置 -> 环境变量 -> 自定义配置文件 -> 程序化配置
@@ -123,7 +155,7 @@ export class ConfigManager {
       envConfig.storageFolder = process.env.LITE_STORE_STORAGE_FOLDER;
     }
     if (process.env.LITE_STORE_SORT_METHODS) {
-      envConfig.sortMethods = process.env.LITE_STORE_SORT_METHODS as any;
+      envConfig.sortMethods = process.env.LITE_STORE_SORT_METHODS as LiteStoreConfig['sortMethods'];
     }
     if (process.env.LITE_STORE_TIMEOUT) {
       envConfig.timeout = parseInt(process.env.LITE_STORE_TIMEOUT, 10);
@@ -190,23 +222,16 @@ export class ConfigManager {
         try {
           // In Expo, get config directly from global.__expoConfig
           // More reliable way, directly accesses Expo internal config
-          if (typeof global !== 'undefined') {
-            const globalAny = global as any;
-
-            if (globalAny.__expoConfig) {
-              const expoConfig = globalAny.__expoConfig;
-
-              if (expoConfig.extra?.liteStore && typeof expoConfig.extra.liteStore === 'object') {
-                const liteStoreConfig = expoConfig.extra.liteStore;
-                logger.info('Configuration loaded from app.json via expo-constants');
-                return this.mergeConfig(baseConfig, liteStoreConfig);
-              }
-            }
+          const globalConfig = this.getGlobalLiteStoreConfig();
+          const globalExpoConfig = this.extractLiteStoreConfig(globalConfig?.__expoConfig);
+          if (globalExpoConfig) {
+            logger.info('Configuration loaded from app.json via expo-constants');
+            return this.mergeConfig(baseConfig, globalExpoConfig);
           }
 
           // 2. 尝试使用expo-constants获取配置
           try {
-            let Constants = require('expo-constants');
+            let Constants = require('expo-constants') as ExpoConstantsConfigLike;
 
             // If Constants is a module, try to get default export
             if (
@@ -218,13 +243,13 @@ export class ConfigManager {
               Constants = Constants.default;
             }
 
-            let expoConfig: null | { extra?: { liteStore?: any } } = null;
+            let expoConfig: LiteStoreExtraConfig | null = null;
 
             // Method 1: Use getConfig() (most reliable)
             if (typeof Constants.getConfig === 'function') {
               try {
                 expoConfig = Constants.getConfig();
-              } catch (getConfigError) {
+              } catch {
                 // IgnoregetConfig()错误
               }
             }
@@ -241,8 +266,8 @@ export class ConfigManager {
             // Method 3: Try to access extra from Constants
             if (!expoConfig && Constants.extra) {
               // Get liteStore config directly from Constants.extra
-              const liteStoreConfig = Constants.extra?.liteStore;
-              if (liteStoreConfig && typeof liteStoreConfig === 'object') {
+              const liteStoreConfig = this.extractLiteStoreConfig(Constants);
+              if (liteStoreConfig) {
                 logger.info('Configuration loaded from app.json via expo-constants');
                 return this.mergeConfig(baseConfig, liteStoreConfig);
               }
@@ -250,42 +275,33 @@ export class ConfigManager {
 
             if (expoConfig) {
               // Read config from app.json extra field
-              const liteStoreConfig = expoConfig.extra?.liteStore;
-              if (liteStoreConfig && typeof liteStoreConfig === 'object') {
+              const liteStoreConfig = this.extractLiteStoreConfig(expoConfig);
+              if (liteStoreConfig) {
                 logger.info('Configuration loaded from app.json via expo-constants');
                 return this.mergeConfig(baseConfig, liteStoreConfig);
               }
             }
-          } catch (expoConstantsError) {
+          } catch {
             // Ignoreexpo-constants加载错误
           }
 
           // 3. 尝试直接从global对象获取配置（备选方案）
-          if (typeof global !== 'undefined') {
-            const globalAny = global as any;
-
-            if (globalAny.expo && globalAny.expo.extra?.liteStore) {
-              const liteStoreConfig = globalAny.expo.extra?.liteStore;
-              if (liteStoreConfig && typeof liteStoreConfig === 'object') {
-                logger.info('Configuration loaded from app.json via expo-constants');
-                return this.mergeConfig(baseConfig, liteStoreConfig);
-              }
-            }
-
-            // 4. 尝试从global.liteStoreConfig获取配置
-            if (globalAny.liteStoreConfig) {
-              const customConfig = globalAny.liteStoreConfig;
-              if (customConfig && typeof customConfig === 'object') {
-                logger.info('Configuration loaded from global.liteStoreConfig');
-                return this.mergeConfig(baseConfig, customConfig);
-              }
-            }
+          const globalExpoFallback = this.extractLiteStoreConfig(globalConfig?.expo);
+          if (globalExpoFallback) {
+            logger.info('Configuration loaded from app.json via expo-constants');
+            return this.mergeConfig(baseConfig, globalExpoFallback);
           }
-        } catch (error) {
+
+          // 4. 尝试从global.liteStoreConfig获取配置
+          if (globalConfig?.liteStoreConfig && typeof globalConfig.liteStoreConfig === 'object') {
+            logger.info('Configuration loaded from global.liteStoreConfig');
+            return this.mergeConfig(baseConfig, globalConfig.liteStoreConfig);
+          }
+        } catch {
           // Ignore配置加载错误，使用默认配置
         }
       }
-    } catch (error) {
+    } catch {
       // Ignore所有配置文件加载错误，使用默认配置
     }
 
@@ -380,11 +396,11 @@ export class ConfigManager {
    */
   public get<T>(path: string): T | undefined {
     const keys = path.split('.');
-    let value: any = this.currentConfig;
+    let value: unknown = this.currentConfig;
 
     for (const key of keys) {
-      if (value && typeof value === 'object' && key in value) {
-        value = value[key];
+      if (value && typeof value === 'object' && key in (value as Record<string, unknown>)) {
+        value = (value as Record<string, unknown>)[key];
       } else {
         return undefined;
       }
@@ -398,7 +414,7 @@ export class ConfigManager {
    * @param path 配置路径，如 'encryption.encryptedFields'
    * @param value 配置值
    */
-  public set(path: string, value: any): void {
+  public set(path: string, value: unknown): void {
     const keys = path.split('.');
     const lastKey = keys.pop();
     if (!lastKey) return;
@@ -407,17 +423,17 @@ export class ConfigManager {
     keys.forEach(key => this.assertSafeConfigKey(key));
     this.assertSafeConfigKey(lastKey);
 
-    let config = this.customConfig as Record<string, any>;
+    let config = this.customConfig as Record<string, unknown>;
     for (const key of keys) {
       if (!Object.prototype.hasOwnProperty.call(config, key) || typeof config[key] !== 'object' || config[key] === null) {
         Object.defineProperty(config, key, {
-          value: this.createConfigContainer<Record<string, any>>(),
+          value: this.createConfigContainer<Record<string, unknown>>(),
           enumerable: true,
           configurable: true,
           writable: true,
         });
       }
-      config = config[key];
+      config = config[key] as Record<string, unknown>;
     }
     Object.defineProperty(config, lastKey, {
       value: this.sanitizeConfigValue(value),

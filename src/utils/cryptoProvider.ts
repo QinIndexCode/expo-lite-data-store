@@ -7,11 +7,8 @@
 
 import ExpoConstants from 'expo-constants';
 import * as ExpoCrypto from 'expo-crypto';
-import { pbkdf2 as noblePbkdf2 } from '@noble/hashes/pbkdf2';
-import { hkdf } from '@noble/hashes/hkdf';
-import { sha256 } from '@noble/hashes/sha256';
-import { sha512 } from '@noble/hashes/sha512';
-import { bytesToHex } from './byteEncoding';
+import { bytesToHex, hexToBytes } from './byteEncoding';
+import { hashBytesSync, hashHexSync, hkdfBytesSync, hmacBytesSync, pbkdf2BytesSync } from './cryptoPrimitives';
 import logger from './logger';
 
 type BinaryLike = ArrayBuffer | ArrayBufferView | ArrayLike<number>;
@@ -20,8 +17,13 @@ type NativeDigest = 'sha256' | 'sha512';
 type GlobalRequire = (moduleName: string) => unknown;
 
 type NativeHashInstance = {
-  update(data: string): void;
-  digest(encoding: 'hex'): string;
+  update(data: string | Uint8Array): NativeHashInstance;
+  digest(encoding?: 'hex'): string | BinaryLike;
+};
+
+type NativeHmacInstance = {
+  update(data: string | Uint8Array): NativeHmacInstance;
+  digest(encoding?: 'hex'): string | BinaryLike;
 };
 
 type NativeCryptoModule = {
@@ -34,11 +36,13 @@ type NativeCryptoModule = {
   ) => BinaryLike;
   randomBytes?: (length: number) => BinaryLike;
   createHash?: (algorithm: NativeHashAlgorithm) => NativeHashInstance;
+  createHmac?: (algorithm: NativeHashAlgorithm, key: Uint8Array) => NativeHmacInstance;
 };
 
 let nativePBKDF2Sync: NativeCryptoModule['pbkdf2Sync'];
 let nativeRandomBytes: NativeCryptoModule['randomBytes'];
 let nativeCreateHash: NativeCryptoModule['createHash'];
+let nativeCreateHmac: NativeCryptoModule['createHmac'];
 let warned = false;
 let nativeChecked = false;
 let nativeEnabled = false;
@@ -89,7 +93,7 @@ const normalizeNativeCryptoModule = (moduleValue: unknown): NativeCryptoModule |
 
 const hasNativeCryptoPrimitives = (
   moduleValue: NativeCryptoModule | undefined
-): moduleValue is Required<Pick<NativeCryptoModule, 'pbkdf2Sync' | 'randomBytes' | 'createHash'>> =>
+): moduleValue is NativeCryptoModule & Required<Pick<NativeCryptoModule, 'pbkdf2Sync' | 'randomBytes' | 'createHash'>> =>
   !!moduleValue &&
   typeof moduleValue.pbkdf2Sync === 'function' &&
   typeof moduleValue.randomBytes === 'function' &&
@@ -104,6 +108,7 @@ const applyNativeCryptoModule = (moduleValue: unknown): boolean => {
   nativePBKDF2Sync = normalizedModule.pbkdf2Sync;
   nativeRandomBytes = normalizedModule.randomBytes;
   nativeCreateHash = normalizedModule.createHash;
+  nativeCreateHmac = normalizedModule.createHmac;
   nativeChecked = true;
   nativeEnabled = true;
   return true;
@@ -161,25 +166,35 @@ const tryLoadNative = () => {
     nativeEnabled = false;
     return false;
   }
+  const reqFn = (typeof getGlobalScope()?.require === 'function' ? getGlobalScope()?.require : require) as GlobalRequire;
   try {
     const moduleName = ['react-native-quick-crypto'].join('');
-    const reqFn = (typeof getGlobalScope()?.require === 'function' ? getGlobalScope()?.require : require) as GlobalRequire;
     const qcrypto = reqFn(moduleName);
     if (registerNativeCryptoModule(qcrypto)) {
       return true;
     }
-    throw new Error('Native crypto module is missing required primitives');
   } catch {
-    if (!warned) {
-      warned = true;
-      logger.warn(
-        'Native crypto module not found. Using JavaScript fallback. Install react-native-quick-crypto for better performance.'
-      );
-    }
-    nativeChecked = true;
-    nativeEnabled = false;
-    return false;
+    // Fall through to alternate native providers.
   }
+
+  try {
+    const nodeCrypto = reqFn('node:crypto');
+    if (registerNativeCryptoModule(nodeCrypto)) {
+      return true;
+    }
+  } catch {
+    // Ignore Node crypto loading errors and continue to the JS fallback.
+  }
+
+  if (!warned) {
+    warned = true;
+    logger.warn(
+      'Native crypto module not found. Using JavaScript fallback. Install react-native-quick-crypto for better performance.'
+    );
+  }
+  nativeChecked = true;
+  nativeEnabled = false;
+  return false;
 };
 
 export const useNative = () => {
@@ -194,6 +209,7 @@ export const __resetNativeCryptoForTest = () => {
   nativePBKDF2Sync = undefined;
   nativeRandomBytes = undefined;
   nativeCreateHash = undefined;
+  nativeCreateHmac = undefined;
   nativeChecked = false;
   nativeEnabled = false;
   const globalScope = getGlobalScope();
@@ -222,9 +238,7 @@ export const pbkdf2 = (
     const buf = pbkdf2Sync(password, salt, iterations, dkLen, digest);
     return toUint8Array(buf);
   }
-  const hashFn = digest === 'sha256' ? sha256 : sha512;
-  const out = noblePbkdf2(hashFn, password, salt, { c: iterations, dkLen });
-  return out;
+  return pbkdf2BytesSync(password, salt, iterations, dkLen, digest);
 };
 
 /**
@@ -237,8 +251,7 @@ export const pbkdf2 = (
  * @returns Derived key material
  */
 export const hkdfDerive = (ikm: Uint8Array, salt: Uint8Array, dkLen: number): Uint8Array => {
-  // Use SHA-256 for HKDF (fast, sufficient security when IKM is already high-entropy)
-  return hkdf(sha256, ikm, salt, undefined, dkLen);
+  return hkdfBytesSync(ikm, salt, dkLen);
 };
 
 export const randomBytes = (length: number): Uint8Array => {
@@ -279,9 +292,28 @@ export const hash = async (data: string, algorithm: 'SHA-256' | 'SHA-512' = 'SHA
     }
     const hasher = createHash(nativeAlgorithm);
     hasher.update(data);
-    return hasher.digest('hex');
+    const digestResult = hasher.digest('hex');
+    return typeof digestResult === 'string' ? digestResult : bytesToHex(toUint8Array(digestResult));
   }
-  const fn = algorithm === 'SHA-256' ? sha256 : sha512;
-  const encoded = new TextEncoder().encode(data);
-  return bytesToHex(fn(encoded));
+  return hashHexSync(data, algorithm);
 };
+
+export const hmac = (
+  data: string | Uint8Array,
+  key: Uint8Array,
+  algorithm: 'SHA-256' | 'SHA-512' = 'SHA-512'
+): Uint8Array => {
+  devWarnOnce();
+  if (useNative()) {
+    const createHmac = nativeCreateHmac;
+    if (createHmac) {
+      const nativeAlgorithm = algorithm === 'SHA-256' ? 'sha256' : 'sha512';
+      const digestResult = createHmac(nativeAlgorithm, key).update(data).digest('hex');
+      return typeof digestResult === 'string' ? hexToBytes(digestResult) : toUint8Array(digestResult);
+    }
+  }
+  return hmacBytesSync(data, key, algorithm);
+};
+
+export const hashBytes = (data: string | Uint8Array, algorithm: 'SHA-256' | 'SHA-512' = 'SHA-512'): Uint8Array =>
+  hashBytesSync(data, algorithm);

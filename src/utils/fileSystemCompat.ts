@@ -7,10 +7,17 @@ type EncodingTypeShape = {
   UTF16?: string;
 };
 
+type FileInfoCompat = {
+  exists: boolean;
+  isDirectory?: boolean;
+  size?: number;
+  uri?: string;
+};
+
 export type ExpoFileSystemCompat = {
   documentDirectory?: string | null;
   EncodingType?: EncodingTypeShape;
-  getInfoAsync: (uri: string, options?: Record<string, unknown>) => Promise<any>;
+  getInfoAsync: (uri: string, options?: Record<string, unknown>) => Promise<FileInfoCompat>;
   makeDirectoryAsync: (uri: string, options?: { intermediates?: boolean }) => Promise<void>;
   writeAsStringAsync: (
     uri: string,
@@ -38,10 +45,19 @@ type NativeModernFileSystemModule = {
   documentDirectory?: string | null;
 };
 
+type ModernFileSystemCompat = {
+  documentDirectory?: string | null;
+  Paths?: {
+    document?: {
+      uri?: string | null;
+    };
+  };
+};
+
 type RequireOptionalNativeModule = <T>(moduleName: string) => T | null;
 
 let cachedFileSystemModule: ExpoFileSystemCompat | null = null;
-let cachedModernFileSystemModule: any | null = null;
+let cachedModernFileSystemModule: ModernFileSystemCompat | null | undefined = null;
 let cachedRequireOptionalNativeModule: RequireOptionalNativeModule | null | undefined;
 
 const normalizeDirectoryUri = (uri?: string | null): string | null => {
@@ -155,7 +171,11 @@ const loadFileSystemModule = (): ExpoFileSystemCompat => {
   return cachedFileSystemModule;
 };
 
-const loadModernFileSystemModule = (): any | null => {
+const loadModernFileSystemModule = (): ModernFileSystemCompat | null => {
+  if (cachedModernFileSystemModule === undefined) {
+    return null;
+  }
+
   if (cachedModernFileSystemModule !== null) {
     return cachedModernFileSystemModule;
   }
@@ -178,7 +198,7 @@ const loadModernFileSystemModule = (): any | null => {
   }
 
   try {
-    cachedModernFileSystemModule = loadRequiredExpoModule<any>('expo-file-system');
+    cachedModernFileSystemModule = loadRequiredExpoModule<ModernFileSystemCompat>('expo-file-system');
   } catch {
     cachedModernFileSystemModule = undefined;
   }

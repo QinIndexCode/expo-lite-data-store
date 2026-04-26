@@ -8,8 +8,6 @@
  */
 
 import { gcm } from '@noble/ciphers/aes';
-import { sha256 } from '@noble/hashes/sha256';
-import { bytesToHex } from './byteEncoding';
 import { pbkdf2, randomBytes } from './cryptoProvider';
 import { CryptoError } from './crypto-errors';
 import { performanceMonitor } from '../core/monitor/PerformanceMonitor';
@@ -108,9 +106,8 @@ const base64ToBytes = (base64: string): Uint8Array => {
 const deriveGCMKey = async (masterKey: string, salt: Uint8Array): Promise<Uint8Array> => {
   const iterations = getGCMIterations();
 
-  const masterKeyHash = bytesToHex(sha256(masterKey)).substring(0, 16);
   const saltStr = bytesToBase64(salt);
-  const cacheKey = `gcm_${masterKeyHash}_${saltStr}_${iterations}`;
+  const cacheKey = `gcm_${masterKey.slice(0, 16)}_${saltStr}_${iterations}`;
 
   // Check cache first
   const cached = gcmKeyCache.get(cacheKey);

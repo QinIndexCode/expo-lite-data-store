@@ -1,7 +1,7 @@
 ﻿/**
  * Encryption utility module
  * Expo SDK 54 compliant version (AES-256-CTR + HMAC-SHA512 emulates GCM)
- * Dependencies: expo-crypto (randomness) + @noble/ciphers (encryption) + @noble/hashes (HMAC & hashing)
+ * Dependencies: expo-crypto (randomness) + @noble/ciphers (encryption) + crypto-js/native helpers (HMAC & hashing)
  *
  * @module crypto
  * @since 2025-11-17
@@ -10,6 +10,7 @@
  *   - 2025-11-17: Initial implementation for Expo SDK 54
  *   - 2025-12-09: Fixed Base64 encoding/decoding issues in Expo environment
  *   - 2026-01-20: Migrated from crypto-es to @noble/ciphers and @noble/hashes
+ *   - 2026-04-26: Replaced @noble/hashes runtime usage with crypto-js/native helpers to avoid Metro export warnings
  */
 import bcrypt from 'bcryptjs';
 import logger from './logger';
@@ -18,11 +19,13 @@ import { configManager } from '../core/config/ConfigManager';
 
 // Use standard ES module imports
 import { ctr } from '@noble/ciphers/aes';
-import { hmac } from '@noble/hashes/hmac';
-import { sha256 } from '@noble/hashes/sha256';
-import { sha512 } from '@noble/hashes/sha512';
-import { bytesToHex } from './byteEncoding';
-import { pbkdf2 as providerPbkdf2, randomBytes as providerRandomBytes, hkdfDerive } from './cryptoProvider';
+import {
+  hash as providerHash,
+  hmac as providerHmac,
+  hkdfDerive,
+  pbkdf2 as providerPbkdf2,
+  randomBytes as providerRandomBytes,
+} from './cryptoProvider';
 import { encryptGCM, decryptGCM, encryptGCMBulk, decryptGCMBulk } from './crypto-gcm';
 import { CryptoError } from './crypto-errors';
 import { loadOptionalExpoModule, loadRequiredExpoModule } from './expoModuleLoader';
@@ -135,7 +138,7 @@ const base64ToUint8Array = (str: string): Uint8Array => {
  * @param obj Object to serialize
  * @returns Base64 encoded JSON string
  */
-const jsonToBase64 = (obj: any): string => {
+const jsonToBase64 = (obj: unknown): string => {
   const jsonStr = JSON.stringify(obj);
   const utf8Bytes = new TextEncoder().encode(jsonStr);
   return bytesToBase64(utf8Bytes);
@@ -147,10 +150,10 @@ const jsonToBase64 = (obj: any): string => {
  * @param str Base64 encoded JSON string
  * @returns Deserialized object
  */
-const base64ToJson = (str: string): any => {
+const base64ToJson = <T>(str: string): T => {
   const bytes = base64ToBytes(str);
   const jsonStr = new TextDecoder().decode(bytes);
-  return JSON.parse(jsonStr);
+  return JSON.parse(jsonStr) as T;
 };
 
 /**
@@ -561,8 +564,8 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
     ensureKeyCacheCleanupInitialized();
 
     // Step 1: Get or derive root key (PBKDF2, one-time per masterKey)
-    const masterKeyHash = bytesToHex(sha256(masterKey));
-    let rootKey = rootKeyCache.get(masterKeyHash);
+    const rootCacheKey = masterKey;
+    let rootKey = rootKeyCache.get(rootCacheKey);
 
     if (!rootKey) {
       // First time: expensive PBKDF2 operation (~2s in Expo Go with 20K iterations)
@@ -570,7 +573,7 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
       const rootSalt = new Uint8Array([0x72, 0x6f, 0x6f, 0x74, 0x2d, 0x6b, 0x65, 0x79]); // "root-key"
       const iterations = getIterations();
       rootKey = providerPbkdf2(masterKey, rootSalt, iterations, 64, 'sha256');
-      rootKeyCache.set(masterKeyHash, rootKey);
+      rootKeyCache.set(rootCacheKey, rootKey);
     }
 
     // Step 2: Fast HKDF-expand for per-record keys (~3渭s)
@@ -584,7 +587,7 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
 
     // Also cache in the LRU keyCache for stats tracking
     const saltStr = bytesToBase64(salt);
-    const cacheKey = `${masterKeyHash.substring(0, 16)}_${saltStr}`;
+    const cacheKey = `${masterKey.slice(0, 16)}_${saltStr}`;
     const cachedEntry = keyCache.get(cacheKey);
     if (!cachedEntry) {
       keyCache.set(cacheKey, {
@@ -658,9 +661,7 @@ const selectHMACAlgorithm = (dataSize: number): 'SHA-256' | 'SHA-512' => {
  */
 const computeHMAC = (data: string, hmacKey: Uint8Array, algorithm?: 'SHA-256' | 'SHA-512'): Uint8Array => {
   const selectedAlgorithm = algorithm || selectHMACAlgorithm(data.length);
-
-  const hashFn = selectedAlgorithm === 'SHA-256' ? sha256 : sha512;
-  return hmac(hashFn, hmacKey, data);
+  return providerHmac(data, hmacKey, selectedAlgorithm);
 };
 
 /**
@@ -1161,10 +1162,8 @@ export const generateHash = async (data: string, algorithm: 'SHA-256' | 'SHA-512
           throw new CryptoError(`Unsupported hash algorithm: ${algorithm}`, 'HASH_FAILED');
       }
     } else {
-      // Fallback for non-Expo, using @noble/hashes
-      logger.warn('Expo Crypto not available, using @noble/hashes for hashing');
-      const hashFn = algorithm === 'SHA-256' ? sha256 : sha512;
-      return bytesToHex(hashFn(data));
+      logger.warn('Expo Crypto not available, using JavaScript hashing fallback');
+      return providerHash(data, algorithm);
     }
   } catch (error) {
     throw new CryptoError('Hash generation failed', 'HASH_FAILED', error);
@@ -1198,9 +1197,9 @@ interface FieldEncryptionConfig {
  * @param config 鍔犲瘑閰嶇疆
  * @returns Promise<Record<string, any>> 瀛楁绾у姞瀵嗗悗鐨勫璞? */
 export const encryptFields = async (
-  data: Record<string, any>,
+  data: Record<string, unknown>,
   fieldConfig: FieldEncryptionConfig
-): Promise<Record<string, any>> => {
+): Promise<Record<string, unknown>> => {
   const result = { ...data };
 
   // Only encrypt fields requiring encryption
@@ -1224,9 +1223,9 @@ export const encryptFields = async (
  * @param config 瑙ｅ瘑閰嶇疆
  * @returns Promise<Record<string, any>> 瀛楁绾цВ瀵嗗悗鐨勫璞? */
 export const decryptFields = async (
-  data: Record<string, any>,
+  data: Record<string, unknown>,
   fieldConfig: FieldEncryptionConfig
-): Promise<Record<string, any>> => {
+): Promise<Record<string, unknown>> => {
   const result = { ...data };
   const fieldsToDecrypt = fieldConfig.fields.filter(
     field => result[field] !== undefined && result[field] !== null && typeof result[field] === 'string'
@@ -1274,9 +1273,9 @@ export const decryptFields = async (
  * @param fieldConfig 鍔犲瘑閰嶇疆
  * @returns Promise<Record<string, any>[]> 鎵归噺瀛楁绾у姞瀵嗗悗鐨勫璞℃暟缁? */
 export const encryptFieldsBulk = async (
-  dataArray: Record<string, any>[],
+  dataArray: Record<string, unknown>[],
   fieldConfig: FieldEncryptionConfig
-): Promise<Record<string, any>[]> => {
+): Promise<Record<string, unknown>[]> => {
   if (dataArray.length === 0) return dataArray;
 
   // Collect values for all fields requiring encryption
@@ -1324,9 +1323,9 @@ export const encryptFieldsBulk = async (
  * @param config 瑙ｅ瘑閰嶇疆
  * @returns Promise<Record<string, any>[]> 鎵归噺瀛楁绾цВ瀵嗗悗鐨勫璞℃暟缁? */
 export const decryptFieldsBulk = async (
-  dataArray: Record<string, any>[],
+  dataArray: Record<string, unknown>[],
   fieldConfig: FieldEncryptionConfig
-): Promise<Record<string, any>[]> => {
+): Promise<Record<string, unknown>[]> => {
   if (dataArray.length === 0) return dataArray;
 
   // Collect values for all fields requiring decryption
@@ -1340,7 +1339,7 @@ export const decryptFieldsBulk = async (
 
   // Batch decrypt each field value
   const decryptionPromises: Promise<void>[] = [];
-  const decryptedValues: { [field: string]: any[] } = {};
+  const decryptedValues: Record<string, unknown[]> = {};
 
   for (const [field, values] of Object.entries(fieldValues)) {
     decryptionPromises.push(
