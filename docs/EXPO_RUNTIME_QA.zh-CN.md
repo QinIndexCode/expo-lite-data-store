@@ -2,7 +2,7 @@
 
 本文档说明 `expo-lite-data-store` 当前维护的运行时 QA 基线，面向贡献者与发布维护者。目标是用工件和运行时证据证明：打包后的 npm 产物在 Expo Go 和原生旗舰配置下确实按契约工作。
 
-[English](./EXPO_RUNTIME_QA.md) | [消费者文档](../README.zh-CN.md) | [API 参考](./API.zh-CN.md) | [变更日志](./CHANGELOG.zh-CN.md)
+[README 入口](../README.md) | [English](./EXPO_RUNTIME_QA.en.md) | [API 参考](./API.zh-CN.md) | [变更日志](./CHANGELOG.zh-CN.md)
 
 ## 适用范围
 

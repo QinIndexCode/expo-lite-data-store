@@ -2,7 +2,7 @@
 
 面向 Expo 应用的本地结构化存储库，已针对 Expo SDK 54 下的 Expo Go、managed app 和原生开发构建完成运行时验证。
 
-[English](./README.md) | [English Alias](./README.en.md) | [API 参考](./docs/API.zh-CN.md) | [运行时 QA 指南](./docs/EXPO_RUNTIME_QA.zh-CN.md) | [变更日志](./docs/CHANGELOG.zh-CN.md)
+[README 入口](./README.md) | [English](./README.en.md) | [API 参考](./docs/API.zh-CN.md) | [运行时 QA 指南](./docs/EXPO_RUNTIME_QA.zh-CN.md) | [变更日志](./docs/CHANGELOG.zh-CN.md)
 
 ## 概览
 
@@ -528,14 +528,15 @@ npm run qa:baseline:release
 ## 文档入口
 
 - API 参考： [docs/API.zh-CN.md](./docs/API.zh-CN.md)
-- 英文 API 参考： [docs/API.md](./docs/API.md)
+- 英文 API 参考： [docs/API.en.md](./docs/API.en.md)
 - 运行时 QA 流程、lane 定义、verdict 语义与工件结构： [docs/EXPO_RUNTIME_QA.zh-CN.md](./docs/EXPO_RUNTIME_QA.zh-CN.md)
 - 变更日志： [docs/CHANGELOG.zh-CN.md](./docs/CHANGELOG.zh-CN.md)
-- 英文变更日志： [docs/CHANGELOG.md](./docs/CHANGELOG.md)
+- 英文变更日志： [docs/CHANGELOG.en.md](./docs/CHANGELOG.en.md)
 - 架构说明： [docs/ARCHITECTURE.zh-CN.md](./docs/ARCHITECTURE.zh-CN.md)
 - 贡献指南： [CONTRIBUTING.zh-CN.md](./CONTRIBUTING.zh-CN.md)
 - 安全策略： [SECURITY.zh-CN.md](./SECURITY.zh-CN.md)
-- 英文开发者文档： [README.md](./README.md)
+- README 入口页： [README.md](./README.md)
+- 英文开发者文档： [README.en.md](./README.en.md)
 
 ## 许可证
 

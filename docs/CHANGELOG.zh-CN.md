@@ -2,7 +2,7 @@
 
 本文件记录本项目所有值得说明的重要变更。
 
-[English](./CHANGELOG.md) | [消费者文档](../README.zh-CN.md) | [API 参考](./API.zh-CN.md)
+[README 入口](../README.md) | [English](./CHANGELOG.en.md) | [API 参考](./API.zh-CN.md)
 
 ## [2.0.0] - 2026-04-23
 

@@ -2,7 +2,7 @@
 
 `expo-lite-data-store` 是一个面向 Expo 应用的本地存储库。安全问题应通过私下渠道报告，在维护者确认披露时间之前，不应先公开发布 GitHub Issue。
 
-[English](./SECURITY.md) | [README](./README.zh-CN.md) | [贡献指南](./CONTRIBUTING.zh-CN.md)
+[README 入口](./README.md) | [English](./SECURITY.en.md) | [贡献指南](./CONTRIBUTING.zh-CN.md)
 
 ## 支持版本
 

@@ -1,8 +1,8 @@
 # 更新日志
 
-[English](./updatelog.md) | [English Alias](./updatelog.en.md) | [消费者文档](../README.zh-CN.md)
+[README 入口](../README.md) | [English](./updatelog.en.md) | [消费者文档](../README.zh-CN.md)
 
-### 📅 2026-04-23 `v2.0.0` 正式版发布加固与发布验证
+### 📅 2026-04-26 `v2.0.0` 正式版发布加固与发布验证
 
 > 正式发布：在完成 build、typecheck、全量 Jest、Expo consumer smoke 和打包验证后，将包提升为稳定版 `2.0.0`
 > 消费者契约：正式定义 Expo SDK 54 下受支持的 `npx expo install ...` 安装流程，并记录可选的 native flagship 加密依赖路径
@@ -25,7 +25,7 @@
 > 代码组织：移动 CryptoService 到 core/crypto/，删除空目录
 > 新增文件：crypto-gcm.ts（GCM 加密模块）、crypto-errors.ts（错误定义）、crypto-types.ts（类型定义）
 > 新增文件：PathHelper.ts（路径管理）、envUtils.ts（环境检测）
-> 新增文件：.prettierignore、COMMENT_SPECIFICATION 文档（中英文）
+> 新增文件：.prettierignore、COMMENT\_SPECIFICATION 文档（中英文）
 > 测试：365 个测试全部通过，新增 GCM 加密测试
 
 ### 📅 2026-01-28 `v2.0.0-beta.2`  Expo Go 加密性能与 Provider 加固
@@ -58,7 +58,7 @@
 
 ### 📅 2025-12-22 `v2.0.0-beta.2`  配置系统简化与文档完善
 
-> 文档更新：更新README.md、README.en.md、WIKI.md、WIKI_EN.md，简化配置描述和加密推荐模式
+> 文档更新：更新README.md、README.en.md、WIKI.md、WIKI\_EN.md，简化配置描述和加密推荐模式
 > 配置系统：移除了根目录下创建配置文件的代码，仅支持app.json配置和源代码默认配置，适配Expo Go环境
 > 配置清理：移除了api.version、encryption.requireAuthOnAccess、cache.enableCompression等非必要配置
 > 性能配置：启用performance.maxConcurrentOperations、performance.enableBatchOptimization、performance.memoryWarningThreshold、cache.cleanupInterval配置
@@ -66,9 +66,9 @@
 > 修复：CacheManager.ts中处理已移除的cache.enableCompression属性，返回默认值false
 > 修复：ConfigManager.test.ts中移除对已删除requireAuthOnAccess属性的引用
 > 修复：ConfigValidator.ts中移除对已删除配置选项的验证
-> 修复：首次启动时"delete from table app_settings failed"的错误
+> 修复：首次启动时"delete from table app\_settings failed"的错误
 > 包配置：调整package-env.json的exports配置，适配简化的npm上传版本
-> 文档优化：简化README内容，详细内容移至WIKI，并添加加密写入/读取性能优化的Q&A
+> 文档优化：简化README内容，详细内容移至WIKI，并添加加密写入/读取性能优化的Q\&A
 
 ### 📅 2025-12-20 `v2.0.0-beta.2`  性能优化与文档完善
 

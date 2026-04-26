@@ -2,7 +2,7 @@
 
 感谢为 `expo-lite-data-store` 做出贡献。本仓库维护的是一个经过真实运行时验证的 Expo 存储库，因此贡献质量不仅以“能编译”为准，还以打包后的 npm 产物在真实 Expo consumer 中是否按契约工作为准。
 
-[English](./CONTRIBUTING.md) | [README](./README.zh-CN.md) | [安全策略](./SECURITY.zh-CN.md) | [运行时 QA 指南](./docs/EXPO_RUNTIME_QA.zh-CN.md)
+[README 入口](./README.md) | [English](./CONTRIBUTING.en.md) | [安全策略](./SECURITY.zh-CN.md) | [运行时 QA 指南](./docs/EXPO_RUNTIME_QA.zh-CN.md)
 
 ## 贡献范围
 
@@ -78,9 +78,9 @@ npm run qa:baseline:native-flagship
 
 本仓库采用以下文档规则：
 
-- 英文规范文档使用 `.md`
+- 正式英文文档使用 `.en.md`
 - 简体中文对应文档使用 `.zh-CN.md`
-- 只有在“作为英文别名页跳转到规范英文文档”时，才使用 `.en.md`
+- 裸 `.md` 文件只作为仓库索引页或内部维护文档，不承担正式终端用户文档正文
 
 当公开行为、安装要求、QA 语义或发布策略发生变化时，需要：
 

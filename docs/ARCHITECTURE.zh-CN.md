@@ -1,6 +1,6 @@
 # Expo Lite Data Store 架构设计文档
 
-[English](./ARCHITECTURE.md) | [English Alias](./ARCHITECTURE.en.md) | [消费者文档](../README.zh-CN.md)
+[README 入口](../README.md) | [English](./ARCHITECTURE.en.md) | [消费者文档](../README.zh-CN.md)
 
 // 创建于: 2025-11-28
 // 最后修改: 2026-01-22

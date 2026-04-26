@@ -1,6 +1,6 @@
 # 注释规范 / Comment Specification
 
-[English](./COMMENT_SPECIFICATION.md) | [English Alias](./COMMENT_SPECIFICATION.en.md) | [消费者文档](../README.zh-CN.md)
+[README 入口](../README.md) | [English](./COMMENT_SPECIFICATION.en.md) | [消费者文档](../README.zh-CN.md)
 
 ## 1. 文件头注释 / File Header Comment
 

@@ -1,6 +1,6 @@
 # Expo Lite Data Store API 参考
 
-[English](./API.md) | [消费者文档](../README.zh-CN.md) | [运行时 QA 指南](./EXPO_RUNTIME_QA.zh-CN.md) | [变更日志](./CHANGELOG.zh-CN.md)
+[README 入口](../README.md) | [English](./API.en.md) | [运行时 QA 指南](./EXPO_RUNTIME_QA.zh-CN.md) | [变更日志](./CHANGELOG.zh-CN.md)
 
 ## 文档范围
 
@@ -771,6 +771,6 @@ try {
 ## 相关文档
 
 - 消费者文档： [../README.zh-CN.md](../README.zh-CN.md)
-- 英文 API 参考： [./API.md](./API.md)
+- 英文 API 参考： [./API.en.md](./API.en.md)
 - 运行时 QA 指南： [./EXPO_RUNTIME_QA.zh-CN.md](./EXPO_RUNTIME_QA.zh-CN.md)
 - 变更日志： [./CHANGELOG.zh-CN.md](./CHANGELOG.zh-CN.md)
