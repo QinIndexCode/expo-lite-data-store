@@ -4,7 +4,7 @@
  *
  * @module crypto-gcm
  * @since 2026-04-01
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { gcm } from '@noble/ciphers/aes';

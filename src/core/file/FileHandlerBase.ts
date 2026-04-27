@@ -2,7 +2,7 @@
  * @module FileHandlerBase
  * @description Abstract base class for file handlers with common functionality
  * @since 2025-11-28
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import * as Crypto from 'expo-crypto';

@@ -2,7 +2,7 @@
  * @module StorageTaskProcessor
  * @description Storage task processor for queue-based storage operations
  * @since 2025-11-28
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { FileSystemStorageAdapter } from '../core/adapter/FileSystemStorageAdapter';

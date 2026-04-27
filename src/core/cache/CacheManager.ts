@@ -2,7 +2,7 @@
  * @module CacheManager
  * @description Cache manager with LRU/LFU strategies, compression, and protection mechanisms
  * @since 2025-11-28
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { CACHE } from '../constants';

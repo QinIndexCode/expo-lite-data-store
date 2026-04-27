@@ -2,7 +2,7 @@
  * @module IndexManager
  * @description Index manager for unique and non-unique field indexing
  * @since 2025-11-28
- * @version 1.0.0
+ * @version 2.0.0
  */
 import { IMetadataManager } from '../../types/metadataManagerInfc';
 import { StorageError } from '../../types/storageErrorInfc';

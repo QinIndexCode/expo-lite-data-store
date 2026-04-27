@@ -2,7 +2,7 @@
  * @module TransactionService
  * @description Transaction service managing begin, commit, and rollback operations
  * @since 2025-11-28
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { QueryEngine } from '../query/QueryEngine';

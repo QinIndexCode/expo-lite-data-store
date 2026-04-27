@@ -2,7 +2,7 @@
  * @module QueryEngine
  * @description Query engine for data filtering, sorting, pagination, and aggregation
  * @since 2025-11-28
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import type { FilterCondition } from '../../types/storageTypes';

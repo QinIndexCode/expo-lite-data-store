@@ -1,8 +1,8 @@
-﻿/**
+/**
  * @module FileSystemStorageAdapter
  * @description File system storage adapter implementing IStorageAdapter interface
  * @since 2025-11-19
- * @version 1.0.0
+ * @version 2.0.0
  */
 // Created
 // Last modified

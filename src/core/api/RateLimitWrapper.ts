@@ -2,7 +2,7 @@
  * @module RateLimitWrapper
  * @description Rate limiter wrapper for API request throttling
  * @since 2025-11-28
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { RATE_LIMIT } from '../constants';

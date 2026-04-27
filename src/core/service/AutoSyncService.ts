@@ -2,7 +2,7 @@
  * @module AutoSyncService
  * @description Auto-sync service for periodic dirty data synchronization to disk
  * @since 2025-11-28
- * @version 1.0.0
+ * @version 2.0.0
  */
 import { FileSystemStorageAdapter } from '../adapter/FileSystemStorageAdapter';
 

@@ -2,7 +2,7 @@
  * @module storageErrorInfc
  * @description Storage error class with detailed error messages and suggestions
  * @since 2025-11-19
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { StorageErrorCode } from './storageErrorCode';

@@ -2,7 +2,7 @@
  * @module ConfigManager
  * @description Configuration manager supporting multiple configuration sources
  * @since 2025-11-19
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import defaultConfig from '../../defaultConfig';

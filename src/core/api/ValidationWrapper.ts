@@ -2,7 +2,7 @@
  * @module ValidationWrapper
  * @description Validation wrapper for input data verification
  * @since 2025-12-03
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { StorageError } from '../../types/storageErrorInfc';

@@ -2,7 +2,7 @@
  * @module metadataManagerInfc
  * @description Metadata manager interface definition
  * @since 2025-11-19
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import type { TableSchema } from '../core/meta/MetadataManager';

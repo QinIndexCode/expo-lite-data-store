@@ -2,7 +2,7 @@
  * @module crypto-types
  * @description Shared type definitions for encryption modules
  * @since 2026-04-02
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 /**
