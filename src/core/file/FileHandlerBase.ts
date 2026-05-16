@@ -5,8 +5,8 @@
  * @version 2.0.0
  */
 
-import * as Crypto from 'expo-crypto';
 import { StorageError } from '../../types/storageErrorInfc';
+import { hashHexSync } from '../../utils/cryptoPrimitives';
 import logger from '../../utils/logger';
 import { getFileSystem } from '../../utils/fileSystemCompat';
 
@@ -68,7 +68,7 @@ export abstract class FileHandlerBase {
    */
   protected async computeHash(data: any): Promise<string> {
     const content = JSON.stringify(data);
-    return await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, content);
+    return hashHexSync(content, 'SHA-256');
   }
 
   /**

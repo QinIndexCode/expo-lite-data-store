@@ -146,10 +146,6 @@ export class PerformanceMonitor {
     this.metricsRetention = PerformanceMonitor.getMetricsRetention();
     this.sampleRate = DEFAULT_SAMPLE_RATE;
     this.thresholds = { ...DEFAULT_THRESHOLDS };
-
-    if (typeof process === 'undefined' || process.env?.NODE_ENV !== 'test') {
-      this.startMetricsCleanupTimer();
-    }
   }
 
   configure(options: PerformanceMonitorOptions): void {
@@ -197,6 +193,7 @@ export class PerformanceMonitor {
       return;
     }
 
+    this.ensureMetricsCleanupTimerStarted();
     this.metrics.push(metrics);
 
     if (this.metrics.length > this.maxRecords) {
@@ -260,6 +257,14 @@ export class PerformanceMonitor {
     this.cleanupTimer = setInterval(() => {
       this.cleanupOldMetrics();
     }, 60000);
+  }
+
+  private ensureMetricsCleanupTimerStarted(): void {
+    if (this.cleanupTimer || (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test')) {
+      return;
+    }
+
+    this.startMetricsCleanupTimer();
   }
 
   stopMetricsCleanupTimer(): void {

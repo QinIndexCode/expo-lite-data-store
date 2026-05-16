@@ -12,10 +12,20 @@ import { pbkdf2, randomBytes } from './cryptoProvider';
 import { CryptoError } from './crypto-errors';
 import { performanceMonitor } from '../core/monitor/PerformanceMonitor';
 import { configManager } from '../core/config/ConfigManager';
-import ExpoConstants from 'expo-constants';
+import { loadOptionalExpoModule } from './expoModuleLoader';
 
-const expoConstantsWithOwnership = ExpoConstants as typeof ExpoConstants & {
+type ExpoConstantsRuntime = {
   appOwnership?: string;
+};
+
+let cachedExpoConstants: ExpoConstantsRuntime | null | undefined;
+
+const getExpoConstants = (): ExpoConstantsRuntime | null => {
+  if (cachedExpoConstants === undefined) {
+    cachedExpoConstants = loadOptionalExpoModule<ExpoConstantsRuntime>('expo-constants') ?? null;
+  }
+
+  return cachedExpoConstants;
 };
 
 /**
@@ -23,7 +33,7 @@ const expoConstantsWithOwnership = ExpoConstants as typeof ExpoConstants & {
  */
 const isExpoGo = (): boolean => {
   try {
-    return typeof ExpoConstants !== 'undefined' && expoConstantsWithOwnership.appOwnership === 'expo';
+    return getExpoConstants()?.appOwnership === 'expo';
   } catch {
     return false;
   }

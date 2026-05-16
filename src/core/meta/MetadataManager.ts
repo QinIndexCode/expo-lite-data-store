@@ -64,9 +64,7 @@ export class MetadataManager {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private loadPromise: Promise<void> | null = null;
 
-  constructor() {
-    this.loadPromise = this.load();
-  }
+  constructor() {}
 
   private async getMetaFilePath(): Promise<string> {
     const rootPath = await ensureStorageRootReady();
@@ -102,9 +100,10 @@ export class MetadataManager {
   }
 
   async waitForLoad(): Promise<void> {
-    if (this.loadPromise) {
-      await this.loadPromise;
+    if (!this.loadPromise) {
+      this.loadPromise = this.load();
     }
+    await this.loadPromise;
   }
 
   async reload(): Promise<void> {

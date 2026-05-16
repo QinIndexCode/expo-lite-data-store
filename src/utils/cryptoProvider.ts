@@ -5,16 +5,24 @@
  * @version 2.0.0
  */
 
-import ExpoConstants from 'expo-constants';
-import * as ExpoCrypto from 'expo-crypto';
 import { bytesToHex, hexToBytes } from './byteEncoding';
 import { hashBytesSync, hashHexSync, hkdfBytesSync, hmacBytesSync, pbkdf2BytesSync } from './cryptoPrimitives';
+import { loadOptionalExpoModule } from './expoModuleLoader';
 import logger from './logger';
 
 type BinaryLike = ArrayBuffer | ArrayBufferView | ArrayLike<number>;
 type NativeHashAlgorithm = 'sha256' | 'sha512';
 type NativeDigest = 'sha256' | 'sha512';
 type GlobalRequire = (moduleName: string) => unknown;
+type ExpoConstantsRuntime = {
+  appOwnership?: string;
+};
+type ExpoCryptoRuntime = {
+  getRandomBytes?: (length: number) => BinaryLike;
+  default?: {
+    getRandomBytes?: (length: number) => BinaryLike;
+  };
+};
 
 type NativeHashInstance = {
   update(data: string | Uint8Array): NativeHashInstance;
@@ -46,14 +54,9 @@ let nativeCreateHmac: NativeCryptoModule['createHmac'];
 let warned = false;
 let nativeChecked = false;
 let nativeEnabled = false;
+let cachedExpoConstants: ExpoConstantsRuntime | null | undefined;
+let cachedExpoCrypto: ExpoCryptoRuntime | null | undefined;
 const NATIVE_CRYPTO_GLOBAL_KEY = '__expoLiteDataStoreNativeCrypto';
-
-const expoConstantsWithOwnership = ExpoConstants as typeof ExpoConstants & {
-  appOwnership?: string;
-};
-const expoCryptoWithFallback = ExpoCrypto as typeof ExpoCrypto & {
-  default?: typeof ExpoCrypto;
-};
 
 const toUint8Array = (value: BinaryLike): Uint8Array => {
   if (value instanceof Uint8Array) {
@@ -119,9 +122,25 @@ const getRegisteredNativeCryptoModule = (): unknown => {
   return globalScope ? globalScope[NATIVE_CRYPTO_GLOBAL_KEY] : undefined;
 };
 
+const getExpoConstants = (): ExpoConstantsRuntime | null => {
+  if (cachedExpoConstants === undefined) {
+    cachedExpoConstants = loadOptionalExpoModule<ExpoConstantsRuntime>('expo-constants') ?? null;
+  }
+
+  return cachedExpoConstants;
+};
+
+const getExpoCrypto = (): ExpoCryptoRuntime | null => {
+  if (cachedExpoCrypto === undefined) {
+    cachedExpoCrypto = loadOptionalExpoModule<ExpoCryptoRuntime>('expo-crypto') ?? null;
+  }
+
+  return cachedExpoCrypto;
+};
+
 const isExpoGo = () => {
   try {
-    return typeof ExpoConstants !== 'undefined' && expoConstantsWithOwnership.appOwnership === 'expo';
+    return getExpoConstants()?.appOwnership === 'expo';
   } catch {
     return false;
   }
@@ -212,6 +231,8 @@ export const __resetNativeCryptoForTest = () => {
   nativeCreateHmac = undefined;
   nativeChecked = false;
   nativeEnabled = false;
+  cachedExpoConstants = undefined;
+  cachedExpoCrypto = undefined;
   const globalScope = getGlobalScope();
   if (globalScope && NATIVE_CRYPTO_GLOBAL_KEY in globalScope) {
     try {
@@ -264,7 +285,8 @@ export const randomBytes = (length: number): Uint8Array => {
     const buf = randomBytesFn(length);
     return toUint8Array(buf);
   }
-  const getRB = expoCryptoWithFallback.getRandomBytes ?? expoCryptoWithFallback.default?.getRandomBytes;
+  const expoCrypto = getExpoCrypto();
+  const getRB = expoCrypto?.getRandomBytes ?? expoCrypto?.default?.getRandomBytes;
   if (typeof getRB === 'function') {
     const out = getRB(length);
     return toUint8Array(out);
