@@ -16,6 +16,10 @@ describe('DataReader', () => {
   const testTableName = 'test_table';
 
   beforeEach(() => {
+    if ((global as any).__expo_file_system_mock__) {
+      (global as any).__expo_file_system_mock__.mockFileSystem = {};
+    }
+
     // 创建新的实例用于每个测试
     metadataManager = new MetadataManager();
     cacheManager = new CacheManager({
@@ -74,7 +78,7 @@ describe('DataReader', () => {
       });
     });
 
-    it('should not recover corrupted single-file data when metadata is missing', async () => {
+    it('should reject corrupted single-file data when metadata is missing', async () => {
       if ((global as any).__expo_file_system_mock__) {
         (global as any).__expo_file_system_mock__.mockFileSystem['/mock/documents/lite-data-store/test_table.ldb'] =
           JSON.stringify({
@@ -85,9 +89,7 @@ describe('DataReader', () => {
 
       metadataManager.delete(testTableName);
 
-      const result = await dataReader.read(testTableName);
-
-      expect(result).toEqual([]);
+      await expect(dataReader.read(testTableName)).rejects.toBeDefined();
       expect(metadataManager.get(testTableName)).toBeUndefined();
     });
 

@@ -171,6 +171,111 @@ describe('ChunkedFileHandler', () => {
       // @ts-ignore - Intentionally passing invalid data type
       await expect(chunkedFileHandler.write('invalid data')).rejects.toThrow();
     });
+
+    it('should reject a corrupted chunk instead of silently dropping its records', async () => {
+      await chunkedFileHandler.write([{ id: 1, name: 'original' }]);
+
+      const chunkPath = '/mock/documents/lite-data-store/test_chunked_table/000000.ldb';
+      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+      const parsed = JSON.parse(fileSystem[chunkPath]);
+      parsed.data[0].name = 'tampered';
+      fileSystem[chunkPath] = JSON.stringify(parsed);
+
+      await expect(chunkedFileHandler.readAll()).rejects.toMatchObject({ code: 'CORRUPTED_DATA' });
+    });
+
+    it('should not clear corrupted source data when an overwrite cannot take a snapshot', async () => {
+      await chunkedFileHandler.write([{ id: 1, name: 'original' }]);
+
+      const chunkPath = '/mock/documents/lite-data-store/test_chunked_table/000000.ldb';
+      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+      fileSystem[chunkPath] = '{corrupted';
+
+      await expect(chunkedFileHandler.write([{ id: 2, name: 'replacement' }])).rejects.toMatchObject({
+        code: 'CORRUPTED_DATA',
+      });
+      expect(fileSystem[chunkPath]).toBe('{corrupted');
+    });
+
+    it('should restore previous data when a chunked overwrite fails', async () => {
+      const originalData = [{ id: 1, name: 'original' }];
+      await chunkedFileHandler.write(originalData);
+
+      const handler = chunkedFileHandler as any;
+      const originalWriteChunk = handler.writeChunk.bind(handler);
+      let writeAttempts = 0;
+      const writeSpy = jest.spyOn(handler, 'writeChunk').mockImplementation(async (...args: any[]) => {
+        writeAttempts++;
+        if (writeAttempts === 1) {
+          throw new Error('injected chunk write failure');
+        }
+        return originalWriteChunk(...args);
+      });
+
+      await expect(chunkedFileHandler.write([{ id: 2, name: 'replacement' }])).rejects.toThrow();
+      writeSpy.mockRestore();
+
+      await expect(chunkedFileHandler.readAll()).resolves.toEqual(originalData);
+    });
+
+    it('should reject non-serializable records without silently dropping them', async () => {
+      const originalData = [{ id: 1, name: 'original' }];
+      await chunkedFileHandler.write(originalData);
+
+      const circular: Record<string, any> = { id: 2 };
+      circular.self = circular;
+
+      await expect(chunkedFileHandler.write([circular])).rejects.toThrow();
+      await expect(chunkedFileHandler.readAll()).resolves.toEqual(originalData);
+    });
+
+    it('should recover previous data from a pending overwrite journal after an interrupted clear', async () => {
+      const originalData = [{ id: 1, name: 'original' }];
+      const replacementData = [{ id: 2, name: 'replacement' }];
+      await chunkedFileHandler.write(originalData);
+
+      await (chunkedFileHandler as any).writeOverwriteJournal(originalData, replacementData);
+      await chunkedFileHandler.clear();
+
+      const restartedHandler = new ChunkedFileHandler(testTableName, metadataManager);
+      await expect(restartedHandler.readAll()).resolves.toEqual(originalData);
+
+      const journalPath = '/mock/documents/lite-data-store/test_chunked_table.overwrite-journal';
+      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+      expect(fileSystem[journalPath]).toBeUndefined();
+    });
+
+    it('should keep completed replacement data when an overwrite journal is left behind', async () => {
+      const originalData = [{ id: 1, name: 'original' }];
+      const replacementData = [{ id: 2, name: 'replacement' }];
+      await chunkedFileHandler.write(originalData);
+
+      await (chunkedFileHandler as any).writeOverwriteJournal(originalData, replacementData);
+      await chunkedFileHandler.clear();
+      await chunkedFileHandler.append(replacementData);
+
+      const restartedHandler = new ChunkedFileHandler(testTableName, metadataManager);
+      await expect(restartedHandler.readAll()).resolves.toEqual(replacementData);
+    });
+
+    it('should invalidate cached chunks after an overwrite', async () => {
+      await chunkedFileHandler.write([{ id: 1, name: 'original' }]);
+      await chunkedFileHandler.readAll();
+
+      await chunkedFileHandler.write([{ id: 2, name: 'replacement' }]);
+
+      await expect(chunkedFileHandler.readAll()).resolves.toEqual([{ id: 2, name: 'replacement' }]);
+    });
+
+    it('should reject a corrupted overwrite journal instead of guessing recovery state', async () => {
+      await chunkedFileHandler.write([{ id: 1, name: 'original' }]);
+
+      const journalPath = '/mock/documents/lite-data-store/test_chunked_table.overwrite-journal';
+      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+      fileSystem[journalPath] = '{corrupted';
+
+      await expect(chunkedFileHandler.readAll()).rejects.toMatchObject({ code: 'CORRUPTED_DATA' });
+    });
   });
 
   describe('Chunk Processing Tests', () => {
@@ -222,6 +327,16 @@ describe('ChunkedFileHandler', () => {
       expect(readLog).toContain('contentPreview=');
       expect(readLog).toContain('[truncated ');
       expect(readLog).not.toContain(payload);
+    });
+
+    it('preserves chunk order when a later chunk is preloaded', async () => {
+      await chunkedFileHandler.write([{ id: 1 }]);
+      await chunkedFileHandler.append([{ id: 2 }]);
+      await chunkedFileHandler.append([{ id: 3 }]);
+
+      await chunkedFileHandler.preloadChunks([1]);
+
+      await expect(chunkedFileHandler.readAll()).resolves.toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
     });
   });
 });

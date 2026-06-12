@@ -249,4 +249,15 @@ describe('MetadataManager', () => {
       expect(result.tables[testTableName]).toBeDefined();
     });
   });
+
+  it('should reject corrupted existing metadata without overwriting it', async () => {
+    const metaPath = '/mock/documents/lite-data-store/meta.ldb';
+    const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+    fileSystem[metaPath] = 'not-valid-json';
+
+    const manager = new MetadataManager();
+    await expect(manager.waitForLoad()).rejects.toMatchObject({ code: 'META_FILE_READ_ERROR' });
+    expect(fileSystem[metaPath]).toBe('not-valid-json');
+    manager.cleanup();
+  });
 });

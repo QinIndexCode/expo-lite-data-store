@@ -2,7 +2,7 @@
  * @module configValidator
  * @description Configuration validator for ConfigManager parameters
  * @since 2025-11-19
- * @version 2.0.0
+ * @version 2.0.1
  */
 import { configManager } from '../core/config/ConfigManager';
 import defaultConfig from '../defaultConfig';

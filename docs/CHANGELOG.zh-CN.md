@@ -4,6 +4,19 @@
 
 [README 入口](../README.md) | [English](./CHANGELOG.en.md) | [API 参考](./API.zh-CN.md)
 
+## [2.0.1] - 2026-06-12
+
+### 变更
+- 将正式支持的 Expo 安装契约升级到 Expo SDK 56
+- 将 Expo 运行时 peer 依赖和本地开发依赖对齐到 `expo@~56.0.11`、`expo-constants@~56.0.18`、`expo-crypto@~56.0.4`、`expo-file-system@~56.0.8`、`expo-secure-store@~56.0.4`、React 19.2、React Native 0.85 和 TypeScript 6.0
+- 同步更新 README、运行时 QA、包元数据和源码头信息，确保 2.0.1 / SDK 56 发布候选信息一致
+- 将 `package-lock.json` 纳入发布依赖面，并在发布门禁中加入生产依赖审计和 no-high 审计检查
+
+### 修复
+- 加固分块覆盖写恢复、分块缓存失效、元数据损坏处理、单文件损坏处理和事务回滚快照等存储可靠性路径
+- 加固安全行为：表名在适配器边界被拒绝，生产环境下 SecureStore 或安全随机数不可用时加密流程失败即拒绝
+- 将压力测试改为默认有界且可复现，同时保留通过环境变量放大规模的能力
+
 ## [2.0.0] - 2026-04-23
 
 ### 新增

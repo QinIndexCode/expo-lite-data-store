@@ -2,7 +2,7 @@
  * @module CacheManager
  * @description Cache manager with LRU/LFU strategies, compression, and protection mechanisms
  * @since 2025-11-28
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import { CACHE } from '../constants';
@@ -465,6 +465,9 @@ export class CacheManager {
 
       // May be deleted by other logic, skip
       if (!item) continue;
+      // A key can be refreshed before an older heap entry expires. Only the
+      // heap entry matching the current item expiry is allowed to evict it.
+      if (item.expiry !== top[0]) continue;
 
       const itemSize = this.calculateDataSize(item.data);
       this.stats.memoryUsage -= itemSize;

@@ -116,7 +116,7 @@ describe('smoke expo consumer helpers', () => {
       status: 0,
       stdout: JSON.stringify([
         {
-          filename: 'expo-lite-data-store-2.0.0.tgz',
+          filename: 'expo-lite-data-store-2.0.1.tgz',
           files: [{ path: 'README.md' }],
         },
       ]),

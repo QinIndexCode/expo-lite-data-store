@@ -1,6 +1,7 @@
 // src/core/__tests__/EncryptedStorageAdapter.test.ts
 import { EncryptedStorageAdapter } from '../EncryptedStorageAdapter';
 import { MetadataManager } from '../meta/MetadataManager';
+import storage from '../adapter/FileSystemStorageAdapter';
 
 describe('EncryptedStorageAdapter', () => {
   let adapter: EncryptedStorageAdapter;
@@ -37,6 +38,25 @@ describe('EncryptedStorageAdapter', () => {
   });
 
   describe('数据读写', () => {
+    it('应该通过加密写入路径持久化 initialData', async () => {
+      const initialTable = 'test_encrypted_initial_data';
+      const initialData = [{ id: 1, secret: 'plain-secret', visible: 'ok' }];
+
+      try {
+        await adapter.createTable(initialTable, {
+          encrypted: true,
+          encryptedFields: ['secret'],
+          initialData,
+        });
+
+        const rawData = await storage.read(initialTable, { bypassCache: true });
+        expect(rawData[0]?.secret).not.toBe('plain-secret');
+        await expect(adapter.read(initialTable, { bypassCache: true })).resolves.toEqual(initialData);
+      } finally {
+        await adapter.deleteTable(initialTable);
+      }
+    });
+
     it('应该能够写入和读取加密数据', async () => {
       const testData = { id: 1, name: 'Alice', age: 25 };
       

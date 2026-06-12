@@ -1,6 +1,6 @@
 # expo-lite-data-store
 
-面向 Expo 应用的本地结构化存储库，已针对 Expo SDK 54 下的 Expo Go、managed app 和原生开发构建完成运行时验证。
+面向 Expo 应用的本地结构化存储库，已针对 Expo SDK 56 下的 Expo Go、managed app 和原生开发构建完成运行时验证。
 
 [README 入口](./README.md) | [English](./README.en.md) | [API 参考](./docs/API.zh-CN.md) | [运行时 QA 指南](./docs/EXPO_RUNTIME_QA.zh-CN.md) | [变更日志](./docs/CHANGELOG.zh-CN.md)
 
@@ -21,9 +21,9 @@
 
 | 运行面 | 状态 |
 | --- | --- |
-| Expo SDK | `54.x` |
-| React | `19.1.x` |
-| React Native | `0.81.x` |
+| Expo SDK | `56.x` |
+| React | `19.2.x` |
+| React Native | `0.85.x` |
 | Managed App | 支持 |
 | Expo Go | 支持本文档定义的运行契约 |
 | Native Dev Client / 独立应用 | 支持，且推荐用于原生加密性能验证 |
@@ -32,7 +32,7 @@
 
 本库不支持把 `npm install expo-lite-data-store` 当作唯一安装步骤。
 
-对 Expo SDK 54 而言，唯一受支持的基础安装命令是：
+对 Expo SDK 56 而言，唯一受支持的基础安装命令是：
 
 ```bash
 npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store
@@ -60,7 +60,7 @@ npx expo install react-native-quick-crypto
 
 | 契约 | 状态 | 说明 |
 | --- | --- | --- |
-| `npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store` | 正式支持 | Expo SDK 54 下的 managed-compatible 安装契约 |
+| `npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store` | 正式支持 | Expo SDK 56 下的 managed-compatible 安装契约 |
 | 在上一条基础上额外安装 `react-native-quick-crypto` | 正式支持 | 用于 native dev client 或独立应用中的原生旗舰加密验证 |
 | 仅执行 `npm install expo-lite-data-store` | 不支持 | 可能导致 Expo peer 依赖缺失或版本未对齐 |
 

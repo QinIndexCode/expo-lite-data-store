@@ -2,7 +2,7 @@
  * @module FileHandlerBase
  * @description Abstract base class for file handlers with common functionality
  * @since 2025-11-28
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import { StorageError } from '../../types/storageErrorInfc';

@@ -1,16 +1,17 @@
 ﻿/**
  * Encryption utility module
- * Expo SDK 54 compliant version (AES-256-CTR + HMAC-SHA512 emulates GCM)
+ * Expo SDK 56 compliant version (AES-256-CTR + HMAC-SHA512 emulates GCM)
  * Dependencies: expo-crypto (randomness) + @noble/ciphers (encryption) + crypto-js/native helpers (HMAC & hashing)
  *
  * @module crypto
  * @since 2025-11-17
- * @version 2.0.0
+ * @version 2.0.1
  * @changelog
  *   - 2025-11-17: Initial implementation for Expo SDK 54
  *   - 2025-12-09: Fixed Base64 encoding/decoding issues in Expo environment
  *   - 2026-01-20: Migrated from crypto-es to @noble/ciphers and @noble/hashes
  *   - 2026-04-26: Replaced @noble/hashes runtime usage with crypto-js/native helpers to avoid Metro export warnings
+ *   - 2026-06-12: Updated the supported dependency contract for Expo SDK 56
  */
 import bcrypt from 'bcryptjs';
 import logger from './logger';
@@ -834,7 +835,7 @@ const decryptCTR = async (encryptedBase64: string, masterKey: string): Promise<s
  *
  * @description
  * - Uses expo-secure-store if available
- * - Falls back to in-memory storage if secure storage is unavailable
+ * - Uses an in-memory fallback only in tests
  * - Supports biometric authentication when required
  */
 export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promise<string> => {
@@ -872,10 +873,13 @@ export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promis
 
         return key;
       } catch (secureStoreError) {
-        logger.warn('SecureStore unavailable, using in-memory key storage fallback:', secureStoreError);
+        if (!isTestEnvironment) {
+          throw new CryptoError('SecureStore unavailable; refusing non-persistent master key fallback', 'KEY_DERIVE_FAILED', secureStoreError);
+        }
+        logger.warn('SecureStore unavailable in test environment, using in-memory key storage fallback:', secureStoreError);
       }
     } else if (!isTestEnvironment) {
-      logger.warn('SecureStore not available, using in-memory master key storage');
+      throw new CryptoError('SecureStore not available; refusing non-persistent master key fallback', 'KEY_DERIVE_FAILED');
     }
 
     let key = inMemoryStore.get(MASTER_KEY_ALIAS);
@@ -891,7 +895,11 @@ export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promis
     }
 
     logger.error('Failed to retrieve encryption key:', error);
-    logger.warn('All key retrieval methods failed, generating in-memory key as last resort');
+    if (!isTestEnvironment) {
+      throw error;
+    }
+
+    logger.warn('All key retrieval methods failed in test environment, generating in-memory key as last resort');
 
     let key = inMemoryStore.get(MASTER_KEY_ALIAS);
     if (!key) {
@@ -1235,33 +1243,28 @@ export const decryptFields = async (
 
   // 1. Batch process all encrypted fields
   const decryptPromises = fieldsToDecrypt.map(async field => {
-    try {
-      const encryptedValue = result[field] as string;
+    const encryptedValue = result[field] as string;
 
-      // 2. Reuse the existing decrypt function so key caches still apply
-      const decryptedStr = await decrypt(encryptedValue, fieldConfig.masterKey);
+    // 2. Reuse the existing decrypt function so key caches still apply
+    const decryptedStr = await decrypt(encryptedValue, fieldConfig.masterKey);
 
-      // 3. 绫诲瀷鎭㈠閫昏緫淇濇寔涓嶅彉
-      if (/^[\{\[]/.test(decryptedStr.trim())) {
-        result[field] = JSON.parse(decryptedStr);
-      } else {
-        const trimmed = decryptedStr.trim();
-        if (/^true$/i.test(trimmed)) result[field] = true;
-        else if (/^false$/i.test(trimmed)) result[field] = false;
-        else if (/^null$/i.test(trimmed)) result[field] = null;
-        else if (/^[-+]?\d*\.?\d+([eE][-+]?\d+)?$/.test(trimmed) && !trimmed.startsWith('+0')) {
-          if (decryptedStr.includes('+') && !decryptedStr.startsWith('+0')) {
-            result[field] = decryptedStr;
-          } else {
-            result[field] = Number(decryptedStr);
-          }
-        } else {
+    // 3. 绫诲瀷鎭㈠閫昏緫淇濇寔涓嶅彉
+    if (/^[\{\[]/.test(decryptedStr.trim())) {
+      result[field] = JSON.parse(decryptedStr);
+    } else {
+      const trimmed = decryptedStr.trim();
+      if (/^true$/i.test(trimmed)) result[field] = true;
+      else if (/^false$/i.test(trimmed)) result[field] = false;
+      else if (/^null$/i.test(trimmed)) result[field] = null;
+      else if (/^[-+]?\d*\.?\d+([eE][-+]?\d+)?$/.test(trimmed) && !trimmed.startsWith('+0')) {
+        if (decryptedStr.includes('+') && !decryptedStr.startsWith('+0')) {
           result[field] = decryptedStr;
+        } else {
+          result[field] = Number(decryptedStr);
         }
+      } else {
+        result[field] = decryptedStr;
       }
-    } catch (error) {
-      logger.warn(`Failed to decrypt field ${field}:`, error);
-      // Keep original encrypted value, don not throw error
     }
   });
 
@@ -1300,8 +1303,9 @@ export const encryptFieldsBulk = async (
     );
   }
 
-  // Use Promise.allSettled for better fault tolerance
-  await Promise.allSettled(encryptionPromises);
+  // Encryption must be all-or-nothing. Returning partially encrypted records
+  // would persist plaintext when any field encryption fails.
+  await Promise.all(encryptionPromises);
 
   // Rebuild result array
   return dataArray.map((item, index) => {

@@ -2,6 +2,18 @@
 
 [README 入口](../README.md) | [English](./updatelog.en.md) | [消费者文档](../README.zh-CN.md)
 
+### 📅 2026-06-12 `v2.0.1` Expo SDK 56 升级、存储加固与发布验证准备
+
+> 实现审计：基于当前源码和实跑结果检查文件存储、分块存储、事务、加密、缓存、元数据与发布脚本，而不是仅依赖文档状态
+> 可靠性：为分块表覆盖写入新增 overwrite journal，支持中断后的恢复；同时修复分块缓存失效、腐坏 chunk/metadata/single-file 静默吞错、事务回滚快照不完整等问题
+> 安全性：将表名校验下沉到文件系统适配器边界；加密字段写入/读取改为失败即拒绝；生产环境拒绝 SecureStore 或安全随机数不可用时的非持久/不安全回退
+> 性能：分块 append 不再为了计算数量读取整表，改用元数据计数路径；性能测试配置恢复覆盖真实 benchmark 文件
+> 发布门禁：发布工作流改为执行完整 `prepublishOnly`，覆盖测试、构建、类型检查、Expo consumer smoke 和打包验证
+> Expo 升级：将正式支持的消费端契约和本地开发工具链升级到 Expo SDK 56、React 19.2、React Native 0.85 与 TypeScript 6.0
+> 验证结果：`npx expo install --check` 通过，`npm run prepublishOnly` 通过 59 个套件 / 504 个测试及压力测试、发布 smoke 检查，`npm pack --dry-run --json --ignore-scripts` 生成 `expo-lite-data-store-2.0.1.tgz`，`git diff --check` 通过
+> 继续完善：将 `package-lock.json` 纳入版本控制并对齐 Expo 56 peer/dev 依赖版本下限，消除 dev audit 中的 critical；新增 `audit:prod` 与 `audit:no-high` 发布门禁
+> 压力测试：`test:stress` 改为默认有界、可用 `LDS_STRESS_*` 环境变量放大、并使用可复现随机种子；该压力回归现已纳入 `test:all`
+
 ### 📅 2026-04-26 `v2.0.0` 正式版发布加固与发布验证
 
 > 正式发布：在完成 build、typecheck、全量 Jest、Expo consumer smoke 和打包验证后，将包提升为稳定版 `2.0.0`

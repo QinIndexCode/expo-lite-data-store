@@ -1,6 +1,6 @@
 # expo-lite-data-store
 
-Local structured storage for Expo applications, with runtime-tested support for Expo Go, managed apps, and native development builds on Expo SDK 54.
+Local structured storage for Expo applications, with runtime-tested support for Expo Go, managed apps, and native development builds on Expo SDK 56.
 
 [README Entry](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/README.md) | [简体中文](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/README.zh-CN.md) | [API Reference](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/API.en.md) | [Runtime QA Guide](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/EXPO_RUNTIME_QA.en.md) | [Changelog](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/CHANGELOG.en.md)
 
@@ -21,9 +21,9 @@ The package is designed around the following runtime guarantees:
 
 | Surface | Status |
 | --- | --- |
-| Expo SDK | `54.x` |
-| React | `19.1.x` |
-| React Native | `0.81.x` |
+| Expo SDK | `56.x` |
+| React | `19.2.x` |
+| React Native | `0.85.x` |
 | Managed apps | Supported |
 | Expo Go | Supported for the documented contract below |
 | Native dev client / standalone app | Supported and recommended for native crypto validation |
@@ -32,7 +32,7 @@ The package is designed around the following runtime guarantees:
 
 This package does not support `npm install expo-lite-data-store` as a standalone installation step.
 
-The only supported base install command for Expo SDK 54 is:
+The only supported base install command for Expo SDK 56 is:
 
 ```bash
 npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store
@@ -60,7 +60,7 @@ That design avoids version drift such as:
 
 | Contract | Status | Notes |
 | --- | --- | --- |
-| `npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store` | Supported | Required managed-compatible contract for Expo SDK 54 |
+| `npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store` | Supported | Required managed-compatible contract for Expo SDK 56 |
 | Previous command plus `react-native-quick-crypto` | Supported | Required for native flagship validation in a dev client or standalone build |
 | `npm install expo-lite-data-store` only | Not supported | May leave Expo peer dependencies missing or version-misaligned |
 

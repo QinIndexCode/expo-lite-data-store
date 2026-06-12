@@ -2,7 +2,7 @@
  * @module StorageStrategy
  * @description Storage strategy for single-file vs chunked storage selection
  * @since 2025-11-28
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 // Define storage record type

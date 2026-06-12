@@ -2,7 +2,7 @@
  * @module logger
  * @description Colored console logging utility for development
  * @since 2025-11-19
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 // Detect ANSI color code support

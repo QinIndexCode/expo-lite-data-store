@@ -4,7 +4,7 @@
  * 
  * @module storageAdapterInfc
  * @since 2025-11-19
- * @version 2.0.0
+ * @version 2.0.1
  */
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from './storageTypes';
 

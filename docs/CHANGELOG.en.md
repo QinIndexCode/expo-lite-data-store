@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 [README Entry](../README.md) | [简体中文](./CHANGELOG.zh-CN.md) | [API Reference](./API.en.md)
 
+## [2.0.1] - 2026-06-12
+
+### Changed
+- Upgraded the supported Expo install contract to Expo SDK 56
+- Aligned Expo runtime peers and local development dependencies with `expo@~56.0.11`, `expo-constants@~56.0.18`, `expo-crypto@~56.0.4`, `expo-file-system@~56.0.8`, `expo-secure-store@~56.0.4`, React 19.2, React Native 0.85, and TypeScript 6.0
+- Updated README, runtime QA guidance, package metadata, and source headers to describe the 2.0.1 / SDK 56 release candidate consistently
+- Added `package-lock.json` to the release-controlled dependency surface and expanded the publish gate with production and no-high audit checks
+
+### Fixed
+- Hardened storage reliability around chunk overwrite recovery, stale chunk-cache invalidation, metadata corruption handling, single-file corruption handling, and transaction rollback snapshots
+- Hardened security behavior so invalid table names are rejected at the adapter boundary and production encryption fails closed when secure storage or secure randomness is unavailable
+- Made the stress test bounded and reproducible by default while preserving environment-controlled scale-up
+
 ## [2.0.0] - 2026-04-23
 
 ### Added

@@ -60,26 +60,18 @@ describe('SingleFileHandler', () => {
       expect(result).toEqual([]);
     });
 
-    it('should return empty array for corrupted data', async () => {
+    it('should reject corrupted data instead of treating it as an empty table', async () => {
       if ((global as any).__expo_file_system_mock__) {
-        (global as any).__expo_file_system_mock__.mockFileSystem[testFilePath] = {
-          type: 'file',
-          content: 'not-valid-json',
-        };
+        (global as any).__expo_file_system_mock__.mockFileSystem[testFilePath] = 'not-valid-json';
       }
-      const result = await handler.read();
-      expect(result).toEqual([]);
+      await expect(handler.read()).rejects.toMatchObject({ code: 'CORRUPTED_DATA' });
     });
 
-    it('should return empty array for missing hash', async () => {
+    it('should reject data with a missing integrity hash', async () => {
       if ((global as any).__expo_file_system_mock__) {
-        (global as any).__expo_file_system_mock__.mockFileSystem[testFilePath] = {
-          type: 'file',
-          content: JSON.stringify({ data: [{ id: 1 }] }),
-        };
+        (global as any).__expo_file_system_mock__.mockFileSystem[testFilePath] = JSON.stringify({ data: [{ id: 1 }] });
       }
-      const result = await handler.read();
-      expect(result).toEqual([]);
+      await expect(handler.read()).rejects.toMatchObject({ code: 'CORRUPTED_DATA' });
     });
   });
 

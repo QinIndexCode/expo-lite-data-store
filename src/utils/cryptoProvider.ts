@@ -2,7 +2,7 @@
  * @module cryptoProvider
  * @description Cryptographic primitives provider with Expo Go compatibility
  * @since 2025-11-17
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import { bytesToHex, hexToBytes } from './byteEncoding';
@@ -295,8 +295,7 @@ export const randomBytes = (length: number): Uint8Array => {
     return globalThis.crypto.getRandomValues(new Uint8Array(length));
   }
   const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
-  const isProduction = typeof process !== 'undefined' && process.env.NODE_ENV === 'production';
-  if (!isTestEnvironment && isProduction) {
+  if (!isTestEnvironment) {
     throw new Error('Secure random generation not available');
   }
   const bytes = new Uint8Array(length);

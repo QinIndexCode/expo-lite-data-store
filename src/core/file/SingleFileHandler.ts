@@ -2,7 +2,7 @@
  * @module SingleFileHandler
  * @description Single file handler for small data storage with atomic writes
  * @since 2025-11-28
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import { StorageError } from '../../types/storageErrorInfc';
@@ -105,7 +105,17 @@ export class SingleFileHandler extends FileHandlerBase {
       return parsed.data;
     } catch (error) {
       logger.warn(`READ_FILE_ERROR: ${this.filePath}:`, error);
-      return [];
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      if (error instanceof SyntaxError) {
+        throw new StorageError(`FILE_CONTENT_INVALID: ${this.filePath}`, 'CORRUPTED_DATA', {
+          cause: error,
+          details: 'File content is not valid JSON',
+          suggestion: 'Restore the file from a known-good backup or recreate the table',
+        });
+      }
+      throw this.formatReadError(`READ_FILE_ERROR: ${this.filePath}`, error);
     }
   }
 

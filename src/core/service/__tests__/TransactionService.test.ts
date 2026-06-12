@@ -54,6 +54,20 @@ describe('TransactionService', () => {
       expect(service.isInTransaction()).toBe(false);
     });
 
+    it('should execute overwrite operations using overwrite mode', async () => {
+      const writeFn = jest.fn().mockResolvedValue(undefined);
+
+      await service.beginTransaction();
+      service.addOperation({ tableName: 'users', type: 'overwrite', data: [{ id: 2, name: 'Bob' }] });
+      await service.commit(writeFn, jest.fn(), jest.fn(), jest.fn());
+
+      expect(writeFn).toHaveBeenCalledWith(
+        'users',
+        [{ id: 2, name: 'Bob' }],
+        expect.objectContaining({ mode: 'overwrite', directWrite: true })
+      );
+    });
+
     it('should execute update operations', async () => {
       const writeFn = jest.fn().mockResolvedValue(undefined);
       const deleteFn = jest.fn().mockResolvedValue(undefined);
@@ -216,6 +230,14 @@ describe('TransactionService', () => {
         { id: 1, name: 'Alice' },
         { id: 2, name: 'Bob' },
       ]);
+    });
+
+    it('should expose queued overwrite data inside the transaction', async () => {
+      await service.beginTransaction();
+      service.addOperation({ tableName: 'users', type: 'overwrite', data: [{ id: 2, name: 'Bob' }] });
+
+      const readFn = jest.fn().mockResolvedValue([{ id: 1, name: 'Alice' }]);
+      await expect(service.getCurrentTransactionData('users', readFn)).resolves.toEqual([{ id: 2, name: 'Bob' }]);
     });
 
     it('should cache computed transaction data', async () => {

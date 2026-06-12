@@ -4,7 +4,7 @@
  *
  * @module expo-lite-data-store
  * @since 2025-11-19
- * @version 2.0.0
+ * @version 2.0.1
  */
 import { plainStorage, dbManager } from './core/db';
 import { configManager, ConfigManager } from './core/config/ConfigManager';

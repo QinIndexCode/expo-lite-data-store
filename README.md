@@ -4,10 +4,10 @@
 [![npm downloads](https://img.shields.io/npm/dm/expo-lite-data-store?logo=npm)](https://www.npmjs.com/package/expo-lite-data-store)
 [![license](https://img.shields.io/npm/l/expo-lite-data-store)](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/LICENSE.txt)
 [![types](https://img.shields.io/npm/types/expo-lite-data-store)](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/dist/types/index.d.ts)
-[![Expo SDK](https://img.shields.io/badge/Expo%20SDK-54-000020?logo=expo)](https://docs.expo.dev/)
-[![React Native](https://img.shields.io/badge/React%20Native-0.81-61dafb?logo=react)](https://reactnative.dev/)
+[![Expo SDK](https://img.shields.io/badge/Expo%20SDK-56-000020?logo=expo)](https://docs.expo.dev/)
+[![React Native](https://img.shields.io/badge/React%20Native-0.85-61dafb?logo=react)](https://reactnative.dev/)
 
-Local structured storage for Expo applications, with runtime-tested support for Expo Go, managed apps, and native development builds on Expo SDK 54.
+Local structured storage for Expo applications, with runtime-tested support for Expo Go, managed apps, and native development builds on Expo SDK 56.
 
 This `README.md` is the package introduction and documentation index for npm and GitHub. Formal user-facing guides use explicit language suffixes:
 
@@ -19,7 +19,7 @@ This `README.md` is the package introduction and documentation index for npm and
 
 Do not treat `npm install expo-lite-data-store` as a complete setup.
 
-The supported base install command for Expo SDK 54 is:
+The supported base install command for Expo SDK 56 is:
 
 ```bash
 npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store

@@ -2,7 +2,7 @@
  * @module EncryptedStorageAdapter
  * @description Encrypted storage adapter decorator with field-level encryption
  * @since 2025-11-19
- * @version 2.0.0
+ * @version 2.0.1
  */
 import type { IStorageAdapter } from '../types/storageAdapterInfc';
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from '../types/storageTypes';
@@ -20,6 +20,7 @@ import { configManager } from './config/ConfigManager';
 import storage from './adapter/FileSystemStorageAdapter';
 import { ErrorHandler as StorageErrorHandler } from '../utils/StorageErrorHandler';
 import { QueryEngine } from './query/QueryEngine';
+import logger from '../utils/logger';
 export class EncryptedStorageAdapter implements IStorageAdapter {
   private keyPromise: Promise<string> | null = null;
   private cachedData: Map<string, { data: Record<string, any>[]; timestamp: number }> = new Map();
@@ -186,8 +187,33 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       enableFieldLevelEncryption?: boolean;
       encryptedFields?: string[];
     }
-  ) {
-    return storage.createTable(tableName, options);
+  ): Promise<void> {
+    const { initialData = [], ...tableOptions } = options ?? {};
+    const alreadyExists = await storage.hasTable(tableName);
+    if (alreadyExists) {
+      return;
+    }
+
+    await storage.createTable(tableName, { ...tableOptions, initialData: [] });
+
+    if (initialData.length === 0) {
+      return;
+    }
+
+    try {
+      await this.overwrite(tableName, initialData, {
+        encrypted: options?.encrypted,
+        requireAuthOnAccess: options?.requireAuthOnAccess,
+        encryptFullTable: options?.encryptFullTable,
+      });
+    } catch (error) {
+      try {
+        await storage.deleteTable(tableName);
+      } catch (cleanupError) {
+        logger.error(`Failed to clean up table ${tableName} after encrypted initialization failed`, cleanupError);
+      }
+      throw error;
+    }
   }
 
   async deleteTable(tableName: string, _options?: any) {
@@ -811,6 +837,8 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   async migrateToChunked(tableName: string): Promise<void> {
+    const tableMeta = await this.getTableMeta(tableName);
+
     // Read解密后的数据
     const data = await this.read(tableName);
 
@@ -818,7 +846,13 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     await this.deleteTable(tableName);
 
     // Create新的分片表并写入数据
-    await this.createTable(tableName, { initialData: data, mode: 'chunked' });
+    await this.createTable(tableName, {
+      initialData: data,
+      mode: 'chunked',
+      encrypted: tableMeta?.encrypted ?? true,
+      encryptedFields: tableMeta?.encryptedFields ?? [],
+      encryptFullTable: tableMeta?.encryptFullTable ?? false,
+    });
   }
 
   async delete(tableName: string, where: Record<string, any>, options?: any): Promise<number> {

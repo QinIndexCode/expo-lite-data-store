@@ -2,7 +2,7 @@
  * @module PathHelper
  * @description Independent path management to avoid circular dependencies
  * @since 2026-04-02
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import logger from './logger';

@@ -2,7 +2,7 @@
  * @module ApiErrorHandler
  * @description Error handler providing unified error handling and response formatting
  * @since 2025-12-11
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import { ApiResponse } from '../../types/apiResponse';

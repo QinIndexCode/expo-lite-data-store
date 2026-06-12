@@ -2,7 +2,7 @@
  * @module DataReader
  * @description Data reader handling file system read and data processing
  * @since 2025-11-28
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import { configManager } from '../config/ConfigManager';
@@ -15,6 +15,7 @@ import withTimeout from '../../utils/withTimeout';
 import { CacheManager } from '../cache/CacheManager';
 import { ChunkedFileHandler } from '../file/ChunkedFileHandler';
 import { SingleFileHandler } from '../file/SingleFileHandler';
+import { assertValidTableName } from '../../utils/tableName';
 import { IndexManager } from '../index/IndexManager';
 import { QueryEngine } from '../query/QueryEngine';
 
@@ -30,11 +31,13 @@ export class DataReader {
   }
 
   private getSingleFile(tableName: string): SingleFileHandler {
+    assertValidTableName(tableName);
     const filePath = `${getRootPathSync()}${tableName}.ldb`;
     return new SingleFileHandler(filePath);
   }
 
   private getChunkedHandler(tableName: string): ChunkedFileHandler {
+    assertValidTableName(tableName);
     return new ChunkedFileHandler(tableName, this.metadataManager);
   }
 

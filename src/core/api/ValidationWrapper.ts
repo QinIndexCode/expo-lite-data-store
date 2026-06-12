@@ -2,11 +2,11 @@
  * @module ValidationWrapper
  * @description Validation wrapper for input data verification
  * @since 2025-12-03
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import { StorageError } from '../../types/storageErrorInfc';
-import { FILE_OPERATION, REGEX } from '../constants';
+import { assertValidTableName } from '../../utils/tableName';
 
 /**
  * 验证包装器，负责输入数据验证
@@ -17,23 +17,7 @@ export class ValidationWrapper {
    * @param tableName 表名
    */
   validateTableName(tableName: string): void {
-    if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
-      throw new StorageError('Invalid table name: table name cannot be empty', 'TABLE_NAME_INVALID');
-    }
-
-    if (tableName.length > FILE_OPERATION.MAX_TABLE_NAME_LENGTH) {
-      throw new StorageError(
-        `Invalid table name: table name too long (max ${FILE_OPERATION.MAX_TABLE_NAME_LENGTH} characters)`,
-        'TABLE_NAME_INVALID'
-      );
-    }
-
-    if (!REGEX.TABLE_NAME.test(tableName)) {
-      throw new StorageError(
-        'Invalid table name: table name must start with a letter and contain only letters, numbers, and underscores',
-        'TABLE_NAME_INVALID'
-      );
-    }
+    assertValidTableName(tableName);
   }
 
   /**

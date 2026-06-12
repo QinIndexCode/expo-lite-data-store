@@ -2,7 +2,7 @@
  * @module DataWriter
  * @description Data writer handling insert, overwrite, update, and delete operations
  * @since 2025-11-19
- * @version 2.0.0
+ * @version 2.0.1
  */
 import { configManager } from '../config/ConfigManager';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
@@ -16,6 +16,7 @@ import logger from '../../utils/logger';
 
 import { ChunkedFileHandler } from '../file/ChunkedFileHandler';
 import { SingleFileHandler } from '../file/SingleFileHandler';
+import { assertValidTableName } from '../../utils/tableName';
 import { FileOperationManager } from '../FileOperationManager';
 import { IndexManager } from '../index/IndexManager';
 import type { ColumnSchema } from '../meta/MetadataManager';
@@ -94,11 +95,13 @@ export class DataWriter {
   }
 
   private getSingleFile(tableName: string): SingleFileHandler {
+    assertValidTableName(tableName);
     const filePath = `${getRootPathSync()}${tableName}.ldb`;
     return new SingleFileHandler(filePath);
   }
 
   private getChunkedHandler(tableName: string): ChunkedFileHandler {
+    assertValidTableName(tableName);
     return new ChunkedFileHandler(tableName, this.metadataManager);
   }
 
@@ -200,15 +203,7 @@ export class DataWriter {
   ): Promise<void> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
-        if (!tableName?.trim()) {
-          throw StorageErrorHandler.createGeneralError(
-            'Table name cannot be empty',
-            'TABLE_NAME_INVALID',
-            undefined,
-            'Table name must be a non-empty string',
-            'Please provide a valid table name'
-          );
-        }
+        assertValidTableName(tableName);
 
         const releaseLock = await this.acquireLock(tableName);
 
@@ -325,11 +320,11 @@ export class DataWriter {
 
           await this.updateIndexes(tableName, items, options?.mode === 'overwrite');
 
-          await this.updateTableMetadata(tableName, writeResult.final.length);
+          await this.updateTableMetadata(tableName, writeResult.finalCount);
 
           return {
             written: items.length,
-            totalAfterWrite: writeResult.final.length,
+            totalAfterWrite: writeResult.finalCount,
             chunked: writeResult.isChunked,
           };
         } finally {
@@ -359,44 +354,41 @@ export class DataWriter {
     items: Record<string, any>[],
     options?: WriteOptions & { directWrite?: boolean },
     tableMeta?: any
-  ): Promise<{ final: Record<string, any>[]; isChunked: boolean }> {
-    let final: Record<string, any>[];
+  ): Promise<{ finalCount: number; isChunked: boolean }> {
+    let finalCount: number;
     let isChunked = false;
 
     if (tableMeta?.mode === 'chunked') {
-      final = await this.writeToChunkedTable(tableName, items, options);
+      finalCount = await this.writeToChunkedTable(tableName, items, options);
       isChunked = true;
     } else {
-      final = await this.writeToSingleFileTable(tableName, items, options);
+      finalCount = await this.writeToSingleFileTable(tableName, items, options);
     }
 
-    return { final, isChunked };
+    return { finalCount, isChunked };
   }
 
   private async writeToChunkedTable(
     tableName: string,
     items: Record<string, any>[],
     options?: WriteOptions & { directWrite?: boolean }
-  ): Promise<Record<string, any>[]> {
+  ): Promise<number> {
     const handler = this.getChunkedHandler(tableName);
-    let final: Record<string, any>[];
 
     if (options?.mode === 'overwrite') {
       await withTimeout(handler.write(items), 10000, `write to chunked table ${tableName}`);
-      final = items;
     } else {
-      final = [...(await withTimeout(handler.readAll(), 10000, `read chunked table ${tableName}`)), ...items];
       await withTimeout(handler.append(items), 10000, `append to chunked table ${tableName}`);
     }
 
-    return final;
+    return this.metadataManager.count(tableName);
   }
 
   private async writeToSingleFileTable(
     tableName: string,
     items: Record<string, any>[],
     options?: WriteOptions & { directWrite?: boolean }
-  ): Promise<Record<string, any>[]> {
+  ): Promise<number> {
     const handler = this.getSingleFile(tableName);
 
     const existing =
@@ -408,7 +400,7 @@ export class DataWriter {
 
     await withTimeout(handler.write(final), 10000, `write to single file table ${tableName}`);
 
-    return final;
+    return final.length;
   }
 
   private async updateIndexes(tableName: string, items: Record<string, any>[], isOverwrite: boolean): Promise<void> {

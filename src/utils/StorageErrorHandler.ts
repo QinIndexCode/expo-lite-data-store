@@ -2,7 +2,7 @@
  * @module StorageErrorHandler
  * @description Unified error handling utility for storage operations
  * @since 2025-11-19
- * @version 2.0.0
+ * @version 2.0.1
  */
 import { StorageErrorCode } from '../types/storageErrorCode';
 import { StorageError } from '../types/storageErrorInfc';
@@ -188,6 +188,9 @@ export class ErrorHandler {
     try {
       return await operation();
     } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
       throw errorCreator(error);
     }
   }
@@ -203,6 +206,9 @@ export class ErrorHandler {
     try {
       return operation();
     } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
       throw errorCreator(error);
     }
   }

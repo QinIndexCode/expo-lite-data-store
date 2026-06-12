@@ -2,7 +2,7 @@
  * @module TransactionService
  * @description Transaction service managing begin, commit, and rollback operations
  * @since 2025-11-28
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import { QueryEngine } from '../query/QueryEngine';
@@ -153,6 +153,14 @@ export class TransactionService {
       // Execute each operation directly
       for (const operation of this.operations) {
         switch (operation.type) {
+          case 'overwrite':
+            const overwriteData = Array.isArray(operation.data) ? operation.data : [operation.data];
+            await writeFn(operation.tableName, overwriteData, {
+              ...operation.options,
+              mode: 'overwrite',
+              directWrite: true,
+            });
+            break;
           case 'write':
             // Execute write operation directly with writeFn
             // Ensure data is array
@@ -352,6 +360,9 @@ export class TransactionService {
       }
 
       switch (operation.type) {
+        case 'overwrite':
+          data = Array.isArray(operation.data) ? operation.data : [operation.data];
+          break;
         case 'write':
           // Write操作：根据mode决定是覆盖还是追加
           const writeData = Array.isArray(operation.data) ? operation.data : [operation.data];

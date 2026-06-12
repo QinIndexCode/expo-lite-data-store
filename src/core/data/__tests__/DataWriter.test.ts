@@ -3,6 +3,7 @@
 
 import { CacheManager, CacheStrategy } from '../../cache/CacheManager';
 import { FileOperationManager } from '../../FileOperationManager';
+import { ChunkedFileHandler } from '../../file/ChunkedFileHandler';
 import { IndexManager } from '../../index/IndexManager';
 import { MetadataManager } from '../../meta/MetadataManager';
 import { DataWriter } from '../DataWriter';
@@ -168,6 +169,31 @@ describe('DataWriter', () => {
 
       const count = await dataWriter.count(testTableName);
       expect(count).toBe(25);
+    });
+
+    it('should append to a chunked table without reading the entire table first', async () => {
+      await dataWriter.createTable(testTableName, {
+        mode: 'chunked',
+        columns: {
+          id: 'string',
+          name: 'string',
+        },
+      });
+
+      const readAllSpy = jest.spyOn(ChunkedFileHandler.prototype, 'readAll');
+
+      try {
+        const result = await dataWriter.write(testTableName, { id: '1', name: 'test' });
+
+        expect(result).toMatchObject({
+          written: 1,
+          totalAfterWrite: 1,
+          chunked: true,
+        });
+        expect(readAllSpy).not.toHaveBeenCalled();
+      } finally {
+        readAllSpy.mockRestore();
+      }
     });
   });
 

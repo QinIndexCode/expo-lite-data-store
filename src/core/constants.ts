@@ -2,7 +2,7 @@
  * @module constants
  * @description Application constants to eliminate magic numbers and hardcoded values
  * @since 2025-12-03
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 /**

@@ -2,7 +2,7 @@
  * @module FileOperationManager
  * @description File operation manager coordinating single and chunked file handling
  * @since 2025-11-28
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import { getFileSystem } from '../utils/fileSystemCompat';

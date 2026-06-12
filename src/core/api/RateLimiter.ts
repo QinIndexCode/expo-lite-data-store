@@ -2,7 +2,7 @@
  * @module RateLimiter
  * @description API rate limiter using token bucket algorithm
  * @since 2025-11-28
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import { RATE_LIMIT } from '../constants';

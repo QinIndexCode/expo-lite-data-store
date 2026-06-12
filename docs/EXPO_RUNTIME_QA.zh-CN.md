@@ -143,7 +143,7 @@ artifacts/expo-runtime-qa/<timestamp>/
 
 ### Expo Go
 
-- 请使用与 Expo SDK 54 对齐的 Expo Go 版本。
+- 请使用与 Expo SDK 56 对齐的 Expo Go 版本。
 - 运行前应确保设备已解锁，并允许前台拉起应用。
 
 ### 原生旗舰 profile

@@ -2,7 +2,7 @@
  * @module FileSystemStorageAdapter
  * @description File system storage adapter implementing IStorageAdapter interface
  * @since 2025-11-19
- * @version 2.0.0
+ * @version 2.0.1
  */
 // Created
 // Last modified
@@ -31,6 +31,7 @@ import { ErrorHandler as StorageErrorHandler } from '../../utils/StorageErrorHan
 import { ensureStorageRootReady, getRootPathSync } from '../../utils/ROOTPath';
 import { getFileSystem } from '../../utils/fileSystemCompat';
 import { QueryEngine } from '../query/QueryEngine';
+import { assertValidTableName } from '../../utils/tableName';
 /**
  * 文件系统存储适配器
  * 实现了IStorageAdapter接口，负责处理数据库的文件系统存储操作
@@ -60,6 +61,10 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   private initializationPromise: Promise<void> | null = null;
   private servicesStarted = false;
   private taskQueueInitialized = false;
+
+  private validateTableName(tableName: string): void {
+    assertValidTableName(tableName);
+  }
 
   private flattenInsertOperations(
     operations: Array<
@@ -244,6 +249,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     } = {}
   ): Promise<void> {
     await this.ensureInitialized();
+    this.validateTableName(tableName);
 
     // Input validation: table name cannot be empty and must be a string
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
@@ -264,6 +270,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    */
   async deleteTable(tableName: string, _options?: any): Promise<void> {
     await this.ensureInitialized();
+    this.validateTableName(tableName);
 
     // Input validation: table name cannot be empty and must be a string
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
@@ -286,6 +293,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    */
   async hasTable(tableName: string, _options?: any): Promise<boolean> {
     await this.ensureInitialized();
+    this.validateTableName(tableName);
     return this.dataWriter.hasTable(tableName);
   }
 
@@ -323,6 +331,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     return StorageErrorHandler.handleAsyncError(
       async () => {
         await this.ensureInitialized();
+        this.validateTableName(tableName);
 
         // Input validation: table name cannot be empty and must be a string
         if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
@@ -360,6 +369,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
         // Transaction handling logic
         if (this.transactionService.isInTransaction()) {
+          const currentData = await this.dataReader.read(tableName, { bypassCache: true });
+          this.transactionService.saveSnapshot(tableName, currentData);
+
           // Add operation to transaction queue
           this.transactionService.addOperation({
             tableName,
@@ -415,6 +427,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     return StorageErrorHandler.handleAsyncError(
       async () => {
         await this.ensureInitialized();
+        this.validateTableName(tableName);
 
         // Input validation: table name cannot be empty and must be a string
         if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
@@ -452,6 +465,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
         // Transaction handling logic
         if (this.transactionService.isInTransaction() && !options?.directWrite) {
+          const currentData = await this.dataReader.read(tableName, { bypassCache: true });
+          this.transactionService.saveSnapshot(tableName, currentData);
+
           // Add operation to transaction queue
           this.transactionService.addOperation({
             tableName,
@@ -519,6 +535,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    */
   async read(tableName: string, options?: ReadOptions & { bypassCache?: boolean }): Promise<Record<string, any>[]> {
     await this.ensureInitialized();
+    this.validateTableName(tableName);
 
     // Input validation: table name cannot be empty and must be a string
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
@@ -544,6 +561,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    */
   async count(tableName: string): Promise<number> {
     await this.ensureInitialized();
+    this.validateTableName(tableName);
     return this.dataWriter.count(tableName);
   }
 
@@ -556,6 +574,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    */
   async verifyCount(tableName: string): Promise<{ metadata: number; actual: number; match: boolean }> {
     await this.ensureInitialized();
+    this.validateTableName(tableName);
 
     // Input validation: table name cannot be empty and must be a string
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
@@ -573,10 +592,12 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    * @returns 表的元数据，或者undefined如果表不存在
    */
   getTableMeta(tableName: string): any | undefined {
+    this.validateTableName(tableName);
     return this.metadataManager.get(tableName);
   }
 
   private async recoverTableMetaFromFiles(tableName: string, recordCount: number): Promise<any | undefined> {
+    this.validateTableName(tableName);
     const fileSystem = getFileSystem();
     const rootPath = getRootPathSync();
     const singleFilePath = `${rootPath}${tableName}.ldb`;
@@ -618,6 +639,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    */
   async findOne(tableName: string, filter: Record<string, any>, _options?: any): Promise<Record<string, any> | null> {
     await this.ensureInitialized();
+    this.validateTableName(tableName);
 
     // Input validation: table name cannot be empty and must be a string
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
@@ -649,6 +671,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     _findOptions?: any
   ): Promise<Record<string, any>[]> {
     await this.ensureInitialized();
+    this.validateTableName(tableName);
     return this.dataReader.findMany(tableName, filter, options);
   }
 
@@ -663,6 +686,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    */
   async delete(tableName: string, where: Record<string, any>, options?: { directWrite?: boolean }): Promise<number> {
     await this.ensureInitialized();
+    this.validateTableName(tableName);
 
     // Input validation: table name cannot be empty and must be a string
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
@@ -674,7 +698,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     // Transaction handling logic
     if (this.transactionService.isInTransaction() && !options?.directWrite) {
       // Save数据快照（只在第一次操作该表时保存），用于事务回滚
-      const currentData = await this.read(tableName);
+      const currentData = await this.dataReader.read(tableName, { bypassCache: true });
       this.transactionService.saveSnapshot(tableName, currentData);
 
       // Add operation to transaction queue
@@ -737,6 +761,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     options?: { directWrite?: boolean }
   ): Promise<number> {
     await this.ensureInitialized();
+    this.validateTableName(tableName);
 
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
       throw new StorageError('Invalid table name: must be a non-empty string', 'TABLE_NAME_INVALID', {
@@ -777,6 +802,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     });
 
     if (this.transactionService.isInTransaction() && !options?.directWrite) {
+      const currentData = await this.dataReader.read(tableName, { bypassCache: true });
+      this.transactionService.saveSnapshot(tableName, currentData);
+
       // Add operation to transaction queue
       this.transactionService.addOperation({
         tableName,
@@ -807,6 +835,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    */
   async clearTable(tableName: string): Promise<void> {
     await this.ensureInitialized();
+    this.validateTableName(tableName);
 
     // Input validation: table name cannot be empty and must be a string
     if (!tableName || typeof tableName !== 'string' || tableName.trim() === '') {
@@ -847,10 +876,14 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     options?: { directWrite?: boolean }
   ): Promise<WriteResult> {
     await this.ensureInitialized();
+    this.validateTableName(tableName);
 
     const startTime = Date.now();
     // If in transaction且directWrite为false，将操作添加到事务队列
     if (this.transactionService.isInTransaction() && !options?.directWrite) {
+      const currentData = await this.dataReader.read(tableName, { bypassCache: true });
+      this.transactionService.saveSnapshot(tableName, currentData);
+
       // Add到事务操作队列
       this.transactionService.addOperation({
         tableName,
@@ -1096,6 +1129,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    */
   async migrateToChunked(tableName: string): Promise<void> {
     await this.ensureInitialized();
+    this.validateTableName(tableName);
 
     // Execute migration directly，不使用任务队列，避免无限递归
     // Read当前表数据

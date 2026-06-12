@@ -2,7 +2,7 @@
  * @module ROOTPath
  * @description Runtime root path helpers
  * @since 2025-11-19
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import { pathHelper } from './PathHelper';

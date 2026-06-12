@@ -2,7 +2,7 @@
  * @module ChunkedFileHandler
  * @description Chunked file handler for large data storage with automatic splitting
  * @since 2025-11-28
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import { configManager } from '../config/ConfigManager';
@@ -12,8 +12,11 @@ import { getRootPathSync } from '../../utils/ROOTPath';
 import withTimeout from '../../utils/withTimeout';
 import { FileHandlerBase } from './FileHandlerBase';
 import logger from '../../utils/logger';
+import { assertValidTableName } from '../../utils/tableName';
+import { StorageError } from '../../types/storageErrorInfc';
 
 const CHUNK_EXT = '.ldb';
+const OVERWRITE_JOURNAL_EXT = '.overwrite-journal';
 const MAX_DEBUG_CONTENT_PREVIEW = 160;
 
 const summarizeDebugText = (text: string): string => {
@@ -23,6 +26,16 @@ const summarizeDebugText = (text: string): string => {
 
   return `${text.slice(0, MAX_DEBUG_CONTENT_PREVIEW)}...[truncated ${text.length - MAX_DEBUG_CONTENT_PREVIEW} chars]`;
 };
+
+interface OverwriteJournal {
+  version: 1;
+  tableName: string;
+  previousData: Record<string, any>[];
+  previousHash: string;
+  targetHash: string;
+  targetCount: number;
+  createdAt: number;
+}
 
 /**
  * Chunked file handler for large tables.
@@ -36,6 +49,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
   constructor(tableName: string, metadataManager: IMetadataManager) {
     super();
+    assertValidTableName(tableName);
     this.tableName = tableName;
     this.tableDirPath = `${getRootPathSync()}${tableName}/`;
     this.metadataManager = metadataManager;
@@ -45,25 +59,169 @@ export class ChunkedFileHandler extends FileHandlerBase {
     return `${this.tableDirPath}${String(index).padStart(6, '0')}${CHUNK_EXT}`;
   }
 
+  private getOverwriteJournalPath(): string {
+    return `${getRootPathSync()}${this.tableName}${OVERWRITE_JOURNAL_EXT}`;
+  }
+
   async write(data: Record<string, any>[]): Promise<void> {
+    this.validateArrayData(data);
+    const previousData = await this.readAll();
+
+    await this.writeOverwriteJournal(previousData, data);
+
     try {
-      this.validateArrayData(data);
-
-      if (data.length === 0) {
-        await this.clear();
-        return;
-      }
-
       await this.clear();
-      await this.append(data);
+
+      if (data.length > 0) {
+        await this.append(data);
+      }
 
       this.metadataManager.update(this.tableName, {
         count: data.length,
         updatedAt: Date.now(),
       });
+
+      await this.deleteOverwriteJournal();
     } catch (error) {
+      try {
+        await this.clear();
+        if (previousData.length > 0) {
+          await this.append(previousData);
+        }
+        await this.deleteOverwriteJournal();
+      } catch (rollbackError) {
+        logger.error(`failed to restore table ${this.tableName} after overwrite failure`, rollbackError);
+      }
       throw this.formatWriteError(`write data to table ${this.tableName} failed`, error);
     }
+  }
+
+  private async writeOverwriteJournal(
+    previousData: Record<string, any>[],
+    targetData: Record<string, any>[]
+  ): Promise<void> {
+    const journalPath = this.getOverwriteJournalPath();
+    const tempJournalPath = `${journalPath}.tmp`;
+    const journal: OverwriteJournal = {
+      version: 1,
+      tableName: this.tableName,
+      previousData,
+      previousHash: await this.computeHash(previousData),
+      targetHash: await this.computeHash(targetData),
+      targetCount: targetData.length,
+      createdAt: Date.now(),
+    };
+    const content = JSON.stringify({
+      journal,
+      hash: await this.computeHash(journal),
+    });
+
+    await withTimeout(
+      getFileSystem().writeAsStringAsync(tempJournalPath, content, { encoding: getEncodingType().UTF8 }),
+      10000,
+      `write overwrite journal ${journalPath}`
+    );
+    await withTimeout(
+      getFileSystem().moveAsync({ from: tempJournalPath, to: journalPath }),
+      10000,
+      `publish overwrite journal ${journalPath}`
+    );
+    this.clearFileInfoCache(journalPath);
+  }
+
+  private async readOverwriteJournal(): Promise<OverwriteJournal | null> {
+    const journalPath = this.getOverwriteJournalPath();
+    const info = await super.getFileInfo(journalPath);
+    if (!info.exists) {
+      return null;
+    }
+
+    try {
+      const text = await withTimeout(
+        getFileSystem().readAsStringAsync(journalPath, { encoding: getEncodingType().UTF8 }),
+        10000,
+        `read overwrite journal ${journalPath}`
+      );
+      const parsed = JSON.parse(text);
+
+      if (!parsed || typeof parsed !== 'object' || !parsed.journal || typeof parsed.hash !== 'string') {
+        throw new StorageError(`OVERWRITE JOURNAL ${journalPath} FORMAT_ERROR`, 'CORRUPTED_DATA');
+      }
+
+      const journal = parsed.journal as Partial<OverwriteJournal>;
+      const hash = await this.computeHash(journal);
+      if (hash !== parsed.hash) {
+        throw new StorageError(`OVERWRITE JOURNAL ${journalPath} CORRUPTED: hash mismatch`, 'CORRUPTED_DATA');
+      }
+
+      if (
+        journal.version !== 1 ||
+        journal.tableName !== this.tableName ||
+        !Array.isArray(journal.previousData) ||
+        typeof journal.previousHash !== 'string' ||
+        typeof journal.targetHash !== 'string' ||
+        typeof journal.targetCount !== 'number'
+      ) {
+        throw new StorageError(`OVERWRITE JOURNAL ${journalPath} FORMAT_ERROR`, 'CORRUPTED_DATA');
+      }
+
+      return journal as OverwriteJournal;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      if (error instanceof SyntaxError) {
+        throw new StorageError(`OVERWRITE JOURNAL ${journalPath} FORMAT_ERROR: invalid JSON`, 'CORRUPTED_DATA', {
+          cause: error,
+        });
+      }
+      throw this.formatReadError(`READ OVERWRITE JOURNAL ${journalPath} FAILED`, error);
+    }
+  }
+
+  private async deleteOverwriteJournal(): Promise<void> {
+    const journalPath = this.getOverwriteJournalPath();
+    try {
+      await withTimeout(
+        getFileSystem().deleteAsync(journalPath, { idempotent: true }),
+        10000,
+        `delete overwrite journal ${journalPath}`
+      );
+      this.clearFileInfoCache(journalPath);
+    } catch (error) {
+      logger.warn(`DELETE OVERWRITE JOURNAL ${journalPath} FAILED`, error);
+    }
+  }
+
+  private async recoverPendingOverwriteJournal(): Promise<void> {
+    const journal = await this.readOverwriteJournal();
+    if (!journal) {
+      return;
+    }
+
+    const previousHash = await this.computeHash(journal.previousData);
+    if (previousHash !== journal.previousHash) {
+      throw new StorageError(`OVERWRITE JOURNAL ${this.getOverwriteJournalPath()} CORRUPTED: previous data hash mismatch`, 'CORRUPTED_DATA');
+    }
+
+    let currentData: Record<string, any>[] | null = null;
+    try {
+      currentData = await this.readAllChunks();
+      const currentHash = await this.computeHash(currentData);
+      if (currentData.length === journal.targetCount && currentHash === journal.targetHash) {
+        await this.deleteOverwriteJournal();
+        return;
+      }
+    } catch (error) {
+      logger.warn(`Current chunked table ${this.tableName} is incomplete while overwrite journal is pending`, error);
+    }
+
+    logger.warn(`Recovering chunked table ${this.tableName} from pending overwrite journal`);
+    await this.clear();
+    if (journal.previousData.length > 0) {
+      await this.append(journal.previousData);
+    }
+    await this.deleteOverwriteJournal();
   }
 
   async read(): Promise<Record<string, any>[]> {
@@ -138,17 +296,26 @@ export class ChunkedFileHandler extends FileHandlerBase {
     const itemSizes: number[] = [];
     const validItems: Record<string, any>[] = [];
 
-    for (const item of data) {
+    for (let index = 0; index < data.length; index++) {
+      const item = data[index];
+
+      if (!this.validateDataItem(item)) {
+        throw new StorageError(`Invalid chunk data item at index ${index}`, 'FILE_CONTENT_INVALID');
+      }
+
       try {
-        if (!this.validateDataItem(item)) {
-          continue;
+        const serialized = JSON.stringify(item);
+        if (serialized === undefined) {
+          throw new Error('JSON serialization returned undefined');
         }
 
-        const itemSize = encoder.encode(JSON.stringify(item)).byteLength + overhead;
+        const itemSize = encoder.encode(serialized).byteLength + overhead;
         itemSizes.push(itemSize);
         validItems.push(item);
-      } catch (err) {
-        logger.warn(`skip error data item:`, item, err);
+      } catch (error) {
+        throw new StorageError(`Chunk data item at index ${index} is not JSON serializable`, 'FILE_CONTENT_INVALID', {
+          cause: error,
+        });
       }
     }
 
@@ -237,6 +404,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
           logger.debug(`File ${filePath} exists: ${fileInfo.exists}`);
 
           this.clearFileInfoCache(filePath);
+          this.chunkCache.delete(index);
           return;
         } catch (error: any) {
           logger.debug(`Error writing chunk ${index}: ${error?.message}`);
@@ -258,6 +426,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
   }
 
   async preloadChunks(chunkIndices: number[]): Promise<void> {
+    await this.recoverPendingOverwriteJournal();
     const chunkFiles = await this.getChunkFiles();
     const filesToLoad = chunkIndices
       .map(index => {
@@ -316,26 +485,32 @@ export class ChunkedFileHandler extends FileHandlerBase {
       const parsed = JSON.parse(text);
 
       if (!parsed || typeof parsed !== 'object') {
-        logger.warn(`CHUNK ${filePath} FORMAT_ERROR: not valid JSON object`);
-        return [];
+        throw new StorageError(`CHUNK ${filePath} FORMAT_ERROR: not valid JSON object`, 'CORRUPTED_DATA');
       }
 
       if (!Array.isArray(parsed.data) || parsed.hash === undefined) {
-        logger.warn(`CHUNK ${filePath} FORMAT_ERROR: missing data array or hash field`);
-        return [];
+        throw new StorageError(`CHUNK ${filePath} FORMAT_ERROR: missing data array or hash field`, 'CORRUPTED_DATA');
       }
 
       const isValid = await this.verifyHash(parsed.data, parsed.hash);
       if (!isValid) {
         logger.warn(`CHUNK ${filePath} CORRUPTED: hash mismatch`);
         logger.debug(`Expected hash: ${parsed.hash}, Actual hash: ${await this.computeHash(parsed.data)}`);
-        return [];
+        throw new StorageError(`CHUNK ${filePath} CORRUPTED: hash mismatch`, 'CORRUPTED_DATA');
       }
 
       return parsed.data;
     } catch (error) {
       logger.error(`ERROR reading chunk file ${filePath}:`, error);
-      return [];
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      if (error instanceof SyntaxError) {
+        throw new StorageError(`CHUNK ${filePath} FORMAT_ERROR: invalid JSON`, 'CORRUPTED_DATA', {
+          cause: error,
+        });
+      }
+      throw this.formatReadError(`READ CHUNK ${filePath} FAILED`, error);
     }
   }
 
@@ -344,13 +519,18 @@ export class ChunkedFileHandler extends FileHandlerBase {
   }
 
   async readAll(): Promise<Record<string, any>[]> {
+    await this.recoverPendingOverwriteJournal();
+    return this.readAllChunks();
+  }
+
+  private async readAllChunks(): Promise<Record<string, any>[]> {
     const chunkFiles = await this.getChunkFiles();
 
     if (chunkFiles.length === 0) {
       return [];
     }
 
-    const allChunkData: Record<string, any>[][] = [];
+    const allChunkData = new Map<number, Record<string, any>[]>();
     const filesToRead: string[] = [];
     const cachedIndices: number[] = [];
 
@@ -368,7 +548,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     for (const index of cachedIndices) {
       const cached = this.chunkCache.get(index);
       if (cached) {
-        allChunkData.push(cached);
+        allChunkData.set(index, cached);
       }
     }
 
@@ -378,27 +558,26 @@ export class ChunkedFileHandler extends FileHandlerBase {
       const batchFiles = filesToRead.slice(i, i + parallelLimit);
 
       const batchPromises = batchFiles.map(async filePath => {
-        try {
-          const fileName = filePath.split('/').pop() || '';
-          const chunkIndex = parseInt(fileName.replace(CHUNK_EXT, ''), 10);
-          const data = await this.readChunkFile(filePath);
+        const fileName = filePath.split('/').pop() || '';
+        const chunkIndex = parseInt(fileName.replace(CHUNK_EXT, ''), 10);
+        const data = await this.readChunkFile(filePath);
 
-          if (data.length > 0 && this.chunkCache.size < this.maxCacheSize) {
-            this.chunkCache.set(chunkIndex, data);
-          }
-
-          return data;
-        } catch (e) {
-          logger.warn(`READ CHUNK ${filePath} FAILED`, e);
-          return [];
+        if (data.length > 0 && this.chunkCache.size < this.maxCacheSize) {
+          this.chunkCache.set(chunkIndex, data);
         }
+
+        return { chunkIndex, data };
       });
 
       const batchResults = await Promise.all(batchPromises);
-      allChunkData.push(...batchResults);
+      for (const { chunkIndex, data } of batchResults) {
+        allChunkData.set(chunkIndex, data);
+      }
     }
 
-    return allChunkData.flat();
+    return [...allChunkData.entries()]
+      .sort(([left], [right]) => left - right)
+      .flatMap(([, data]) => data);
   }
 
   private async getChunkFiles(): Promise<string[]> {
@@ -447,6 +626,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
   }
 
   async readRange(startIndex: number, endIndex: number): Promise<Record<string, any>[]> {
+    await this.recoverPendingOverwriteJournal();
     const allChunkFiles = await this.getChunkFiles();
     const rangeChunkFiles = allChunkFiles.filter(filePath => {
       const fileName = filePath.split('/').pop() || '';
@@ -454,14 +634,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       return fileIndex >= startIndex && fileIndex <= endIndex;
     });
 
-    const chunkDataPromises = rangeChunkFiles.map(async filePath => {
-      try {
-        return await this.readChunkFile(filePath);
-      } catch (e) {
-        logger.warn(`READ CHUNK ${filePath} FAILED`, e);
-        return [];
-      }
-    });
+    const chunkDataPromises = rangeChunkFiles.map(filePath => this.readChunkFile(filePath));
 
     const chunkDataArray = await Promise.all(chunkDataPromises);
     return chunkDataArray.flat();
@@ -469,15 +642,11 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
   async clear() {
     try {
-      try {
-        await withTimeout(
-          getFileSystem().deleteAsync(this.tableDirPath, { idempotent: true }),
-          10000,
-          'DELETE TABLE DIRECTORY'
-        );
-      } catch (err) {
-        logger.warn(`DELETE TABLE DIRECTORY FAILED`, err);
-      }
+      await withTimeout(
+        getFileSystem().deleteAsync(this.tableDirPath, { idempotent: true }),
+        10000,
+        'DELETE TABLE DIRECTORY'
+      );
 
       await withTimeout(
         getFileSystem().makeDirectoryAsync(this.tableDirPath, { intermediates: true }),
@@ -486,6 +655,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       );
 
       this.clearFileInfoCache(this.tableDirPath);
+      this.chunkCache.clear();
 
       this.metadataManager.update(this.tableName, {
         count: 0,

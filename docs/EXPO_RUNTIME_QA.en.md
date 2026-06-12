@@ -143,7 +143,7 @@ The release source of truth is `summary.json`, with `cases.jsonl` and per-phase 
 
 ### Expo Go
 
-- Use Expo Go that matches Expo SDK 54.
+- Use Expo Go that matches Expo SDK 56.
 - The harness expects the Android device to be unlocked and available for foreground app launches.
 
 ### Native flagship

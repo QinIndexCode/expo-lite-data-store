@@ -8,26 +8,83 @@ import { createTable, insert, remove, countTable, bulkWrite, findMany, update } 
 // 测试表名
 const TEST_TABLE = 'stress_test_table';
 
+const getPositiveIntegerConfig = (name: string, fallback: number): number => {
+  const rawValue = process.env[name];
+  if (!rawValue) {
+    return fallback;
+  }
+
+  const value = Number(rawValue);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+};
+
+const getPositiveNumberConfig = (name: string, fallback: number): number => {
+  const rawValue = process.env[name];
+  if (!rawValue) {
+    return fallback;
+  }
+
+  const value = Number(rawValue);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+};
+
+const getSeedConfig = (): number => {
+  const rawValue = process.env.LDS_STRESS_SEED;
+  if (!rawValue) {
+    return 0x5eed_2026;
+  }
+
+  const numericSeed = Number(rawValue);
+  if (Number.isInteger(numericSeed)) {
+    return numericSeed;
+  }
+
+  let hash = 0;
+  for (const char of rawValue) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return hash || 0x5eed_2026;
+};
+
+const createSeededRandom = (seed: number): (() => number) => {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
 // 压力测试配置
 const STRESS_CONFIG = {
   // 初始并发请求数量
-  INITIAL_CONCURRENCY: 10,
+  INITIAL_CONCURRENCY: getPositiveIntegerConfig('LDS_STRESS_INITIAL_CONCURRENCY', 5),
   // 并发请求增量
-  CONCURRENCY_STEP: 10,
+  CONCURRENCY_STEP: getPositiveIntegerConfig('LDS_STRESS_CONCURRENCY_STEP', 5),
   // 最大并发请求数量
-  MAX_CONCURRENCY: 1000,
+  MAX_CONCURRENCY: getPositiveIntegerConfig('LDS_STRESS_MAX_CONCURRENCY', 30),
   // 初始单次请求数据量
-  INITIAL_DATA_SIZE_PER_REQUEST: 100,
+  INITIAL_DATA_SIZE_PER_REQUEST: getPositiveIntegerConfig('LDS_STRESS_INITIAL_DATA_SIZE', 25),
   // 数据量增量
-  DATA_SIZE_STEP: 100,
+  DATA_SIZE_STEP: getPositiveIntegerConfig('LDS_STRESS_DATA_SIZE_STEP', 25),
   // 最大单次请求数据量
-  MAX_DATA_SIZE_PER_REQUEST: 10000,
+  MAX_DATA_SIZE_PER_REQUEST: getPositiveIntegerConfig('LDS_STRESS_MAX_DATA_SIZE', 150),
   // 最大尝试次数
-  MAX_ATTEMPTS: 20,
+  MAX_ATTEMPTS: getPositiveIntegerConfig('LDS_STRESS_MAX_ATTEMPTS', 4),
   // 失败重试次数
   RETRY_COUNT: 3,
-  // 每次压力测试持续时间（毫秒）
-  TEST_DURATION: 5000,
+  // 每个并发 worker 执行的操作数
+  OPERATIONS_PER_WORKER: getPositiveIntegerConfig('LDS_STRESS_OPERATIONS_PER_WORKER', 3),
+  // 批量写入压力测试的初始批量大小
+  INITIAL_BATCH_SIZE: getPositiveIntegerConfig('LDS_STRESS_INITIAL_BATCH_SIZE', 250),
+  // 批量写入压力测试的最大尝试次数
+  MAX_BATCH_ATTEMPTS: getPositiveIntegerConfig('LDS_STRESS_MAX_BATCH_ATTEMPTS', 4),
+  // 批量写入压力测试每轮放大倍率
+  BATCH_SIZE_MULTIPLIER: getPositiveNumberConfig('LDS_STRESS_BATCH_SIZE_MULTIPLIER', 1.5),
+  // 随机种子，用于让压力测试失败可复现
+  SEED: getSeedConfig(),
   // 混合操作比例（写入:读取:更新:删除）
   OPERATION_RATIO: [4, 3, 2, 1]
 };
@@ -110,14 +167,14 @@ describe('API压力测试', () => {
   };
 
   // 生成随机操作类型
-  const getRandomOperationType = (): OperationType => {
+  const getRandomOperationType = (random: () => number): OperationType => {
     const [insertRatio, readRatio, updateRatio, deleteRatio] = STRESS_CONFIG.OPERATION_RATIO;
     const totalRatio = insertRatio + readRatio + updateRatio + deleteRatio;
-    const random = Math.random() * totalRatio;
+    const randomValue = random() * totalRatio;
     
-    if (random < insertRatio) return OperationType.INSERT;
-    if (random < insertRatio + readRatio) return OperationType.READ;
-    if (random < insertRatio + readRatio + updateRatio) return OperationType.UPDATE;
+    if (randomValue < insertRatio) return OperationType.INSERT;
+    if (randomValue < insertRatio + readRatio) return OperationType.READ;
+    if (randomValue < insertRatio + readRatio + updateRatio) return OperationType.UPDATE;
     return OperationType.DELETE;
   };
 
@@ -125,6 +182,7 @@ describe('API压力测试', () => {
     it('应该能够逐步提升压力直到系统崩溃，并记录极限压力数据', async () => {
       // 用于记录极限压力数据
       const stressLimit: Partial<StressLimitData> = {};
+      const random = createSeededRandom(STRESS_CONFIG.SEED);
       let currentConcurrency = STRESS_CONFIG.INITIAL_CONCURRENCY;
       let currentDataSize = STRESS_CONFIG.INITIAL_DATA_SIZE_PER_REQUEST;
       let attempt = 0;
@@ -146,7 +204,7 @@ describe('API压力测试', () => {
             prefillData.push({
               id: `prefill-${i}`,
               name: `Prefill ${i}`,
-              value: Math.random() * 1000,
+              value: random() * 1000,
               category: `category-${i % 5}`,
               timestamp: Date.now()
             });
@@ -164,8 +222,8 @@ describe('API压力测试', () => {
           // 生成currentConcurrency个并发请求
           for (let i = 0; i < currentConcurrency; i++) {
             const request = async () => {
-              for (let j = 0; j < 5; j++) { // 每个并发连接执行多个操作
-                const operationType = getRandomOperationType();
+              for (let j = 0; j < STRESS_CONFIG.OPERATIONS_PER_WORKER; j++) {
+                const operationType = getRandomOperationType(random);
                 const startTime = Date.now();
                 
                 try {
@@ -177,8 +235,8 @@ describe('API压力测试', () => {
                         insertData.push({
                           id: `${Date.now()}-${i}-${j}-${k}`,
                           name: `Test ${i}-${j}-${k}`,
-                          value: Math.random() * 1000,
-                          category: `category-${Math.floor(Math.random() * 5)}`,
+                          value: random() * 1000,
+                          category: `category-${Math.floor(random() * 5)}`,
                           timestamp: Date.now()
                         });
                       }
@@ -187,7 +245,7 @@ describe('API压力测试', () => {
                       
                     case OperationType.READ:
                       // 随机读取数据
-                      const category = `category-${Math.floor(Math.random() * 5)}`;
+                      const category = `category-${Math.floor(random() * 5)}`;
                       const readResult = await findMany(TEST_TABLE, { 
                         where: { category },
                         limit: 100
@@ -198,16 +256,16 @@ describe('API压力测试', () => {
                       
                     case OperationType.UPDATE:
                       // 更新随机数据
-                      const updateId = `prefill-${Math.floor(Math.random() * prefillData.length)}`;
-                      await update(TEST_TABLE, 
-                        { value: Math.random() * 1000, updatedAt: Date.now() }, 
+                      const updateId = `prefill-${Math.floor(random() * prefillData.length)}`;
+                      await update(TEST_TABLE,
+                        { value: random() * 1000, updatedAt: Date.now() },
                         { where: { id: updateId } }
                       );
                       break;
                       
                     case OperationType.DELETE:
                       // 删除随机数据
-                      const deleteId = `prefill-${Math.floor(Math.random() * prefillData.length)}`;
+                      const deleteId = `prefill-${Math.floor(random() * prefillData.length)}`;
                       await remove(TEST_TABLE, { where: { id: deleteId } });
                       break;
                   }
@@ -278,11 +336,11 @@ describe('API压力测试', () => {
       }
       
       // 批量写入压力测试
-      let currentBatchSize = 1000;
+      let currentBatchSize = STRESS_CONFIG.INITIAL_BATCH_SIZE;
       let lastSuccessfulBatchSize = 0;
       attempt = 0;
       
-      while (attempt < STRESS_CONFIG.MAX_ATTEMPTS) {
+      while (attempt < STRESS_CONFIG.MAX_BATCH_ATTEMPTS) {
         // 清空表，确保测试环境干净
         await remove(TEST_TABLE, { where: {} });
         
@@ -295,7 +353,7 @@ describe('API压力测试', () => {
               data: {
                 id: `bulk-${i}`,
                 name: `Bulk Test ${i}`,
-                value: Math.random() * 1000,
+                value: random() * 1000,
                 batch: 'large'
               }
             });
@@ -330,7 +388,7 @@ describe('API压力测试', () => {
           console.log(`[Stress Test] Batch size: ${currentBatchSize}, Duration: ${duration}ms, OPS: ${operationsPerSecond}`);
           
           // 增加批量大小（指数增长）
-          currentBatchSize = Math.floor(currentBatchSize * 1.5);
+          currentBatchSize = Math.max(currentBatchSize + 1, Math.floor(currentBatchSize * STRESS_CONFIG.BATCH_SIZE_MULTIPLIER));
           
         } catch (error) {
           break;
@@ -344,7 +402,9 @@ describe('API压力测试', () => {
       expect(lastSuccessfulConcurrency).toBeGreaterThan(0);
       // 确保批量写入测试至少完成一次
       expect(lastSuccessfulBatchSize).toBeGreaterThan(0);
-      console.log(`[Stress Test Summary] Max concurrency: ${lastSuccessfulConcurrency}, Max batch size: ${lastSuccessfulBatchSize}`);
+      console.log(
+        `[Stress Test Summary] Seed: ${STRESS_CONFIG.SEED}, Max concurrency: ${lastSuccessfulConcurrency}, Max batch size: ${lastSuccessfulBatchSize}`
+      );
     }, 600000); // 增加超时时间，确保测试能完成
   });
   

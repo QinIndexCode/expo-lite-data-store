@@ -2,7 +2,7 @@
  * @module storageErrorCode
  * @description Runtime error code constants plus the corresponding string-literal type.
  * @since 2025-11-19
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 export const StorageErrorCode = {

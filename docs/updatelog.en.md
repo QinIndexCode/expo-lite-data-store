@@ -2,6 +2,18 @@
 
 [README Entry](../README.md) | [简体中文](./updatelog.zh-CN.md) | [Consumer Guide](../README.en.md)
 
+### 📅 2026-06-12 `v2.0.1` Expo SDK 56 Upgrade, Storage Hardening, and Release Validation Prep
+
+> Implementation Audit: Reviewed the current source and live command results across file storage, chunked storage, transactions, encryption, cache, metadata, and publish scripts instead of relying on documentation status alone
+> Reliability: Added an overwrite journal for chunked-table replacement recovery; also fixed stale chunk-cache reuse, silent corruption handling for chunks/metadata/single-file data, and incomplete transaction rollback snapshots
+> Security: Moved table-name validation to the filesystem adapter boundary; field encryption/decryption now fails closed; production no longer accepts non-persistent or insecure fallbacks when SecureStore or secure randomness is unavailable
+> Performance: Chunked append no longer reads the whole table just to compute the record count, and the performance test config now matches the real benchmark files
+> Publish Gate: The publish workflow now runs the full `prepublishOnly` chain, covering tests, build, typecheck, Expo consumer smoke, and pack validation
+> Expo Upgrade: Upgraded the supported consumer contract and local development toolchain to Expo SDK 56, React 19.2, React Native 0.85, and TypeScript 6.0
+> Verification: `npx expo install --check` passed, `npm run prepublishOnly` passed 59 suites / 504 tests plus stress and release smoke checks, `npm pack --dry-run --json --ignore-scripts` produced `expo-lite-data-store-2.0.1.tgz`, and `git diff --check` passed
+> Continued Hardening: Started tracking `package-lock.json`, aligned Expo 56 peer/dev dependency floors, removed the critical dev audit finding, and added `audit:prod` plus `audit:no-high` to the publish gate
+> Stress Testing: `test:stress` is now bounded by default, scalable through `LDS_STRESS_*` environment variables, and reproducible through a seed; the stress regression is now part of `test:all`
+
 ### 📅 2026-04-23 `v2.0.0` Stable Release Hardening and Publish Validation
 
 > Stable Release: Promoted the package to the `2.0.0` stable line after completing build, typecheck, full Jest, Expo consumer smoke, and pack validation

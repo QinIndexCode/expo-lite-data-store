@@ -177,6 +177,26 @@ describe('CacheManager', () => {
         }, 150);
       });
     });
+
+    it('should not evict a refreshed key using a stale expiry heap entry', () => {
+      const nowSpy = jest.spyOn(Date, 'now');
+      const cache = new CacheManager({
+        defaultExpiry: 10,
+        enableAvalancheProtection: false,
+      });
+      tempCacheManagers.push(cache);
+
+      nowSpy.mockReturnValue(1000);
+      cache.set('refreshed-key', 'old-value', 10);
+      nowSpy.mockReturnValue(1005);
+      cache.set('refreshed-key', 'new-value', 1000);
+      nowSpy.mockReturnValue(1015);
+
+      (cache as any).cleanupExpired();
+
+      expect(cache.get('refreshed-key')).toBe('new-value');
+      nowSpy.mockRestore();
+    });
   });
 
   describe('Cache Statistics Tests', () => {

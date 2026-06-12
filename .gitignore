@@ -53,8 +53,7 @@ artifacts/
 .trae/
 .idea/
 
-# Package lock (optional: remove if you want to commit it)
-package-lock.json
+# Package artifacts
 *.tgz
 
 # Temporary directories

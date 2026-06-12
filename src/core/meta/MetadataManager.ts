@@ -2,7 +2,7 @@
  * @module MetadataManager
  * @description Metadata manager for table schema and data tracking
  * @since 2025-11-19
- * @version 2.0.0
+ * @version 2.0.1
  */
 
 import { StorageError } from '../../types/storageErrorInfc';
@@ -72,23 +72,11 @@ export class MetadataManager {
   }
 
   private async load() {
-    try {
-      const fileSystem = getFileSystem();
-      const metaFilePath = await this.getMetaFilePath();
-      const info = await fileSystem.getInfoAsync(metaFilePath);
-      if (!info.exists) throw new Error('File not exist');
+    const fileSystem = getFileSystem();
+    const metaFilePath = await this.getMetaFilePath();
+    const info = await fileSystem.getInfoAsync(metaFilePath);
 
-      const text = await fileSystem.readAsStringAsync(metaFilePath, {
-        encoding: getEncodingType().UTF8,
-      });
-      const parsed = JSON.parse(text);
-
-      if (parsed.version !== CURRENT_VERSION) {
-        // Reserved for future metadata migrations.
-      }
-
-      this.cache = parsed;
-    } catch {
+    if (!info.exists) {
       this.cache = {
         version: CURRENT_VERSION,
         generatedAt: Date.now(),
@@ -96,6 +84,30 @@ export class MetadataManager {
       };
       this.dirty = true;
       await this.save();
+      return;
+    }
+
+    try {
+      const text = await fileSystem.readAsStringAsync(metaFilePath, {
+        encoding: getEncodingType().UTF8,
+      });
+      const parsed = JSON.parse(text);
+
+      if (!parsed || typeof parsed !== 'object' || !parsed.tables || typeof parsed.tables !== 'object') {
+        throw new Error('Metadata file has an invalid structure');
+      }
+
+      if (parsed.version !== CURRENT_VERSION) {
+        // Reserved for future metadata migrations.
+      }
+
+      this.cache = parsed;
+    } catch (error) {
+      throw new StorageError('Metadata read failed: metadata file is corrupted or unreadable', 'META_FILE_READ_ERROR', {
+        cause: error,
+        details: `Refusing to overwrite existing metadata file: ${metaFilePath}`,
+        suggestion: 'Restore metadata from a known-good backup or repair it before reopening the database',
+      });
     }
   }
 
