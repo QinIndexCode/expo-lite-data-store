@@ -1,0 +1,64 @@
+name: Semgrep SAST
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '37 4 * * 2'
+
+permissions: read-all
+
+jobs:
+  semgrep:
+    name: Semgrep scan
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install Semgrep
+        run: python -m pip install --disable-pip-version-check semgrep==1.166.0
+
+      - name: Run Semgrep
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: '1'
+        run: >
+          semgrep scan
+          --config=p/javascript
+          --config=p/secrets
+          --metrics=off
+          --jobs=2
+          --timeout=60
+          --timeout-threshold=3
+          --exclude='**/__tests__/**'
+          --exclude='**/*.test.ts'
+          --exclude='dist'
+          --exclude='node_modules'
+          --sarif
+          --output=semgrep.sarif
+          src scripts .github
+
+      - name: Upload Semgrep SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+          if-no-files-found: error
+          retention-days: 5
