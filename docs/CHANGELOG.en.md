@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Upgraded the supported Expo install contract to Expo SDK 56
-- Aligned Expo runtime peers and local development dependencies with `expo@~56.0.11`, `expo-constants@~56.0.18`, `expo-crypto@~56.0.4`, `expo-file-system@~56.0.8`, `expo-secure-store@~56.0.4`, React 19.2, React Native 0.85, and TypeScript 6.0
+- Aligned Expo runtime peers and local development dependencies with `expo@~56.0.12`, `expo-constants@~56.0.18`, `expo-crypto@~56.0.4`, `expo-file-system@~56.0.8`, `expo-secure-store@~56.0.4`, React 19.2, React Native 0.85, and TypeScript 6.0
 - Updated README, runtime QA guidance, package metadata, and source headers to describe the 2.0.1 / SDK 56 release candidate consistently
 - Added `package-lock.json` to the release-controlled dependency surface and expanded the publish gate with production and no-high audit checks
 
