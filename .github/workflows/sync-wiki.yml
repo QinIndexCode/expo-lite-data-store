@@ -8,18 +8,20 @@ on:
       - 'README.en.md'
       - '.github/workflows/sync-wiki.yml'
 
-permissions:
-  contents: write
+permissions: read-all
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout main repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Checkout wiki repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: ${{ github.repository }}.wiki
           path: wiki
