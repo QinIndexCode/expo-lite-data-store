@@ -2,7 +2,7 @@ name: Sync Wiki Descriptions
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'README.zh-CN.md'
       - 'README.en.md'
