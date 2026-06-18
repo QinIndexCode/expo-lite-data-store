@@ -153,7 +153,7 @@
   },
   "devDependencies": {
     "@babel/plugin-transform-modules-commonjs": "^7.29.7",
-    "@eslint/js": "^9.39.4",
+    "@eslint/js": "^10.0.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/crypto-js": "^4.2.2",
     "@types/jest": "^29.5.0",
