@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 [README Entry](../README.md) | [简体中文](./CHANGELOG.zh-CN.md) | [API Reference](./API.en.md)
 
+## [2.0.2] - 2026-06-28
+
+### Changed
+- Aligned the local React development dependency exactly to `19.2.3`, matching the Expo SDK 56 dependency validation contract used by `expo-doctor`
+- Updated the GitHub npm publish workflow to run the full `prepublishOnly` gate and `npm pack --dry-run --ignore-scripts` before publishing
+- Added a manual `workflow_dispatch` entry point for the npm publish workflow, while retaining tag-triggered publishing for `v*.*.*` tags
+
+### Fixed
+- Restored the Expo consumer smoke test after npm resolved React to a newer patch version that Expo SDK 56 rejected
+- Made the GitHub publish workflow match the documented release gate before `npm publish --ignore-scripts --access public --provenance`
+
 ## [2.0.1] - 2026-06-12
 
 ### Changed

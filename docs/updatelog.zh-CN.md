@@ -2,6 +2,13 @@
 
 [README 入口](../README.md) | [English](./updatelog.en.md) | [消费者文档](../README.zh-CN.md)
 
+### 📅 2026-06-28 `v2.0.2` Expo Consumer Smoke 与 GitHub 发布门禁对齐
+
+> Expo 兼容性：将本地 React 开发依赖固定到 `19.2.3`，避免临时 Expo SDK 56 consumer app 被 npm 解析到 `expo-doctor` 拒绝的更新 patch 版本
+> 发布门禁：更新 `.github/workflows/npm-publish.yml`，发布前执行 `npm run prepublishOnly`，用 `npm pack --dry-run --ignore-scripts` 校验 tarball，并通过 `npm publish --ignore-scripts --access public --provenance` 发布
+> GitHub 状态：当前 main 分支的 CodeQL、OpenSSF Scorecard 和 Push on main 均已通过；npm publish workflow 仍被 GitHub 标记为手动禁用，需要在仓库设置或认证后的 GitHub CLI/API 中重新启用
+> 验证结果：准备 2.0.2 发布元数据前，已重新执行完整构建、类型检查、全量 Jest、Expo consumer smoke、package exports smoke、workflow lint 和 npm pack 校验
+
 ### 📅 2026-06-12 `v2.0.1` Expo SDK 56 升级、存储加固与发布验证准备
 
 > 实现审计：基于当前源码和实跑结果检查文件存储、分块存储、事务、加密、缓存、元数据与发布脚本，而不是仅依赖文档状态

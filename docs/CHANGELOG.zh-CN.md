@@ -4,6 +4,17 @@
 
 [README 入口](../README.md) | [English](./CHANGELOG.en.md) | [API 参考](./API.zh-CN.md)
 
+## [2.0.2] - 2026-06-28
+
+### 变更
+- 将本地 React 开发依赖精确对齐到 `19.2.3`，匹配 Expo SDK 56 在 `expo-doctor` 中使用的依赖校验契约
+- 更新 GitHub npm 发布工作流，在发布前执行完整 `prepublishOnly` 门禁和 `npm pack --dry-run --ignore-scripts`
+- 为 npm 发布工作流增加手动 `workflow_dispatch` 入口，同时保留 `v*.*.*` tag 触发发布
+
+### 修复
+- 修复 npm 将 React 解析到更新 patch 版本后被 Expo SDK 56 拒绝，导致 Expo consumer smoke 失败的问题
+- 让 GitHub 发布工作流在执行 `npm publish --ignore-scripts --access public --provenance` 前与文档化发布门禁保持一致
+
 ## [2.0.1] - 2026-06-12
 
 ### 变更

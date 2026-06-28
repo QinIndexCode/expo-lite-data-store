@@ -2,6 +2,13 @@
 
 [README Entry](../README.md) | [简体中文](./updatelog.zh-CN.md) | [Consumer Guide](../README.en.md)
 
+### 📅 2026-06-28 `v2.0.2` Expo Consumer Smoke and GitHub Publish Gate Alignment
+
+> Expo Compatibility: Pinned the local React development dependency to `19.2.3` so temporary Expo SDK 56 consumer apps satisfy `expo-doctor` instead of drifting to a rejected patch release
+> Publish Gate: Updated `.github/workflows/npm-publish.yml` to run `npm run prepublishOnly`, verify the tarball with `npm pack --dry-run --ignore-scripts`, and publish with `npm publish --ignore-scripts --access public --provenance`
+> GitHub State: Current main-branch CodeQL, OpenSSF Scorecard, and Push on main runs are passing; GitHub still reports the npm publish workflow as manually disabled until it is re-enabled in repository settings or through an authenticated GitHub CLI/API session
+> Verification: Re-ran full build, typecheck, all Jest suites, Expo consumer smoke, package export smoke, workflow lint, and npm pack validation before preparing the 2.0.2 release metadata
+
 ### 📅 2026-06-12 `v2.0.1` Expo SDK 56 Upgrade, Storage Hardening, and Release Validation Prep
 
 > Implementation Audit: Reviewed the current source and live command results across file storage, chunked storage, transactions, encryption, cache, metadata, and publish scripts instead of relying on documentation status alone
