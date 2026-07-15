@@ -70,11 +70,33 @@ const run = (command, args, cwd) => {
   runCommand(command, args, cwd);
 };
 
+const parseJsonOutput = output => {
+  const normalized = String(output || '').trim();
+
+  try {
+    return JSON.parse(normalized);
+  } catch {
+    for (let index = 0; index < normalized.length; index += 1) {
+      if (normalized[index] !== '[' && normalized[index] !== '{') {
+        continue;
+      }
+
+      try {
+        return JSON.parse(normalized.slice(index));
+      } catch {
+        // npm can print lifecycle output before the final JSON payload.
+      }
+    }
+  }
+
+  throw new SyntaxError('Command output did not contain a valid JSON payload');
+};
+
 const runJson = (command, args, cwd) => {
   const result = runCommand(command, args, cwd, {
     captureOutput: true,
   });
-  return JSON.parse(result.stdout);
+  return parseJsonOutput(result.stdout);
 };
 
 const readRepoPackage = () => JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
@@ -93,17 +115,15 @@ const packRepoTarball = root => {
   const packDir = fs.mkdtempSync(path.join(os.tmpdir(), 'expo-lite-data-store-pack-'));
   const packResult = runJson(npmCmd, ['pack', '--json', '--ignore-scripts', '--pack-destination', packDir], root);
   const [packMetadata] = packResult;
-  const packagedPaths = Array.isArray(packMetadata?.files)
-    ? packMetadata.files.map(file => file.path)
-    : [];
+  const packagedPaths = Array.isArray(packMetadata?.files) ? packMetadata.files.map(file => file.path) : [];
 
   if (packagedPaths.length > 0) {
-    const missingPackagedArtifacts = requiredBuiltArtifacts.filter(relativePath => !packagedPaths.includes(relativePath));
+    const missingPackagedArtifacts = requiredBuiltArtifacts.filter(
+      relativePath => !packagedPaths.includes(relativePath)
+    );
 
     if (missingPackagedArtifacts.length > 0) {
-      throw new Error(
-        `Packed tarball is missing required build artifacts: ${missingPackagedArtifacts.join(', ')}`
-      );
+      throw new Error(`Packed tarball is missing required build artifacts: ${missingPackagedArtifacts.join(', ')}`);
     }
   }
 
@@ -189,6 +209,7 @@ module.exports = {
   createCommandEnv,
   ensureBuiltArtifacts,
   hasBuiltArtifacts,
+  parseJsonOutput,
   packRepoTarball,
   resolveCommandInvocation,
   requiredBuiltArtifacts,

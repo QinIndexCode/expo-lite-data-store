@@ -114,12 +114,14 @@ describe('smoke expo consumer helpers', () => {
     const { spawnSync } = require('child_process') as { spawnSync: jest.Mock };
     spawnSync.mockReturnValueOnce({
       status: 0,
-      stdout: JSON.stringify([
-        {
-          filename: 'expo-lite-data-store-2.0.1.tgz',
-          files: [{ path: 'README.md' }],
-        },
-      ]),
+      stdout:
+        'Wrote dist/js/package.json.\n' +
+        JSON.stringify([
+          {
+            filename: 'expo-lite-data-store-2.0.1.tgz',
+            files: [{ path: 'README.md' }],
+          },
+        ]),
       stderr: '',
       error: null,
     });
@@ -127,9 +129,7 @@ describe('smoke expo consumer helpers', () => {
       packRepoTarball: (root: string) => string;
     };
 
-    expect(() => smokeModule.packRepoTarball(tempRoot)).toThrow(
-      'Packed tarball is missing required build artifacts'
-    );
+    expect(() => smokeModule.packRepoTarball(tempRoot)).toThrow('Packed tarball is missing required build artifacts');
   });
 
   it('removes inherited npm dry-run flags from child command environments', () => {

@@ -11,6 +11,7 @@
 > Verification: Passed 58 Jest suites / 516 tests, the complete `prepublishOnly` gate, Expo Doctor 21/21, Android Metro export, type-checking, actionlint, formatting, and npm package inspection
 > Cross-Platform CI: Fixed QA temporary-prefix construction to use explicit Windows and POSIX path implementations, with regression coverage for both simulated platforms
 > Clean-Checkout CI: Build distributable artifacts before tests that inspect `dist/`, register the CI/CD index in the documentation contract, and use the host path separator in the remaining simple integration assertion
+> Linux npm Smoke: Parse the final npm JSON payload even when lifecycle scripts write informational lines to stdout before it
 
 ### 📅 2026-06-28 `v2.0.2` Expo Consumer Smoke and GitHub Publish Gate Alignment
 

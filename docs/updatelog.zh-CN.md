@@ -11,6 +11,7 @@
 > 验证结果：58 个 Jest 套件 / 516 项测试、完整 `prepublishOnly`、Expo Doctor 21/21、Android Metro 导出、类型检查、actionlint、格式检查和 npm 包内容检查全部通过
 > 跨平台 CI：修复 QA 临时目录前缀构造，显式使用 Windows 和 POSIX path 实现，并为两个模拟平台补充回归覆盖
 > 干净 Checkout CI：在检查 `dist/` 的测试前先构建可分发产物，将 CI/CD 索引加入文档契约，并让剩余 simple integration 断言使用宿主路径分隔符
+> Linux npm Smoke：即使 lifecycle script 先向 stdout 写入提示行，也能解析后续最终 npm JSON payload
 
 ### 📅 2026-06-28 `v2.0.2` Expo Consumer Smoke 与 GitHub 发布门禁对齐
 

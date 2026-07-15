@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Added a bilingual CI/CD operations runbook covering repository secrets, release sequencing, remote observation, and failure recovery
 - Made Expo runtime QA temporary-path generation explicitly use Windows or POSIX path semantics, so platform-simulation tests remain deterministic on GitHub's Linux runners
 - Made the clean-checkout gate build `dist/` before package-export and built-artifact tests, and removed the final Windows-only separator assertion from the deterministic suite
+- Made the Expo consumer pack parser tolerate npm lifecycle messages that Linux npm can emit before its `--json` payload
 - Disabled auto-sync by default so importing or initializing the library does not start background dirty-cache timers unless the host app opts in explicitly
 
 ### Fixed
