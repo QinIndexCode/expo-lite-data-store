@@ -55,9 +55,12 @@ Examples:
 Every code contribution should run the validation commands that match its scope. At minimum:
 
 ```bash
-npm test -- --runInBand
 npm run typecheck
+npm run build:all
+npm test -- --runInBand
 ```
+
+The build must precede the test command on a clean checkout because the package-export and built-artifact contract tests inspect `dist/`.
 
 When packaging, install-contract, or Expo runtime behavior is affected, also run:
 
@@ -97,6 +100,7 @@ Before opening a pull request, confirm the following:
 - [ ] Changes include tests where applicable
 - [ ] `npm test -- --runInBand` passes
 - [ ] `npm run typecheck` passes
+- [ ] `npm run build:all` completed before tests on a clean checkout
 - [ ] `npm run smoke:expo-consumer` passes when packaging or runtime behavior changed
 - [ ] Documentation was updated in both English and Simplified Chinese where applicable
 - [ ] Generated artifacts such as `artifacts/` output or `*.tgz` files are not included in the commit

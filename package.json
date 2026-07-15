@@ -100,7 +100,7 @@
     "qa:baseline:native-flagship": "npm run qa:flagship:native",
     "qa:baseline:release": "npm run qa:baseline:expo-go && npm run qa:baseline:native-flagship",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run audit:prod && npm run audit:no-high && npm run test:all && npm run build:all && npm run typecheck && npm run smoke:expo-consumer",
+    "prepublishOnly": "npm run audit:prod && npm run audit:no-high && npm run typecheck && npm run build:all && npm run test:all && npm run smoke:expo-consumer",
     "publish:safe": "npm run build && npm run typecheck && npm publish",
     "publish:force": "npm publish --ignore-scripts"
   },

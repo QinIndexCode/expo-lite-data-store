@@ -21,8 +21,8 @@ Pull Request 不会获得 npm 发布凭据，也不能触发包发布。
 ```bash
 npm ci --ignore-scripts
 npm run typecheck
-npm test -- --runInBand --coverage=false
 npm run build:all
+npm test -- --runInBand --coverage=false
 ```
 
 涉及打包、存储运行时、Expo 兼容性、依赖或发布流程时，执行完整门禁：
@@ -32,7 +32,7 @@ npm run prepublishOnly
 npm pack --dry-run --ignore-scripts
 ```
 
-`prepublishOnly` 包含依赖审计、全部维护中的测试分组、构建、类型检查、lint 和临时 Expo consumer smoke。超出 consumer smoke 的真机运行证据请参考 [EXPO_RUNTIME_QA.zh-CN.md](./EXPO_RUNTIME_QA.zh-CN.md)。
+`prepublishOnly` 包含依赖审计、类型检查、干净的可分发构建、全部维护中的测试分组、lint 和临时 Expo consumer smoke。构建有意安排在测试前，因为 package export 与 built artifact 契约会检查 `dist/`。超出 consumer smoke 的真机运行证据请参考 [EXPO_RUNTIME_QA.zh-CN.md](./EXPO_RUNTIME_QA.zh-CN.md)。
 
 ## 仓库一次性配置
 

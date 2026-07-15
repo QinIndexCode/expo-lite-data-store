@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - Replaced the manually disabled npm workflow with a new tag-only release workflow that validates tag/package version alignment and npm authentication before publishing
 - Added a bilingual CI/CD operations runbook covering repository secrets, release sequencing, remote observation, and failure recovery
 - Made Expo runtime QA temporary-path generation explicitly use Windows or POSIX path semantics, so platform-simulation tests remain deterministic on GitHub's Linux runners
+- Made the clean-checkout gate build `dist/` before package-export and built-artifact tests, and removed the final Windows-only separator assertion from the deterministic suite
 - Disabled auto-sync by default so importing or initializing the library does not start background dirty-cache timers unless the host app opts in explicitly
 
 ### Fixed

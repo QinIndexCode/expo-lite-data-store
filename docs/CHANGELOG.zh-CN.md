@@ -13,6 +13,7 @@
 - 用新的 tag-only 发布工作流替换远端被手动禁用的旧 npm workflow，并在发布前校验 tag/包版本和 npm 认证
 - 增加中英文 CI/CD 运维手册，覆盖仓库 Secret、发布顺序、远端观察和失败恢复
 - Expo runtime QA 临时路径现在显式使用 Windows 或 POSIX 语义，确保平台模拟测试在 GitHub Linux runner 上保持确定性
+- 干净 checkout 门禁现在会先构建 `dist/`，再运行 package export 与 built artifact 测试，并移除确定性套件中最后一个仅适用于 Windows 的分隔符断言
 - 默认关闭自动同步，避免库导入或初始化时启动后台脏缓存定时器；需要时由宿主应用显式开启
 
 ### 修复

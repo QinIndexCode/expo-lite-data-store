@@ -55,9 +55,12 @@ npm install
 所有代码贡献至少应运行以下命令：
 
 ```bash
-npm test -- --runInBand
 npm run typecheck
+npm run build:all
+npm test -- --runInBand
 ```
+
+在干净 checkout 中，构建必须先于测试执行，因为 package export 和 built artifact 契约测试会检查 `dist/`。
 
 如果改动影响打包、安装契约或 Expo 运行时行为，还应运行：
 
@@ -97,6 +100,7 @@ npm run qa:baseline:native-flagship
 - [ ] 改动包含必要测试
 - [ ] `npm test -- --runInBand` 通过
 - [ ] `npm run typecheck` 通过
+- [ ] 干净 checkout 中已先执行 `npm run build:all` 再运行测试
 - [ ] 涉及打包或运行时行为时，`npm run smoke:expo-consumer` 通过
 - [ ] 需要更新的文档已同时覆盖英文和简体中文
 - [ ] 没有把 `artifacts/` 产物或 `*.tgz` 之类的生成文件提交进来

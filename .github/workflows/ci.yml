@@ -38,11 +38,11 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
-      - name: Run deterministic test suite
-        run: npm test -- --runInBand --coverage=false
-
       - name: Build distributable artifacts
         run: npm run build:all
+
+      - name: Run deterministic test suite
+        run: npm test -- --runInBand --coverage=false
 
       - name: Smoke-test an Expo consumer
         run: npm run smoke:expo-consumer

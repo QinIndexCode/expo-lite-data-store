@@ -21,8 +21,8 @@ For normal changes, run:
 ```bash
 npm ci --ignore-scripts
 npm run typecheck
-npm test -- --runInBand --coverage=false
 npm run build:all
+npm test -- --runInBand --coverage=false
 ```
 
 For packaging, storage-runtime, Expo compatibility, dependency, or release changes, run the complete release gate:
@@ -32,7 +32,7 @@ npm run prepublishOnly
 npm pack --dry-run --ignore-scripts
 ```
 
-`prepublishOnly` includes dependency audits, all maintained test groups, builds, type-checking, lint, and the temporary Expo consumer smoke test. Runtime-device evidence beyond the consumer smoke is documented in [EXPO_RUNTIME_QA.en.md](./EXPO_RUNTIME_QA.en.md).
+`prepublishOnly` includes dependency audits, type-checking, a clean distributable build, all maintained test groups, lint, and the temporary Expo consumer smoke test. The build intentionally precedes tests because package-export and built-artifact contracts inspect `dist/`. Runtime-device evidence beyond the consumer smoke is documented in [EXPO_RUNTIME_QA.en.md](./EXPO_RUNTIME_QA.en.md).
 
 ## One-Time Repository Setup
 

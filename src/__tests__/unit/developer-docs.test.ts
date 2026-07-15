@@ -25,10 +25,7 @@ describe('developer documentation contract', () => {
   const qaGuide = fs.readFileSync(path.join(repoRoot, 'docs/EXPO_RUNTIME_QA.en.md'), 'utf8');
   const qaGuideZh = fs.readFileSync(path.join(repoRoot, 'docs/EXPO_RUNTIME_QA.zh-CN.md'), 'utf8');
   const bugTemplate = fs.readFileSync(path.join(repoRoot, '.github/ISSUE_TEMPLATE/bug_report.md'), 'utf8');
-  const bugTemplateZh = fs.readFileSync(
-    path.join(repoRoot, '.github/ISSUE_TEMPLATE/bug_report.zh-CN.md'),
-    'utf8'
-  );
+  const bugTemplateZh = fs.readFileSync(path.join(repoRoot, '.github/ISSUE_TEMPLATE/bug_report.zh-CN.md'), 'utf8');
   const trackedMarkdown = childProcess
     .execFileSync('git', ['ls-files'], {
       cwd: repoRoot,
@@ -44,8 +41,8 @@ describe('developer documentation contract', () => {
     .split(/\r?\n/)
     .filter(Boolean);
   const markdownInventory = Array.from(new Set([...trackedMarkdown, ...untrackedMarkdown]))
-    .filter((file) => file.endsWith('.md'))
-    .filter((file) => !file.startsWith('.trae/'));
+    .filter(file => file.endsWith('.md'))
+    .filter(file => !file.startsWith('.trae/'));
   const formalEnglishDocs = [
     'README.en.md',
     'CONTRIBUTING.en.md',
@@ -53,6 +50,7 @@ describe('developer documentation contract', () => {
     'docs/API.en.md',
     'docs/ARCHITECTURE.en.md',
     'docs/CHANGELOG.en.md',
+    'docs/CI_CD.en.md',
     'docs/EXPO_RUNTIME_QA.en.md',
     'docs/updatelog.en.md',
     'docs/COMMENT_SPECIFICATION.en.md',
@@ -64,6 +62,7 @@ describe('developer documentation contract', () => {
     'docs/API.md',
     'docs/ARCHITECTURE.md',
     'docs/CHANGELOG.md',
+    'docs/CI_CD.md',
     'docs/EXPO_RUNTIME_QA.md',
     'docs/updatelog.md',
     'docs/COMMENT_SPECIFICATION.md',
@@ -108,7 +107,9 @@ describe('developer documentation contract', () => {
     expect(readmeEntry).toContain(`${githubBlobBase}/CONTRIBUTING.en.md`);
     expect(readmeEntry).toContain(`${githubBlobBase}/SECURITY.en.md`);
     expect(readmeEntry).toContain(`${githubBlobBase}/LICENSE.txt`);
-    expect(readmeEntry).toContain('npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store');
+    expect(readmeEntry).toContain(
+      'npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store'
+    );
   });
 
   it('keeps the English consumer guide aligned with the release baseline and developer links', () => {
@@ -170,7 +171,9 @@ describe('developer documentation contract', () => {
     expect(apiGuide).toContain('app.json');
     expect(apiGuide).toContain('$like');
     expect(apiGuide).toContain('$inc');
-    expect(apiGuide).toContain('npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store');
+    expect(apiGuide).toContain(
+      'npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store'
+    );
     expect(apiGuideZh).toContain('不属于受支持的安装方式');
     expect(apiGuideZh).toContain('EXPO_MODULE_MISSING');
     expect(apiGuideZh).toContain('WriteResult');
@@ -179,7 +182,9 @@ describe('developer documentation contract', () => {
     expect(apiGuideZh).toContain('app.json');
     expect(apiGuideZh).toContain('$like');
     expect(apiGuideZh).toContain('$inc');
-    expect(apiGuideZh).toContain('npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store');
+    expect(apiGuideZh).toContain(
+      'npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store'
+    );
     expect(apiGuide).toContain('[README.en.md](../README.en.md)');
     expect(apiGuideZh).toContain('[English](./API.en.md)');
   });
