@@ -9,6 +9,7 @@
 > Release Safety: Added exact tag/version matching, main-branch ancestry validation, an explicit `NPM_TOKEN` prerequisite, the complete `prepublishOnly` gate, package inspection, and npm provenance
 > Maintainer Documentation: Added bilingual CI/CD operations guides covering secrets, release sequencing, GitHub CLI observation, and safe failure recovery
 > Verification: Passed 58 Jest suites / 515 tests, the complete `prepublishOnly` gate, Expo Doctor 21/21, Android Metro export, type-checking, actionlint, formatting, and npm package inspection
+> Cross-Platform CI: Fixed QA temporary-prefix construction to use explicit Windows and POSIX path implementations, with regression coverage for both simulated platforms
 
 ### 📅 2026-06-28 `v2.0.2` Expo Consumer Smoke and GitHub Publish Gate Alignment
 

@@ -144,6 +144,17 @@ describe('expo runtime QA Android device selection', () => {
     ).toBe('C:\\qtmp\\lds-mc-nqc-');
   });
 
+  it('uses the host-independent POSIX path implementation for non-Windows QA consumers', () => {
+    expect(
+      buildQaConsumerTempPrefix({
+        channel: 'managed-compatible',
+        profile: 'expo-go-js',
+        platform: 'linux',
+        qaTempRoot: '/tmp/qa',
+      })
+    ).toBe('/tmp/qa/expo-lite-data-store-mc-egj-');
+  });
+
   it('falls back to the only attached adb serial when MuMu remaps the requested network endpoint', () => {
     expect(resolveRequestedAdbSerial('127.0.0.1:7555', ['emulator-5554'])).toBe('emulator-5554');
   });

@@ -9,6 +9,7 @@
 > 发布安全：加入 tag/版本精确匹配、main 分支归属校验、显式 `NPM_TOKEN` 前置条件、完整 `prepublishOnly` 门禁、包内容检查和 npm provenance
 > 维护者文档：增加中英文 CI/CD 运维手册，覆盖 Secret、发布顺序、GitHub CLI 观察和安全故障恢复
 > 验证结果：58 个 Jest 套件 / 515 项测试、完整 `prepublishOnly`、Expo Doctor 21/21、Android Metro 导出、类型检查、actionlint、格式检查和 npm 包内容检查全部通过
+> 跨平台 CI：修复 QA 临时目录前缀构造，显式使用 Windows 和 POSIX path 实现，并为两个模拟平台补充回归覆盖
 
 ### 📅 2026-06-28 `v2.0.2` Expo Consumer Smoke 与 GitHub 发布门禁对齐
 

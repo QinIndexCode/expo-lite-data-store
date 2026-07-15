@@ -9,10 +9,16 @@ const { buildRunnerAppSource } = require('./expo-runtime-runner-template.cjs');
 const repoRoot = path.resolve(__dirname, '..');
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-const adbCmd = process.env.ADB_PATH
-  || (process.env.ANDROID_HOME ? path.join(process.env.ANDROID_HOME, 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb') : 'adb');
-const emulatorCmd = process.env.EMULATOR_PATH
-  || (process.env.ANDROID_HOME ? path.join(process.env.ANDROID_HOME, 'emulator', process.platform === 'win32' ? 'emulator.exe' : 'emulator') : 'emulator');
+const adbCmd =
+  process.env.ADB_PATH ||
+  (process.env.ANDROID_HOME
+    ? path.join(process.env.ANDROID_HOME, 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb')
+    : 'adb');
+const emulatorCmd =
+  process.env.EMULATOR_PATH ||
+  (process.env.ANDROID_HOME
+    ? path.join(process.env.ANDROID_HOME, 'emulator', process.platform === 'win32' ? 'emulator.exe' : 'emulator')
+    : 'emulator');
 
 const QA_PREFIX = 'LITESTORE_QA::';
 const DEFAULT_CHANNELS = ['single-package', 'managed-compatible'];
@@ -64,16 +70,28 @@ const parseArgs = argv => {
 
     switch (key) {
       case 'channels':
-        options.channels = value.split(',').map(item => item.trim()).filter(Boolean);
+        options.channels = value
+          .split(',')
+          .map(item => item.trim())
+          .filter(Boolean);
         break;
       case 'layers':
-        options.layers = value.split(',').map(item => item.trim()).filter(Boolean);
+        options.layers = value
+          .split(',')
+          .map(item => item.trim())
+          .filter(Boolean);
         break;
       case 'groups':
-        options.groups = value.split(',').map(item => item.trim()).filter(Boolean);
+        options.groups = value
+          .split(',')
+          .map(item => item.trim())
+          .filter(Boolean);
         break;
       case 'profiles':
-        options.profiles = value.split(',').map(item => item.trim()).filter(Boolean);
+        options.profiles = value
+          .split(',')
+          .map(item => item.trim())
+          .filter(Boolean);
         break;
       case 'soak-minutes':
         options.soakMinutes = Number(value);
@@ -141,20 +159,15 @@ const getQaTempRoot = () => {
   }
 };
 
-const buildQaConsumerTempPrefix = ({
-  channel,
-  profile,
-  platform = process.platform,
-  qaTempRoot = getQaTempRoot(),
-}) => {
+const buildQaConsumerTempPrefix = ({ channel, profile, platform = process.platform, qaTempRoot = getQaTempRoot() }) => {
   const shortChannel = SHORT_CHANNEL_NAMES[channel] || sanitizeTempToken(channel, 'qa');
   const shortProfile = SHORT_PROFILE_NAMES[profile] || sanitizeTempToken(profile, 'app');
 
   if (platform === 'win32') {
-    return path.join(qaTempRoot, `lds-${shortChannel}-${shortProfile}-`);
+    return path.win32.join(qaTempRoot, `lds-${shortChannel}-${shortProfile}-`);
   }
 
-  return path.join(qaTempRoot, `expo-lite-data-store-${shortChannel}-${shortProfile}-`);
+  return path.posix.join(qaTempRoot, `expo-lite-data-store-${shortChannel}-${shortProfile}-`);
 };
 
 const isPortAvailable = port =>
@@ -376,7 +389,16 @@ const buildAppJson = ({ channel, mode, groups, soakMinutes, restartIntervalMinut
   },
 });
 
-const writeConsumerFiles = ({ consumerDir, channel, mode, groups, soakMinutes, restartIntervalMinutes, runId, profile }) => {
+const writeConsumerFiles = ({
+  consumerDir,
+  channel,
+  mode,
+  groups,
+  soakMinutes,
+  restartIntervalMinutes,
+  runId,
+  profile,
+}) => {
   fs.writeFileSync(
     path.join(consumerDir, 'package.json'),
     `${JSON.stringify(buildConsumerPackageJson(profile), null, 2)}\n`,
@@ -469,13 +491,13 @@ const installConsumerDependencies = ({ consumerDir, tarballPath, channel, artifa
 };
 
 const isSinglePackageExpoGoDoctorPeerWarning = ({ channel, profile, caseId, combinedOutput }) =>
-  channel === 'single-package'
-  && profile === EXPO_GO_PROFILE
-  && caseId === 'contract_expo_doctor'
-  && /Missing peer dependency:\s+expo-constants/iu.test(combinedOutput)
-  && /Missing peer dependency:\s+expo-crypto/iu.test(combinedOutput)
-  && /Missing peer dependency:\s+expo-file-system/iu.test(combinedOutput)
-  && /Missing peer dependency:\s+expo-secure-store/iu.test(combinedOutput);
+  channel === 'single-package' &&
+  profile === EXPO_GO_PROFILE &&
+  caseId === 'contract_expo_doctor' &&
+  /Missing peer dependency:\s+expo-constants/iu.test(combinedOutput) &&
+  /Missing peer dependency:\s+expo-crypto/iu.test(combinedOutput) &&
+  /Missing peer dependency:\s+expo-file-system/iu.test(combinedOutput) &&
+  /Missing peer dependency:\s+expo-secure-store/iu.test(combinedOutput);
 
 const recordCommandCase = ({ recordCase, channel, profile, layer, caseId, group, result, stage }) => {
   const baseRecord = {
@@ -502,10 +524,10 @@ const recordCommandCase = ({ recordCase, channel, profile, layer, caseId, group,
   const combinedOutput = `${result.stdout || ''}\n${result.stderr || ''}`;
   const isKnownDoctorNetworkFlake =
     caseId === 'contract_expo_doctor' &&
-    (/Directory check failed with unexpected server response/iu.test(combinedOutput)
-      || /TypeError:\s*fetch failed/iu.test(combinedOutput)
-      || /ConnectTimeoutError/iu.test(combinedOutput)
-      || /requires a connection to the Expo API/iu.test(combinedOutput));
+    (/Directory check failed with unexpected server response/iu.test(combinedOutput) ||
+      /TypeError:\s*fetch failed/iu.test(combinedOutput) ||
+      /ConnectTimeoutError/iu.test(combinedOutput) ||
+      /requires a connection to the Expo API/iu.test(combinedOutput));
 
   if (isKnownDoctorNetworkFlake) {
     recordCase({
@@ -707,15 +729,11 @@ const ensureAndroidDeviceReady = async ({ avdName, deviceSerial }) => {
     throw new Error(`Requested AVD "${avdName}" is not available. Found: ${avds.join(', ')}`);
   }
 
-  const processHandle = spawn(
-    emulatorCmd,
-    ['-avd', avdName, '-no-snapshot-save', '-no-boot-anim'],
-    {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    }
-  );
+  const processHandle = spawn(emulatorCmd, ['-avd', avdName, '-no-snapshot-save', '-no-boot-anim'], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
   processHandle.unref();
 
   const deadline = Date.now() + 4 * 60 * 1000;
@@ -758,8 +776,7 @@ const captureUiTree = (serial, outputFile) => {
     const xmlText = result.stdout || '';
     const start = xmlText.indexOf('<?xml');
     const end = xmlText.lastIndexOf('</hierarchy>');
-    const normalizedXml =
-      start >= 0 && end >= 0 ? xmlText.slice(start, end + '</hierarchy>'.length) : xmlText;
+    const normalizedXml = start >= 0 && end >= 0 ? xmlText.slice(start, end + '</hierarchy>'.length) : xmlText;
     fs.writeFileSync(outputFile, normalizedXml, 'utf8');
     return true;
   }
@@ -774,9 +791,13 @@ const getExpoGoInstalled = serial => {
 };
 
 const launchPackageHome = (serial, packageName) =>
-  runCommand(adbCmd, ['-s', serial, 'shell', 'monkey', '-p', packageName, '-c', 'android.intent.category.LAUNCHER', '1'], {
-    timeoutMs: 60000,
-  });
+  runCommand(
+    adbCmd,
+    ['-s', serial, 'shell', 'monkey', '-p', packageName, '-c', 'android.intent.category.LAUNCHER', '1'],
+    {
+      timeoutMs: 60000,
+    }
+  );
 
 const forceStopPackage = (serial, packageName) =>
   runCommand(adbCmd, ['-s', serial, 'shell', 'am', 'force-stop', packageName], {
@@ -1052,14 +1073,12 @@ const applyAdbReverse = (serial, port) => {
   });
 };
 
-const buildPhaseEventMatcher = ({ channel, mode, profile, runId }) => event =>
-  Boolean(
-    event
-    && event.channel === channel
-    && event.mode === mode
-    && event.profile === profile
-    && event.runId === runId
-  );
+const buildPhaseEventMatcher =
+  ({ channel, mode, profile, runId }) =>
+  event =>
+    Boolean(
+      event && event.channel === channel && event.mode === mode && event.profile === profile && event.runId === runId
+    );
 
 const extractExpoConnectionInfo = line => {
   const expMatch = line.match(/exp:\/\/[^\s]+/u);
@@ -1138,14 +1157,10 @@ const ensureNativeBuildInstalled = ({ consumerDir, serial, port, outputFile }) =
   }
 
   if (!fs.existsSync(gradleWrapper)) {
-    const prebuildResult = runCommand(
-      npxCmd,
-      ['expo', 'prebuild', '--platform', 'android', '--non-interactive'],
-      {
-        cwd: consumerDir,
-        timeoutMs: 20 * 60 * 1000,
-      }
-    );
+    const prebuildResult = runCommand(npxCmd, ['expo', 'prebuild', '--platform', 'android', '--non-interactive'], {
+      cwd: consumerDir,
+      timeoutMs: 20 * 60 * 1000,
+    });
     if (outputFile) {
       appendCommandLog(outputFile, prebuildResult);
     }
@@ -1176,13 +1191,9 @@ const ensureNativeBuildInstalled = ({ consumerDir, serial, port, outputFile }) =
   ensureCommandSuccess(buildResult, 'Failed to build the native flagship dev client');
 
   const apkPath = findDebugApkPath(consumerDir);
-  const installResult = runCommand(
-    adbCmd,
-    ['-s', serial, 'install', '-r', '-d', apkPath],
-    {
-      timeoutMs: 10 * 60 * 1000,
-    }
-  );
+  const installResult = runCommand(adbCmd, ['-s', serial, 'install', '-r', '-d', apkPath], {
+    timeoutMs: 10 * 60 * 1000,
+  });
   if (outputFile) {
     appendCommandLog(outputFile, installResult);
     fs.appendFileSync(outputFile, `\n[qa] installed apk=${apkPath} serial=${serial}\n`, 'utf8');
@@ -1196,10 +1207,7 @@ const bringExpoToForeground = async ({ serial, expUrl, consumerDir, profile }) =
   wakeAndUnlockDevice(serial);
   launchPackageHome(serial, runtime.packageName);
   await new Promise(resolve => setTimeout(resolve, 2500));
-  const launchUrl =
-    profile === NATIVE_PROFILE
-      ? buildNativeDevClientUrl({ consumerDir, expUrl })
-      : expUrl;
+  const launchUrl = profile === NATIVE_PROFILE ? buildNativeDevClientUrl({ consumerDir, expUrl }) : expUrl;
   ensureCommandSuccess(
     openUrlInPackage(serial, launchUrl, profile === NATIVE_PROFILE ? null : runtime.packageName),
     `Failed to launch ${profile === NATIVE_PROFILE ? 'native dev client' : 'Expo Go'} experience URL`
@@ -1389,20 +1397,14 @@ const runExpoPhase = async ({
           15 * 60 * 1000,
           'recovery checkpoint',
           event => event.checkpoint === 'ready-for-force-stop'
-        )
-          .then(event => ({
-            type: 'checkpoint',
-            event,
-          })),
-        waitForPhaseEvent(
-          'summary',
-          15 * 60 * 1000,
-          'recovery summary before force-stop'
-        )
-          .then(event => ({
-            type: 'summary',
-            event,
-          })),
+        ).then(event => ({
+          type: 'checkpoint',
+          event,
+        })),
+        waitForPhaseEvent('summary', 15 * 60 * 1000, 'recovery summary before force-stop').then(event => ({
+          type: 'summary',
+          event,
+        })),
       ]);
 
       if (recoverySignal.type === 'summary') {
@@ -1440,11 +1442,7 @@ const runExpoPhase = async ({
     }
 
     const timeoutMs =
-      mode === 'probe'
-        ? 8 * 60 * 1000
-        : mode === 'soak'
-          ? (soakMinutes + 10) * 60 * 1000
-          : 45 * 60 * 1000;
+      mode === 'probe' ? 8 * 60 * 1000 : mode === 'soak' ? (soakMinutes + 10) * 60 * 1000 : 45 * 60 * 1000;
 
     if (!summaryEvent) {
       summaryEvent = await waitForPhaseEvent('summary', timeoutMs, `${mode} summary`);
@@ -1590,9 +1588,9 @@ const buildVerdicts = (channelSummaries, options) => {
       record => record.caseId === 'native_client_probe' && record.status === 'fail'
     );
     const runtimeValidated =
-      runtimeRecord?.status === 'pass'
-      && runtimeRecord?.metrics?.provider === 'react-native-quick-crypto'
-      && !runtimeRecord?.fatalError;
+      runtimeRecord?.status === 'pass' &&
+      runtimeRecord?.metrics?.provider === 'react-native-quick-crypto' &&
+      !runtimeRecord?.fatalError;
     const recoveryValidated =
       recoveryRecord?.status === 'pass' && recoveryRecord?.metrics?.provider === 'react-native-quick-crypto';
     const ignoreProbeFailure = Boolean(probeFailure && runtimeValidated && recoveryValidated);
@@ -1642,22 +1640,19 @@ const buildVerdicts = (channelSummaries, options) => {
       singlePackageExpoRequested,
       'single-package expo-go-js',
       'Run the Expo Go single-package lane to validate the zero-config baseline.'
-    )
-    || verdictFromSummary(selectSummary('single-package', EXPO_GO_PROFILE), 'single-package expo-go-js');
+    ) || verdictFromSummary(selectSummary('single-package', EXPO_GO_PROFILE), 'single-package expo-go-js');
   const expoRuntimeVerdict =
     buildRequestedVerdict(
       managedExpoRequested,
       'managed-compatible expo-go-js',
       'Run the managed-compatible Expo Go lane to validate the documented install contract.'
-    )
-    || verdictFromSummary(selectSummary('managed-compatible', EXPO_GO_PROFILE), 'managed-compatible expo-go-js');
+    ) || verdictFromSummary(selectSummary('managed-compatible', EXPO_GO_PROFILE), 'managed-compatible expo-go-js');
   const nativeFlagshipVerdict =
     buildRequestedVerdict(
       nativeFlagshipRequested,
       'managed-compatible native-quick-crypto',
       'Run the native flagship lane before claiming native-performance readiness.'
-    )
-    || buildNativeFlagshipVerdict(selectSummary('managed-compatible', NATIVE_PROFILE));
+    ) || buildNativeFlagshipVerdict(selectSummary('managed-compatible', NATIVE_PROFILE));
 
   const performanceLaneTargets = [
     managedExpoRequested
@@ -1745,23 +1740,22 @@ const buildVerdicts = (channelSummaries, options) => {
     }
   }
 
-  const performanceAndStabilityVerdict =
-    buildRequestedVerdict(
-      performanceRequested,
-      'managed-compatible runtime performance lanes',
-      'Run a managed-compatible runtime baseline before claiming performance or stability readiness.'
-    )
-    || {
-      requested: true,
-      status:
-        performanceBlockers.length === 0 ? 'pass' : performanceExecutionFailed ? 'fail' : 'blocked',
-      evidence: performanceEvidence,
-      blockers: performanceBlockers,
-      nextActions:
-        performanceBlockers.length === 0
-          ? ['Archive the current artifact bundle as the latest runtime QA baseline.']
-          : ['Review the managed-compatible runtime, recovery, and soak artifacts before claiming production or flagship readiness.'],
-    };
+  const performanceAndStabilityVerdict = buildRequestedVerdict(
+    performanceRequested,
+    'managed-compatible runtime performance lanes',
+    'Run a managed-compatible runtime baseline before claiming performance or stability readiness.'
+  ) || {
+    requested: true,
+    status: performanceBlockers.length === 0 ? 'pass' : performanceExecutionFailed ? 'fail' : 'blocked',
+    evidence: performanceEvidence,
+    blockers: performanceBlockers,
+    nextActions:
+      performanceBlockers.length === 0
+        ? ['Archive the current artifact bundle as the latest runtime QA baseline.']
+        : [
+            'Review the managed-compatible runtime, recovery, and soak artifacts before claiming production or flagship readiness.',
+          ],
+  };
 
   return {
     zeroConfigVerdict,
@@ -1773,10 +1767,12 @@ const buildVerdicts = (channelSummaries, options) => {
 
 const runChannel = async ({ channel, profile, tarballPath, options, serial, recordCase }) => {
   const channelArtifacts = ensureDir(path.join(options.artifactsDir, channel, profile));
-  const consumerDir = fs.mkdtempSync(buildQaConsumerTempPrefix({
-    channel,
-    profile,
-  }));
+  const consumerDir = fs.mkdtempSync(
+    buildQaConsumerTempPrefix({
+      channel,
+      profile,
+    })
+  );
   const records = [];
   const nativeBuildContext = {
     built: false,
@@ -1826,12 +1822,12 @@ const runChannel = async ({ channel, profile, tarballPath, options, serial, reco
         },
       });
 
-        return {
-          channel,
-          profile,
-          consumerDir,
-          records,
-          artifactsDir: channelArtifacts,
+      return {
+        channel,
+        profile,
+        consumerDir,
+        records,
+        artifactsDir: channelArtifacts,
       };
     }
 

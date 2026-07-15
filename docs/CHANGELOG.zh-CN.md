@@ -12,6 +12,7 @@
 - 增加 push/PR 主 CI：确定性安装、类型检查、测试、构建、Expo consumer smoke 和 npm 包内容校验
 - 用新的 tag-only 发布工作流替换远端被手动禁用的旧 npm workflow，并在发布前校验 tag/包版本和 npm 认证
 - 增加中英文 CI/CD 运维手册，覆盖仓库 Secret、发布顺序、远端观察和失败恢复
+- Expo runtime QA 临时路径现在显式使用 Windows 或 POSIX 语义，确保平台模拟测试在 GitHub Linux runner 上保持确定性
 - 默认关闭自动同步，避免库导入或初始化时启动后台脏缓存定时器；需要时由宿主应用显式开启
 
 ### 修复
