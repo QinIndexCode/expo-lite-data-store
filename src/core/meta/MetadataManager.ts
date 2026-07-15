@@ -60,7 +60,7 @@ export class MetadataManager {
   };
 
   private dirty = false;
-  private writing = false;
+  private savePromise: Promise<void> | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private loadPromise: Promise<void> | null = null;
 
@@ -102,6 +102,7 @@ export class MetadataManager {
       }
 
       this.cache = parsed;
+      this.dirty = false;
     } catch (error) {
       throw new StorageError('Metadata read failed: metadata file is corrupted or unreadable', 'META_FILE_READ_ERROR', {
         cause: error,
@@ -124,6 +125,7 @@ export class MetadataManager {
       this.saveTimer = null;
     }
 
+    await this.save();
     this.loadPromise = this.load();
     await this.loadPromise;
   }
@@ -143,31 +145,75 @@ export class MetadataManager {
     await this.save();
   }
 
-  private async save() {
-    if (!this.dirty || this.writing) return;
-    this.writing = true;
-    if (this.saveTimer) clearTimeout(this.saveTimer);
+  private async persistSnapshot(snapshot: DatabaseMeta): Promise<void> {
+    const fileSystem = getFileSystem();
+    const metaFilePath = await this.getMetaFilePath();
+    const tempMetaFilePath = `${metaFilePath}.tmp`;
+    const dirPath = metaFilePath.substring(0, metaFilePath.lastIndexOf('/'));
 
     try {
-      const fileSystem = getFileSystem();
-      const metaFilePath = await this.getMetaFilePath();
-      this.cache.generatedAt = Date.now();
+      await fileSystem.makeDirectoryAsync(dirPath, { intermediates: true });
+    } catch (dirError) {
+      logger.warn(`MAKE DIRECTORY FAILED for ${dirPath}`, dirError);
+    }
 
-      const dirPath = metaFilePath.substring(0, metaFilePath.lastIndexOf('/'));
-      try {
-        await fileSystem.makeDirectoryAsync(dirPath, { intermediates: true });
-      } catch (dirError) {
-        logger.warn(`MAKE DIRECTORY FAILED for ${dirPath}`, dirError);
-      }
-
-      await fileSystem.writeAsStringAsync(metaFilePath, JSON.stringify(this.cache, null, 2), {
+    try {
+      await fileSystem.writeAsStringAsync(tempMetaFilePath, JSON.stringify(snapshot, null, 2), {
         encoding: getEncodingType().UTF8,
       });
-      this.dirty = false;
+      await fileSystem.moveAsync({ from: tempMetaFilePath, to: metaFilePath });
     } catch (error) {
-      throw new StorageError('Metadata write failed', 'META_FILE_WRITE_ERROR', { cause: error });
+      try {
+        await fileSystem.deleteAsync(tempMetaFilePath, { idempotent: true });
+      } catch (cleanupError) {
+        logger.warn(`DELETE TEMP METADATA FAILED for ${tempMetaFilePath}`, cleanupError);
+      }
+      throw error;
+    }
+  }
+
+  private async flushDirtyState(): Promise<void> {
+    while (this.dirty) {
+      this.dirty = false;
+      const snapshot: DatabaseMeta = {
+        ...this.cache,
+        generatedAt: Date.now(),
+        tables: { ...this.cache.tables },
+      };
+
+      try {
+        await this.persistSnapshot(snapshot);
+        this.cache.generatedAt = snapshot.generatedAt;
+      } catch (error) {
+        this.dirty = true;
+        throw new StorageError('Metadata write failed', 'META_FILE_WRITE_ERROR', { cause: error });
+      }
+    }
+  }
+
+  private async save(): Promise<void> {
+    if (this.savePromise) {
+      await this.savePromise;
+      if (this.dirty) {
+        await this.save();
+      }
+      return;
+    }
+
+    if (!this.dirty) return;
+
+    const savePromise = this.flushDirtyState();
+    this.savePromise = savePromise;
+    try {
+      await savePromise;
     } finally {
-      this.writing = false;
+      if (this.savePromise === savePromise) {
+        this.savePromise = null;
+      }
+    }
+
+    if (this.dirty) {
+      await this.save();
     }
   }
 
@@ -176,6 +222,7 @@ export class MetadataManager {
     if (this.saveTimer) clearTimeout(this.saveTimer);
     const delay = typeof process !== 'undefined' && process.env.NODE_ENV === 'test' ? 10 : 200;
     this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
       this.save().catch(error => {
         logger.error('[MetadataManager] Failed to persist metadata:', error);
       });

@@ -105,6 +105,12 @@ export class DataWriter {
     return new ChunkedFileHandler(tableName, this.metadataManager);
   }
 
+  private async persistMetadataIfSupported(): Promise<void> {
+    if (typeof this.metadataManager.saveImmediately === 'function') {
+      await this.metadataManager.saveImmediately();
+    }
+  }
+
   private shouldUseChunkedMode(data: Record<string, any>[]): boolean {
     const estimatedSize = data.reduce((acc, item) => acc + JSON.stringify(item).length, 0);
     return estimatedSize > (this.chunkSize || 1024 * 1024) / 2;
@@ -226,11 +232,13 @@ export class DataWriter {
             await withTimeout(handler.write(initialData), 10000, `create single file table ${tableName}`);
           }
 
+          const chunkMeta = actualMode === 'chunked' ? this.metadataManager.get(tableName) : undefined;
+
           this.metadataManager.update(tableName, {
             mode: actualMode,
             path: actualMode === 'chunked' ? `${tableName}/` : `${tableName}.ldb`,
             count: initialData.length,
-            chunks: actualMode === 'chunked' ? 1 : 0,
+            chunks: actualMode === 'chunked' ? (chunkMeta?.chunks ?? 0) : 0,
             createdAt: Date.now(),
             updatedAt: Date.now(),
             columns: this.normalizeColumnSchema(columns),
@@ -240,6 +248,7 @@ export class DataWriter {
             encrypted: options.encrypted || false,
             encryptFullTable: options.encryptFullTable || false,
           });
+          await this.persistMetadataIfSupported();
         } finally {
           releaseLock();
         }
@@ -282,6 +291,7 @@ export class DataWriter {
 
           this.indexManager.clearTableIndexes(tableName);
           this.metadataManager.delete(tableName);
+          await this.persistMetadataIfSupported();
         } finally {
           releaseLock();
         }
@@ -432,6 +442,7 @@ export class DataWriter {
       count: newCount,
       updatedAt: Date.now(),
     });
+    await this.persistMetadataIfSupported();
   }
 
   private validateWriteData(data: Record<string, any>[]): void {
@@ -552,6 +563,7 @@ export class DataWriter {
           count: actualCount,
           updatedAt: now,
         });
+        await this.persistMetadataIfSupported();
       }
     } catch (error) {
       logger.error(`[DataWriter] Failed to validate count for table '${tableName}':`, error);
@@ -598,6 +610,7 @@ export class DataWriter {
         count: actualCount,
         updatedAt: Date.now(),
       });
+      await this.persistMetadataIfSupported();
     }
 
     return { metadata: metadataCount, actual: actualCount, match };
@@ -659,6 +672,7 @@ export class DataWriter {
             count: filteredData.length,
             updatedAt: Date.now(),
           });
+          await this.persistMetadataIfSupported();
 
           return deletedCount;
         } finally {

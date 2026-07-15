@@ -280,17 +280,11 @@ export class QueryEngine {
     }
 
     const filteredData = condition ? this.filter(data, condition) : data;
-    const updatedDataMap = new Map<string | number, T>();
-
-    // Collect data mapping for update
-    for (const item of filteredData) {
-      updatedDataMap.set(item.id || item._id, item);
-    }
+    const updatedDataRefs = new Set(filteredData);
 
     // Update数据
     return data.map(item => {
-      const id = item.id || item._id;
-      if (updatedDataMap.has(id)) {
+      if (updatedDataRefs.has(item)) {
         return this.update(item, updateData);
       }
       return item;

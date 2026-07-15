@@ -29,12 +29,10 @@ describe('AutoSyncService Tests', () => {
     }
   });
 
-  it('should start auto-sync service correctly', async () => {
-    // 检查自动同步服务是否已启动
+  it('should keep auto-sync disabled by default', async () => {
+    // 自动同步默认关闭，避免库初始化时启动后台定时器
     const config = autoSyncService.getConfig();
-    expect(config.enabled).toBe(true);
-    // 注意：全局配置可能会覆盖默认值，所以我们只检查enabled是否为true
-    expect(config.enabled).toBe(true);
+    expect(config.enabled).toBe(false);
   });
 
   it('should detect dirty data and sync when minItems is reached', async () => {

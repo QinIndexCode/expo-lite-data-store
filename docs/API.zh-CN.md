@@ -46,30 +46,24 @@ npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypt
 ### 推荐导入方式
 
 ```ts
-import {
-  db,
-  configManager,
-  performanceMonitor,
-  StorageError,
-  StorageErrorCode,
-} from 'expo-lite-data-store';
+import { db, configManager, performanceMonitor, StorageError, StorageErrorCode } from 'expo-lite-data-store';
 ```
 
 `StorageErrorCode` 既作为运行时常量映射导出，也对应 `StorageError.code` 使用的字符串字面量联合类型。
 
 ### 导出分组
 
-| 导出分组 | 公共项 |
-| --- | --- |
-| Facade 对象 | `db` |
-| 命名 CRUD 函数 | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked` |
-| 事务函数 | `beginTransaction`, `commit`, `rollback` |
-| 配置导出 | `configManager`, `ConfigManager` |
-| 监控导出 | `performanceMonitor` |
-| 加密辅助导出 | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService` |
-| 错误导出 | `StorageError`, `StorageErrorCode`, `CryptoError` |
-| 类型导出 | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FilterCondition`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode` |
-| 高级明文适配器导出 | `plainStorage` |
+| 导出分组           | 公共项                                                                                                                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Facade 对象        | `db`                                                                                                                                                                                                                      |
+| 命名 CRUD 函数     | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked` |
+| 事务函数           | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                  |
+| 配置导出           | `configManager`, `ConfigManager`                                                                                                                                                                                          |
+| 监控导出           | `performanceMonitor`                                                                                                                                                                                                      |
+| 加密辅助导出       | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`                                                                                   |
+| 错误导出           | `StorageError`, `StorageErrorCode`, `CryptoError`                                                                                                                                                                         |
+| 类型导出           | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FilterCondition`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`                               |
+| 高级明文适配器导出 | `plainStorage`                                                                                                                                                                                                            |
 
 ### `db` facade 与命名导出
 
@@ -179,6 +173,8 @@ type FilterCondition =
 
 尽管内部查询引擎支持函数式过滤，公开 `findOne()` 和 `findMany()` 的类型文档仍以对象式 `where` 条件为主。若你希望保持稳定的公共兼容性，请优先使用对象条件。
 
+记录可以包含 `id` 或 `_id`，但这不是强制要求。只要调用提供了 `where` 条件，更新、删除、批量操作和事务路径都会按实际命中的行对象应用变更，而不是在缺少标识符时臆测身份。
+
 ## 初始化
 
 ### `init(options?)`
@@ -224,7 +220,8 @@ await createTable('users', {
 - 校验列类型是否合法；
 - 可选地写入 `initialData`；
 - 可在 `single` 与 `chunked` 模式间起始创建；
-- 可同时声明字段级或整表级加密选项。
+- 可同时声明字段级或整表级加密选项；
+- 建表完成后会立即持久化表元数据。
 
 ### `deleteTable(tableName, options?)`
 
@@ -281,7 +278,9 @@ const result = await verifyCountTable('users');
 await migrateToChunked('audit-log');
 ```
 
-把现有表迁移为 chunked 存储模式。适合在单文件表已经增长到不再适合继续维持单文件时使用。
+把现有表迁移为 chunked 存储模式。适合在单文件表已经增长到不再适合继续维持单文件时使用。迁移会保留列、风险与加密元数据；加密记录按实际存储形态迁移，不经过解密后重写窗口。
+
+chunked 写入使用临时文件发布、覆盖写日志和追加写日志。如果追加过程中已有部分新 chunk 写出但后续 chunk 失败，运行时会移除这些部分 chunk，并保持旧表内容可读。
 
 ## 写入 API
 
@@ -305,9 +304,7 @@ await insert('users', [
 ### `overwrite(tableName, data, options?)`
 
 ```ts
-await overwrite('users', [
-  { id: '1', name: 'Alice v2' },
-]);
+await overwrite('users', [{ id: '1', name: 'Alice v2' }]);
 ```
 
 行为说明：
@@ -339,6 +336,7 @@ type BulkOperation =
 - 保留操作顺序；
 - 内部会对纯插入场景走专门的优化路径；
 - 支持在事务中使用；
+- 更新和删除按传入的 `where` 条件匹配记录，包含没有 `id` 字段的行；
 - 返回的 `WriteResult.written` 在当前运行时中表示受影响的记录数。
 
 ## 读取与查询 API
@@ -385,10 +383,7 @@ findOne(tableName, {
 ```ts
 const users = await findMany('users', {
   where: {
-    $and: [
-      { active: true },
-      { age: { $gte: 18 } },
-    ],
+    $and: [{ active: true }, { age: { $gte: 18 } }],
   },
   sortBy: ['age', 'name'],
   order: ['desc', 'asc'],
@@ -413,19 +408,19 @@ findMany(tableName, {
 
 #### 支持的查询操作符
 
-| 操作符 | 语义 | 示例 |
-| --- | --- | --- |
-| `$and` | 多个条件同时成立 | `{ $and: [{ active: true }, { age: { $gte: 18 } }] }` |
-| `$or` | 任一条件成立即可 | `{ $or: [{ role: 'admin' }, { role: 'moderator' }] }` |
-| `$eq` | 精确相等 | `{ age: { $eq: 21 } }` |
-| `$ne` | 不等于 | `{ status: { $ne: 'archived' } }` |
-| `$gt` | 大于 | `{ price: { $gt: 100 } }` |
-| `$gte` | 大于等于 | `{ score: { $gte: 90 } }` |
-| `$lt` | 小于 | `{ stock: { $lt: 10 } }` |
-| `$lte` | 小于等于 | `{ retries: { $lte: 3 } }` |
-| `$in` | 在候选集合中 | `{ role: { $in: ['admin', 'editor'] } }` |
-| `$nin` | 不在候选集合中 | `{ status: { $nin: ['deleted', 'blocked'] } }` |
-| `$like` | SQL 风格模糊匹配 | `{ email: { $like: '%@example.com' } }` |
+| 操作符  | 语义             | 示例                                                  |
+| ------- | ---------------- | ----------------------------------------------------- |
+| `$and`  | 多个条件同时成立 | `{ $and: [{ active: true }, { age: { $gte: 18 } }] }` |
+| `$or`   | 任一条件成立即可 | `{ $or: [{ role: 'admin' }, { role: 'moderator' }] }` |
+| `$eq`   | 精确相等         | `{ age: { $eq: 21 } }`                                |
+| `$ne`   | 不等于           | `{ status: { $ne: 'archived' } }`                     |
+| `$gt`   | 大于             | `{ price: { $gt: 100 } }`                             |
+| `$gte`  | 大于等于         | `{ score: { $gte: 90 } }`                             |
+| `$lt`   | 小于             | `{ stock: { $lt: 10 } }`                              |
+| `$lte`  | 小于等于         | `{ retries: { $lte: 3 } }`                            |
+| `$in`   | 在候选集合中     | `{ role: { $in: ['admin', 'editor'] } }`              |
+| `$nin`  | 不在候选集合中   | `{ status: { $nin: ['deleted', 'blocked'] } }`        |
+| `$like` | SQL 风格模糊匹配 | `{ email: { $like: '%@example.com' } }`               |
 
 #### 排序说明
 
@@ -444,34 +439,26 @@ findMany(tableName, {
 ### `update(tableName, data, options)`
 
 ```ts
-const updatedCount = await update(
-  'users',
-  { active: false },
-  { where: { id: '1' } }
-);
+const updatedCount = await update('users', { active: false }, { where: { id: '1' } });
 ```
 
 操作符更新示例：
 
 ```ts
-const updatedCount = await update(
-  'accounts',
-  { $inc: { balance: -200 } },
-  { where: { id: 'acct-1' } }
-);
+const updatedCount = await update('accounts', { $inc: { balance: -200 } }, { where: { id: 'acct-1' } });
 ```
 
 返回命中的并已更新的记录数。
 
 #### 支持的更新操作符
 
-| 操作符 | 语义 | 示例 |
-| --- | --- | --- |
-| `$inc` | 数值递增或递减 | `{ $inc: { balance: -200 } }` |
-| `$set` | 显式赋值 | `{ $set: { status: 'active' } }` |
-| `$unset` | 删除字段 | `{ $unset: ['temporaryField'] }` |
-| `$push` | 向数组追加单个值 | `{ $push: { tags: 'new' } }` |
-| `$pull` | 从数组移除匹配值 | `{ $pull: { tags: 'obsolete' } }` |
+| 操作符      | 语义             | 示例                               |
+| ----------- | ---------------- | ---------------------------------- |
+| `$inc`      | 数值递增或递减   | `{ $inc: { balance: -200 } }`      |
+| `$set`      | 显式赋值         | `{ $set: { status: 'active' } }`   |
+| `$unset`    | 删除字段         | `{ $unset: ['temporaryField'] }`   |
+| `$push`     | 向数组追加单个值 | `{ $push: { tags: 'new' } }`       |
+| `$pull`     | 从数组移除匹配值 | `{ $pull: { tags: 'obsolete' } }`  |
 | `$addToSet` | 仅在不存在时追加 | `{ $addToSet: { tags: 'admin' } }` |
 
 不使用操作符、直接传普通字段对象同样有效，运行时会将其视为字段覆盖更新。
@@ -525,7 +512,9 @@ await rollback();
 - 当前不支持嵌套事务；
 - 未结束前再次 `beginTransaction()` 会抛出 `TRANSACTION_IN_PROGRESS`；
 - 没有活动事务时调用 `commit()` 或 `rollback()` 会抛出 `NO_TRANSACTION_IN_PROGRESS`；
-- 事务所在表面同样由 `encrypted` 和 `requireAuthOnAccess` 决定。
+- 事务所在表面同样由 `encrypted` 和 `requireAuthOnAccess` 决定；
+- 显式回滚只丢弃排队操作，不重写表文件；提交部分失败时会恢复已有表快照，并移除事务中新建的表；
+- 事务仅在进程内协调，不提供崩溃持久化或跨进程 ACID 语义。
 
 ## 配置 API
 
@@ -590,6 +579,8 @@ configManager.set('monitoring.enablePerformanceTracking', true);
 5. 配置管理器的程序化覆盖
 
 ### `app.json` 示例
+
+`autoSync.enabled` 默认是 `false`。下面的示例表示显式开启后台脏缓存同步。
 
 ```json
 {
@@ -739,20 +730,20 @@ try {
 
 ### 常见 `StorageErrorCode`
 
-| 错误码 | 含义 |
-| --- | --- |
-| `EXPO_MODULE_MISSING` | 缺少必需的 Expo 运行时包 |
-| `AUTH_ON_ACCESS_UNSUPPORTED` | 当前运行时无法兑现严格逐次访问认证 |
-| `TABLE_NOT_FOUND` | 请求的表不存在 |
-| `TABLE_NAME_INVALID` | 表名为空或不合法 |
-| `TABLE_COLUMN_INVALID` | 列定义使用了不支持的类型 |
-| `QUERY_FAILED` | 查询引擎执行条件失败 |
-| `MIGRATION_FAILED` | 表迁移失败 |
-| `TRANSACTION_IN_PROGRESS` | 当前表面已经存在一个活动事务 |
+| 错误码                       | 含义                                            |
+| ---------------------------- | ----------------------------------------------- |
+| `EXPO_MODULE_MISSING`        | 缺少必需的 Expo 运行时包                        |
+| `AUTH_ON_ACCESS_UNSUPPORTED` | 当前运行时无法兑现严格逐次访问认证              |
+| `TABLE_NOT_FOUND`            | 请求的表不存在                                  |
+| `TABLE_NAME_INVALID`         | 表名为空或不合法                                |
+| `TABLE_COLUMN_INVALID`       | 列定义使用了不支持的类型                        |
+| `QUERY_FAILED`               | 查询引擎执行条件失败                            |
+| `MIGRATION_FAILED`           | 表迁移失败                                      |
+| `TRANSACTION_IN_PROGRESS`    | 当前表面已经存在一个活动事务                    |
 | `NO_TRANSACTION_IN_PROGRESS` | 没有活动事务却调用了 `commit()` 或 `rollback()` |
-| `LOCK_TIMEOUT` | 并发写锁获取超时 |
-| `TIMEOUT` | 操作超过了配置的超时预算 |
-| `CORRUPTED_DATA` | 磁盘数据无法安全解析 |
+| `LOCK_TIMEOUT`               | 并发写锁获取超时                                |
+| `TIMEOUT`                    | 操作超过了配置的超时预算                        |
+| `CORRUPTED_DATA`             | 磁盘数据无法安全解析                            |
 
 ### `CryptoError`
 

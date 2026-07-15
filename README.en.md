@@ -2,7 +2,7 @@
 
 Local structured storage for Expo applications, with runtime-tested support for Expo Go, managed apps, and native development builds on Expo SDK 56.
 
-[README Entry](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/README.md) | [简体中文](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/README.zh-CN.md) | [API Reference](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/API.en.md) | [Runtime QA Guide](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/EXPO_RUNTIME_QA.en.md) | [Changelog](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/CHANGELOG.en.md)
+[README Entry](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/README.md) | [简体中文](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/README.zh-CN.md) | [API Reference](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/API.en.md) | [Runtime QA Guide](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/EXPO_RUNTIME_QA.en.md) | [CI/CD Operations](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/CI_CD.en.md) | [Changelog](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/CHANGELOG.en.md)
 
 ## Overview
 
@@ -19,13 +19,13 @@ The package is designed around the following runtime guarantees:
 
 ## Support Matrix
 
-| Surface | Status |
-| --- | --- |
-| Expo SDK | `56.x` |
-| React | `19.2.x` |
-| React Native | `0.85.x` |
-| Managed apps | Supported |
-| Expo Go | Supported for the documented contract below |
+| Surface                            | Status                                                 |
+| ---------------------------------- | ------------------------------------------------------ |
+| Expo SDK                           | `56.x`                                                 |
+| React                              | `19.2.x`                                               |
+| React Native                       | `0.85.x`                                               |
+| Managed apps                       | Supported                                              |
+| Expo Go                            | Supported for the documented contract below            |
 | Native dev client / standalone app | Supported and recommended for native crypto validation |
 
 ## Installation
@@ -58,20 +58,20 @@ That design avoids version drift such as:
 
 ### Installation Contract
 
-| Contract | Status | Notes |
-| --- | --- | --- |
-| `npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store` | Supported | Required managed-compatible contract for Expo SDK 56 |
-| Previous command plus `react-native-quick-crypto` | Supported | Required for native flagship validation in a dev client or standalone build |
-| `npm install expo-lite-data-store` only | Not supported | May leave Expo peer dependencies missing or version-misaligned |
+| Contract                                                                                              | Status        | Notes                                                                       |
+| ----------------------------------------------------------------------------------------------------- | ------------- | --------------------------------------------------------------------------- |
+| `npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store` | Supported     | Required managed-compatible contract for Expo SDK 56                        |
+| Previous command plus `react-native-quick-crypto`                                                     | Supported     | Required for native flagship validation in a dev client or standalone build |
+| `npm install expo-lite-data-store` only                                                               | Not supported | May leave Expo peer dependencies missing or version-misaligned              |
 
 ### Required runtime packages
 
-| Package | Why it is required |
-| --- | --- |
-| `expo-file-system` | Table files, chunk files, metadata files, and directory management |
-| `expo-constants` | Runtime config loading from `app.json` and Expo environment detection |
-| `expo-crypto` | Randomness, hashing, and Expo-compatible crypto helpers |
-| `expo-secure-store` | Secure persistence of the derived master key material |
+| Package             | Why it is required                                                    |
+| ------------------- | --------------------------------------------------------------------- |
+| `expo-file-system`  | Table files, chunk files, metadata files, and directory management    |
+| `expo-constants`    | Runtime config loading from `app.json` and Expo environment detection |
+| `expo-crypto`       | Randomness, hashing, and Expo-compatible crypto helpers               |
+| `expo-secure-store` | Secure persistence of the derived master key material                 |
 
 `expo-modules-core` is used internally as part of Expo's native module bridge, but it is provided by the host Expo runtime rather than installed as a separate consumer contract line item.
 
@@ -169,6 +169,8 @@ Use `mode: 'chunked'` when:
 
 The library can also switch to chunked handling automatically when the initial payload clearly exceeds the configured chunk threshold.
 
+Chunked overwrites and appends use recovery journals and cleanup of partially written chunks. Append metadata is committed before the recovery journal is removed, and reads reject incomplete chunk sets instead of silently returning partial data. Table metadata uses serialized temp-file publication, so overlapping table writes cannot lose a later metadata update.
+
 ### Declaring columns
 
 `createTable()` accepts a `columns` map. The runtime currently accepts these column types:
@@ -181,6 +183,8 @@ The library can also switch to chunked handling automatically when the initial p
 
 Column metadata is used for validation and table metadata, but records remain plain JavaScript objects in the public API.
 
+Records do not have to contain `id` or `_id`. Those fields are useful as application-level identifiers and for index acceleration when present, but `where`-based update, delete, bulk, and transaction paths match the actual rows returned by the query engine, so no-id rows are handled safely.
+
 ### Writing data
 
 Use `insert()` when new records should be appended:
@@ -192,9 +196,7 @@ await db.insert('events', { id: 'evt-1', type: 'login' });
 Use `overwrite()` when the entire logical contents of a table should be replaced:
 
 ```ts
-await db.overwrite('cache', [
-  { id: 'cfg', version: 2, payload: { theme: 'dark' } },
-]);
+await db.overwrite('cache', [{ id: 'cfg', version: 2, payload: { theme: 'dark' } }]);
 ```
 
 The current runtime returns a `WriteResult` shaped like:
@@ -229,10 +231,7 @@ Use `findOne()` or `findMany()` when query semantics are required:
 ```ts
 const expensiveElectronics = await db.findMany('products', {
   where: {
-    $and: [
-      { category: 'Electronics' },
-      { price: { $gt: 100 } },
-    ],
+    $and: [{ category: 'Electronics' }, { price: { $gt: 100 } }],
   },
   sortBy: 'price',
   order: 'desc',
@@ -242,19 +241,19 @@ const expensiveElectronics = await db.findMany('products', {
 
 Supported query operators:
 
-| Operator | Meaning |
-| --- | --- |
-| `$and` | Logical AND across nested conditions |
-| `$or` | Logical OR across nested conditions |
-| `$eq` | Exact equality |
-| `$ne` | Not equal |
-| `$gt` | Greater than |
-| `$gte` | Greater than or equal |
-| `$lt` | Less than |
-| `$lte` | Less than or equal |
-| `$in` | Value or array overlap is included in the candidate list |
-| `$nin` | Value or array overlap is excluded from the candidate list |
-| `$like` | SQL-style pattern matching using `%` and `_` |
+| Operator | Meaning                                                    |
+| -------- | ---------------------------------------------------------- |
+| `$and`   | Logical AND across nested conditions                       |
+| `$or`    | Logical OR across nested conditions                        |
+| `$eq`    | Exact equality                                             |
+| `$ne`    | Not equal                                                  |
+| `$gt`    | Greater than                                               |
+| `$gte`   | Greater than or equal                                      |
+| `$lt`    | Less than                                                  |
+| `$lte`   | Less than or equal                                         |
+| `$in`    | Value or array overlap is included in the candidate list   |
+| `$nin`   | Value or array overlap is excluded from the candidate list |
+| `$like`  | SQL-style pattern matching using `%` and `_`               |
 
 ### Updating records
 
@@ -263,32 +262,24 @@ Supported query operators:
 Simple replacement update:
 
 ```ts
-await db.update(
-  'users',
-  { active: false },
-  { where: { id: '2' } }
-);
+await db.update('users', { active: false }, { where: { id: '2' } });
 ```
 
 Operator-based update:
 
 ```ts
-await db.update(
-  'accounts',
-  { $inc: { balance: -200 } },
-  { where: { id: 'acct-1' } }
-);
+await db.update('accounts', { $inc: { balance: -200 } }, { where: { id: 'acct-1' } });
 ```
 
 Supported update operators:
 
-| Operator | Meaning |
-| --- | --- |
-| `$inc` | Increment numeric fields |
-| `$set` | Set specific fields explicitly |
-| `$unset` | Remove fields |
-| `$push` | Push one value into an array field |
-| `$pull` | Remove matching values from an array field |
+| Operator    | Meaning                                                     |
+| ----------- | ----------------------------------------------------------- |
+| `$inc`      | Increment numeric fields                                    |
+| `$set`      | Set specific fields explicitly                              |
+| `$unset`    | Remove fields                                               |
+| `$push`     | Push one value into an array field                          |
+| `$pull`     | Remove matching values from an array field                  |
 | `$addToSet` | Add one value to an array only if it is not already present |
 
 ### Bulk operations
@@ -315,18 +306,22 @@ await db.beginTransaction();
 try {
   await db.update('accounts', { $inc: { balance: -200 } }, { where: { id: 'acct-1' } });
   await db.update('accounts', { $inc: { balance: 200 } }, { where: { id: 'acct-2' } });
-  await db.commit();
 } catch (error) {
   await db.rollback();
   throw error;
 }
+
+// A failed commit restores snapshots internally and then rethrows.
+await db.commit();
 ```
 
 Important transaction behavior:
 
 - only one transaction can be active on a given adapter surface at a time;
 - calling `beginTransaction()` twice without finishing the first transaction raises `TRANSACTION_IN_PROGRESS`;
-- calling `commit()` or `rollback()` without an active transaction raises `NO_TRANSACTION_IN_PROGRESS`.
+- calling `commit()` or `rollback()` without an active transaction raises `NO_TRANSACTION_IN_PROGRESS`;
+- an explicit rollback discards queued writes without rewriting table files; if a commit fails after partially applying changes, existing tables are restored and tables created by that transaction are removed;
+- transactions are an in-process coordination feature, not a crash-durable or cross-process ACID implementation.
 
 ### Count vs verification
 
@@ -368,38 +363,38 @@ Within Expo runtime config, the loader checks:
 
 ### Common runtime config keys
 
-| Key | Default | Purpose |
-| --- | --- | --- |
-| `chunkSize` | `5242880` | Chunk threshold in bytes |
-| `storageFolder` | `lite-data-store` | Root folder under Expo file storage |
-| `sortMethods` | `default` | Default sort strategy hint |
-| `timeout` | `10000` | Timeout for selected file operations |
-| `encryption.algorithm` | `auto` | Preferred encryption mode |
-| `encryption.keyIterations` | `600000` | PBKDF2 iteration target before Expo Go downshifts |
-| `performance.maxConcurrentOperations` | `5` | Max write-side concurrency |
-| `cache.maxSize` | `1000` | Cache entry budget |
-| `monitoring.enablePerformanceTracking` | `false` | Enables performance sampling |
-| `monitoring.enableHealthChecks` | `true` | Enables health-check evaluation |
-| `autoSync.enabled` | `true` | Auto-sync service toggle |
-| `autoSync.interval` | `30000` | Auto-sync interval in milliseconds |
-| `autoSync.minItems` | `1` | Minimum queued item count before auto-sync |
-| `autoSync.batchSize` | `100` | Max items processed per auto-sync batch |
+| Key                                    | Default           | Purpose                                                                                     |
+| -------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------- |
+| `chunkSize`                            | `5242880`         | Chunk threshold in bytes                                                                    |
+| `storageFolder`                        | `lite-data-store` | Root folder under Expo file storage                                                         |
+| `sortMethods`                          | `default`         | Default sort strategy hint                                                                  |
+| `timeout`                              | `10000`           | Timeout for selected file operations                                                        |
+| `encryption.algorithm`                 | `auto`            | Preferred encryption mode                                                                   |
+| `encryption.keyIterations`             | `600000`          | PBKDF2 iteration target before Expo Go downshifts                                           |
+| `performance.maxConcurrentOperations`  | `5`               | Max write-side concurrency                                                                  |
+| `cache.maxSize`                        | `1000`            | Cache entry budget                                                                          |
+| `monitoring.enablePerformanceTracking` | `false`           | Enables performance sampling                                                                |
+| `monitoring.enableHealthChecks`        | `true`            | Enables health-check evaluation                                                             |
+| `autoSync.enabled`                     | `false`           | Auto-sync service toggle; opt in explicitly when background dirty-cache syncing is required |
+| `autoSync.interval`                    | `30000`           | Auto-sync interval in milliseconds                                                          |
+| `autoSync.minItems`                    | `1`               | Minimum queued item count before auto-sync                                                  |
+| `autoSync.batchSize`                   | `100`             | Max items processed per auto-sync batch                                                     |
 
 ### Environment variables currently recognized
 
-| Variable | Maps to |
-| --- | --- |
-| `LITE_STORE_CHUNK_SIZE` | `chunkSize` |
-| `LITE_STORE_STORAGE_FOLDER` | `storageFolder` |
-| `LITE_STORE_SORT_METHODS` | `sortMethods` |
-| `LITE_STORE_TIMEOUT` | `timeout` |
-| `LITE_STORE_ENCRYPTION_KEY_ITERATIONS` | `encryption.keyIterations` |
+| Variable                                           | Maps to                               |
+| -------------------------------------------------- | ------------------------------------- |
+| `LITE_STORE_CHUNK_SIZE`                            | `chunkSize`                           |
+| `LITE_STORE_STORAGE_FOLDER`                        | `storageFolder`                       |
+| `LITE_STORE_SORT_METHODS`                          | `sortMethods`                         |
+| `LITE_STORE_TIMEOUT`                               | `timeout`                             |
+| `LITE_STORE_ENCRYPTION_KEY_ITERATIONS`             | `encryption.keyIterations`            |
 | `LITE_STORE_PERFORMANCE_MAX_CONCURRENT_OPERATIONS` | `performance.maxConcurrentOperations` |
-| `LITE_STORE_PERFORMANCE_MEMORY_WARNING_THRESHOLD` | `performance.memoryWarningThreshold` |
-| `LITE_STORE_CACHE_MAX_SIZE` | `cache.maxSize` |
-| `LITE_STORE_CACHE_DEFAULT_EXPIRY` | `cache.defaultExpiry` |
-| `LITE_STORE_AUTO_SYNC_ENABLED` | `autoSync.enabled` |
-| `LITE_STORE_AUTO_SYNC_INTERVAL` | `autoSync.interval` |
+| `LITE_STORE_PERFORMANCE_MEMORY_WARNING_THRESHOLD`  | `performance.memoryWarningThreshold`  |
+| `LITE_STORE_CACHE_MAX_SIZE`                        | `cache.maxSize`                       |
+| `LITE_STORE_CACHE_DEFAULT_EXPIRY`                  | `cache.defaultExpiry`                 |
+| `LITE_STORE_AUTO_SYNC_ENABLED`                     | `autoSync.enabled`                    |
+| `LITE_STORE_AUTO_SYNC_INTERVAL`                    | `autoSync.interval`                   |
 
 ### Programmatic configuration
 
@@ -530,6 +525,7 @@ These commands generate artifact bundles under `artifacts/expo-runtime-qa/`. The
 - Consumer and maintainer API reference: [docs/API.en.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/API.en.md)
 - Simplified Chinese API reference: [docs/API.zh-CN.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/API.zh-CN.md)
 - Runtime QA process, lanes, verdict semantics, and artifact layout: [docs/EXPO_RUNTIME_QA.en.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/EXPO_RUNTIME_QA.en.md)
+- CI/CD triggers, npm credentials, release steps, and failure recovery: [docs/CI_CD.en.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/CI_CD.en.md)
 - Changelog: [docs/CHANGELOG.en.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/CHANGELOG.en.md)
 - Simplified Chinese changelog: [docs/CHANGELOG.zh-CN.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/CHANGELOG.zh-CN.md)
 - Architecture notes: [docs/ARCHITECTURE.en.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/ARCHITECTURE.en.md)

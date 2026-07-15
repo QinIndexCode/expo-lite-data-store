@@ -388,7 +388,7 @@ export class ConfigValidator {
    */
   private static autoFixBasicConfig(config: any): void {
     if (typeof config.chunkSize !== 'number' || config.chunkSize <= 0) {
-      config.chunkSize = 5 * 1024 * 1024; // Default 5MB
+      config.chunkSize = defaultConfig.chunkSize;
     }
 
     if (typeof config.storageFolder !== 'string') {
@@ -397,11 +397,11 @@ export class ConfigValidator {
 
     const validSortMethods = ['default', 'fast', 'counting', 'merge', 'slow'];
     if (typeof config.sortMethods !== 'string' || !validSortMethods.includes(config.sortMethods)) {
-      config.sortMethods = 'default';
+      config.sortMethods = defaultConfig.sortMethods;
     }
 
     if (typeof config.timeout !== 'number' || config.timeout <= 0) {
-      config.timeout = 10000; // Default 10 seconds
+      config.timeout = defaultConfig.timeout;
     }
   }
 
@@ -422,14 +422,14 @@ export class ConfigValidator {
     }
 
     if (typeof config.encryption.keySize !== 'number' || config.encryption.keySize !== 256) {
-      config.encryption.keySize = 256;
+      config.encryption.keySize = defaultConfig.encryption.keySize;
     }
 
     if (
       typeof config.encryption.hmacAlgorithm !== 'string' ||
       !['SHA-256', 'SHA-512'].includes(config.encryption.hmacAlgorithm)
     ) {
-      config.encryption.hmacAlgorithm = 'SHA-512';
+      config.encryption.hmacAlgorithm = defaultConfig.encryption.hmacAlgorithm;
     }
 
     if (
@@ -437,19 +437,19 @@ export class ConfigValidator {
       config.encryption.keyIterations < 10000 ||
       config.encryption.keyIterations > 1000000
     ) {
-      config.encryption.keyIterations = 120000;
+      config.encryption.keyIterations = defaultConfig.encryption.keyIterations;
     }
 
     if (!Array.isArray(config.encryption.encryptedFields)) {
-      config.encryption.encryptedFields = ['password', 'email', 'phone'];
+      config.encryption.encryptedFields = [...defaultConfig.encryption.encryptedFields];
     }
 
     if (typeof config.encryption.cacheTimeout !== 'number' || config.encryption.cacheTimeout < 0) {
-      config.encryption.cacheTimeout = 30000;
+      config.encryption.cacheTimeout = defaultConfig.encryption.cacheTimeout;
     }
 
     if (typeof config.encryption.maxCacheSize !== 'number' || config.encryption.maxCacheSize < 0) {
-      config.encryption.maxCacheSize = 50;
+      config.encryption.maxCacheSize = defaultConfig.encryption.maxCacheSize;
     }
 
     if (typeof config.encryption.useBulkOperations !== 'boolean') {
@@ -467,18 +467,18 @@ export class ConfigValidator {
     }
 
     if (typeof config.performance.enableQueryOptimization !== 'boolean') {
-      config.performance.enableQueryOptimization = true;
+      config.performance.enableQueryOptimization = defaultConfig.performance.enableQueryOptimization;
     }
 
     if (
       typeof config.performance.maxConcurrentOperations !== 'number' ||
       config.performance.maxConcurrentOperations < 1
     ) {
-      config.performance.maxConcurrentOperations = 5;
+      config.performance.maxConcurrentOperations = defaultConfig.performance.maxConcurrentOperations;
     }
 
     if (typeof config.performance.enableBatchOptimization !== 'boolean') {
-      config.performance.enableBatchOptimization = true;
+      config.performance.enableBatchOptimization = defaultConfig.performance.enableBatchOptimization;
     }
 
     if (
@@ -486,7 +486,7 @@ export class ConfigValidator {
       config.performance.memoryWarningThreshold <= 0 ||
       config.performance.memoryWarningThreshold > 1
     ) {
-      config.performance.memoryWarningThreshold = 0.8;
+      config.performance.memoryWarningThreshold = defaultConfig.performance.memoryWarningThreshold;
     }
   }
 
@@ -500,15 +500,15 @@ export class ConfigValidator {
     }
 
     if (typeof config.cache.maxSize !== 'number' || config.cache.maxSize < 0 || config.cache.maxSize > 10000) {
-      config.cache.maxSize = 1000;
+      config.cache.maxSize = defaultConfig.cache.maxSize;
     }
 
     if (typeof config.cache.defaultExpiry !== 'number' || config.cache.defaultExpiry < 0) {
-      config.cache.defaultExpiry = 3600000; // Default 1 hour
+      config.cache.defaultExpiry = defaultConfig.cache.defaultExpiry;
     }
 
     if (typeof config.cache.cleanupInterval !== 'number' || config.cache.cleanupInterval < 0) {
-      config.cache.cleanupInterval = 300000; // Default 5 minutes
+      config.cache.cleanupInterval = defaultConfig.cache.cleanupInterval;
     }
   }
 
@@ -526,7 +526,7 @@ export class ConfigValidator {
     }
 
     if (typeof config.api.rateLimit.enabled !== 'boolean') {
-      config.api.rateLimit.enabled = true;
+      config.api.rateLimit.enabled = defaultConfig.api.rateLimit.enabled;
     }
 
     if (
@@ -534,11 +534,11 @@ export class ConfigValidator {
       config.api.rateLimit.requestsPerSecond < 1 ||
       config.api.rateLimit.requestsPerSecond > 1000
     ) {
-      config.api.rateLimit.requestsPerSecond = 20;
+      config.api.rateLimit.requestsPerSecond = defaultConfig.api.rateLimit.requestsPerSecond;
     }
 
     if (typeof config.api.rateLimit.burstCapacity !== 'number' || config.api.rateLimit.burstCapacity < 1) {
-      config.api.rateLimit.burstCapacity = 40;
+      config.api.rateLimit.burstCapacity = defaultConfig.api.rateLimit.burstCapacity;
     }
 
     if (!config.api.retry) {
@@ -546,11 +546,11 @@ export class ConfigValidator {
     }
 
     if (typeof config.api.retry.maxAttempts !== 'number' || config.api.retry.maxAttempts < 1) {
-      config.api.retry.maxAttempts = 3;
+      config.api.retry.maxAttempts = defaultConfig.api.retry.maxAttempts;
     }
 
     if (typeof config.api.retry.backoffMultiplier !== 'number' || config.api.retry.backoffMultiplier < 1) {
-      config.api.retry.backoffMultiplier = 2;
+      config.api.retry.backoffMultiplier = defaultConfig.api.retry.backoffMultiplier;
     }
   }
 
@@ -564,15 +564,15 @@ export class ConfigValidator {
     }
 
     if (typeof config.monitoring.enablePerformanceTracking !== 'boolean') {
-      config.monitoring.enablePerformanceTracking = true;
+      config.monitoring.enablePerformanceTracking = defaultConfig.monitoring.enablePerformanceTracking;
     }
 
     if (typeof config.monitoring.enableHealthChecks !== 'boolean') {
-      config.monitoring.enableHealthChecks = true;
+      config.monitoring.enableHealthChecks = defaultConfig.monitoring.enableHealthChecks;
     }
 
     if (typeof config.monitoring.metricsRetention !== 'number' || config.monitoring.metricsRetention < 0) {
-      config.monitoring.metricsRetention = 86400000; // Default 24 hours
+      config.monitoring.metricsRetention = defaultConfig.monitoring.metricsRetention;
     }
   }
 }

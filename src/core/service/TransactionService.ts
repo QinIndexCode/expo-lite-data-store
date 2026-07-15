@@ -80,6 +80,8 @@ export interface Snapshot {
   tableName: string;
   /** 表数据 */
   data: Record<string, any>[];
+  /** Whether the table existed before the transaction first touched it. */
+  existed: boolean;
 }
 
 /**
@@ -138,7 +140,8 @@ export class TransactionService {
       data: Record<string, any>,
       where: WhereCondition,
       options?: OperationOptions
-    ) => Promise<any>
+    ) => Promise<any>,
+    deleteTableFn?: (tableName: string) => Promise<any>
   ): Promise<void> {
     if (!this.isInTransaction()) {
       throw new TransactionError(
@@ -192,7 +195,7 @@ export class TransactionService {
       }
     } catch (error) {
       // If operation fails, try to rollback transaction
-      await this.rollback(writeFn);
+      await this.rollback(writeFn, deleteTableFn);
       // Re-throw error to inform caller transaction failed
       throw error;
     } finally {
@@ -210,7 +213,9 @@ export class TransactionService {
    * @throws {TransactionError} 当事务不存在时抛出
    */
   async rollback(
-    writeFn: (tableName: string, data: Record<string, any>[], options?: OperationOptions) => Promise<any>
+    writeFn: (tableName: string, data: Record<string, any>[], options?: OperationOptions) => Promise<any>,
+    deleteTableFn?: (tableName: string) => Promise<any>,
+    restoreSnapshots = true
   ): Promise<void> {
     if (!this.isInTransaction()) {
       throw new TransactionError(
@@ -222,9 +227,16 @@ export class TransactionService {
     }
 
     try {
-      // Iterate所有快照，恢复数据
-      for (const [tableName, snapshot] of this.snapshots) {
-        await writeFn(tableName, snapshot.data, { mode: 'overwrite', directWrite: true });
+      if (restoreSnapshots) {
+        // Restore data written before a failed commit. Tables created by the
+        // transaction must be removed rather than restored as empty tables.
+        for (const [tableName, snapshot] of this.snapshots) {
+          if (!snapshot.existed && deleteTableFn) {
+            await deleteTableFn(tableName);
+          } else if (snapshot.existed) {
+            await writeFn(tableName, snapshot.data, { mode: 'overwrite', directWrite: true });
+          }
+        }
       }
     } finally {
       // End transaction state regardless of success or failure
@@ -284,7 +296,7 @@ export class TransactionService {
    * @param data 表数据
    * @throws {TransactionError} 当事务不存在时抛出
    */
-  saveSnapshot(tableName: string, data: Record<string, any>[]): void {
+  saveSnapshot(tableName: string, data: Record<string, any>[], existed = true): void {
     if (!this.isInTransaction()) {
       throw new TransactionError(
         'No transaction in progress',
@@ -309,6 +321,7 @@ export class TransactionService {
       this.snapshots.set(tableName, {
         tableName,
         data: snapshotData,
+        existed,
       });
     }
   }
@@ -377,11 +390,10 @@ export class TransactionService {
         case 'update':
           // Update操作：使用QueryEngine过滤匹配的数据并更新
           const matchedItems = QueryEngine.filter(data, operation.where || {});
-          const matchedIds = new Set(matchedItems.map(item => item.id || item._id));
+          const matchedItemRefs = new Set(matchedItems);
 
           data = data.map(item => {
-            const itemId = item.id || item._id;
-            if (matchedIds.has(itemId)) {
+            if (matchedItemRefs.has(item)) {
               return QueryEngine.update(item, operation.data);
             }
             return item;
@@ -413,11 +425,10 @@ export class TransactionService {
               case 'update':
                 // Update操作：使用QueryEngine过滤匹配的数据并更新
                 const bulkMatchedItems = QueryEngine.filter(data, bulkOp.where || {});
-                const bulkMatchedIds = new Set(bulkMatchedItems.map(item => item.id || item._id));
+                const bulkMatchedItemRefs = new Set(bulkMatchedItems);
 
                 data = data.map(item => {
-                  const itemId = item.id || item._id;
-                  if (bulkMatchedIds.has(itemId)) {
+                  if (bulkMatchedItemRefs.has(item)) {
                     return QueryEngine.update(item, bulkOp.data);
                   }
                   return item;

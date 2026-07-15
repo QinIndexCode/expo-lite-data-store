@@ -1,5 +1,6 @@
 // src/core/meta/__tests__/MetadataManager.test.ts
 import { MetadataManager } from '../MetadataManager';
+import { getFileSystem } from '../../../utils/fileSystemCompat';
 
 describe('MetadataManager', () => {
   let metadataManager: MetadataManager;
@@ -259,5 +260,72 @@ describe('MetadataManager', () => {
     await expect(manager.waitForLoad()).rejects.toMatchObject({ code: 'META_FILE_READ_ERROR' });
     expect(fileSystem[metaPath]).toBe('not-valid-json');
     manager.cleanup();
+  });
+
+  it('serializes overlapping metadata flushes without losing later table updates', async () => {
+    await metadataManager.saveImmediately();
+
+    const fileSystem = getFileSystem();
+    const originalWrite = fileSystem.writeAsStringAsync.bind(fileSystem);
+    let releaseFirstWrite: (() => void) | undefined;
+    let markFirstWriteStarted: (() => void) | undefined;
+    const firstWriteStarted = new Promise<void>(resolve => {
+      markFirstWriteStarted = resolve;
+    });
+    const firstWriteGate = new Promise<void>(resolve => {
+      releaseFirstWrite = resolve;
+    });
+    let metadataWriteCount = 0;
+
+    const writeSpy = jest.spyOn(fileSystem, 'writeAsStringAsync').mockImplementation(async (uri, contents, options) => {
+      if (uri.endsWith('meta.ldb.tmp')) {
+        metadataWriteCount++;
+        if (metadataWriteCount === 1) {
+          markFirstWriteStarted?.();
+          await firstWriteGate;
+        }
+      }
+      return originalWrite(uri, contents, options);
+    });
+
+    try {
+      metadataManager.update('concurrent_a', {
+        mode: 'single',
+        path: 'concurrent_a.ldb',
+        count: 1,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        columns: {},
+      });
+      const firstFlush = metadataManager.saveImmediately();
+      await firstWriteStarted;
+
+      metadataManager.update('concurrent_b', {
+        mode: 'single',
+        path: 'concurrent_b.ldb',
+        count: 2,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        columns: {},
+      });
+      const secondFlush = metadataManager.saveImmediately();
+
+      releaseFirstWrite?.();
+      await Promise.all([firstFlush, secondFlush]);
+
+      const persistedText = (global as any).__expo_file_system_mock__.mockFileSystem[
+        '/mock/documents/lite-data-store/meta.ldb'
+      ];
+      const persisted = JSON.parse(persistedText);
+      expect(persisted.tables.concurrent_a.count).toBe(1);
+      expect(persisted.tables.concurrent_b.count).toBe(2);
+      expect(metadataWriteCount).toBe(2);
+      expect(
+        (global as any).__expo_file_system_mock__.mockFileSystem['/mock/documents/lite-data-store/meta.ldb.tmp']
+      ).toBeUndefined();
+    } finally {
+      releaseFirstWrite?.();
+      writeSpy.mockRestore();
+    }
   });
 });

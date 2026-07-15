@@ -81,6 +81,7 @@ npm run qa:baseline:native-flagship
 - 正式英文文档使用 `.en.md`
 - 简体中文对应文档使用 `.zh-CN.md`
 - 裸 `.md` 文件只作为仓库索引页或内部维护文档，不承担正式终端用户文档正文
+- 维护者 CI/CD 与 npm 发布操作统一记录在 [docs/CI_CD.zh-CN.md](./docs/CI_CD.zh-CN.md)
 
 当公开行为、安装要求、QA 语义或发布策略发生变化时，需要：
 

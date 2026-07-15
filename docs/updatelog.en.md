@@ -2,6 +2,14 @@
 
 [README Entry](../README.md) | [简体中文](./updatelog.zh-CN.md) | [Consumer Guide](../README.en.md)
 
+### 📅 2026-07-15 Storage Reliability and CI/CD Recovery
+
+> Storage Reliability: Hardened serialized atomic metadata publication, chunk-append recovery ordering, incomplete-chunk rejection, transaction rollback semantics, encrypted migration, and full-table encrypted logical counts
+> Workflow Replacement: Replaced the manually disabled publish workflow with a new main push/PR CI workflow and a separately registered tag-only release workflow
+> Release Safety: Added exact tag/version matching, main-branch ancestry validation, an explicit `NPM_TOKEN` prerequisite, the complete `prepublishOnly` gate, package inspection, and npm provenance
+> Maintainer Documentation: Added bilingual CI/CD operations guides covering secrets, release sequencing, GitHub CLI observation, and safe failure recovery
+> Verification: Passed 58 Jest suites / 515 tests, the complete `prepublishOnly` gate, Expo Doctor 21/21, Android Metro export, type-checking, actionlint, formatting, and npm package inspection
+
 ### 📅 2026-06-28 `v2.0.2` Expo Consumer Smoke and GitHub Publish Gate Alignment
 
 > Expo Compatibility: Pinned the local React development dependency to `19.2.3` so temporary Expo SDK 56 consumer apps satisfy `expo-doctor` instead of drifting to a rejected patch release

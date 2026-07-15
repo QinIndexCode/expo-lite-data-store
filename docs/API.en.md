@@ -46,30 +46,24 @@ That error should be interpreted as:
 ### Recommended import style
 
 ```ts
-import {
-  db,
-  configManager,
-  performanceMonitor,
-  StorageError,
-  StorageErrorCode,
-} from 'expo-lite-data-store';
+import { db, configManager, performanceMonitor, StorageError, StorageErrorCode } from 'expo-lite-data-store';
 ```
 
 `StorageErrorCode` is available as a runtime constant map, and the `StorageError.code` field uses the corresponding string-literal union type.
 
 ### Export groups
 
-| Export group | Public items |
-| --- | --- |
-| Facade object | `db` |
-| Named CRUD functions | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked` |
-| Transaction functions | `beginTransaction`, `commit`, `rollback` |
-| Config exports | `configManager`, `ConfigManager` |
-| Monitoring exports | `performanceMonitor` |
-| Crypto helpers | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService` |
-| Error exports | `StorageError`, `StorageErrorCode`, `CryptoError` |
-| Type exports | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FilterCondition`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode` |
-| Advanced plain adapter access | `plainStorage` |
+| Export group                  | Public items                                                                                                                                                                                                              |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Facade object                 | `db`                                                                                                                                                                                                                      |
+| Named CRUD functions          | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked` |
+| Transaction functions         | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                  |
+| Config exports                | `configManager`, `ConfigManager`                                                                                                                                                                                          |
+| Monitoring exports            | `performanceMonitor`                                                                                                                                                                                                      |
+| Crypto helpers                | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`                                                                                   |
+| Error exports                 | `StorageError`, `StorageErrorCode`, `CryptoError`                                                                                                                                                                         |
+| Type exports                  | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FilterCondition`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`                               |
+| Advanced plain adapter access | `plainStorage`                                                                                                                                                                                                            |
 
 ### `db` facade vs named exports
 
@@ -179,6 +173,8 @@ type FilterCondition =
 
 Although the internal query engine supports function filters, the typed public `findOne()` and `findMany()` APIs are documented around object-based `where` conditions. Use object conditions for stable public compatibility.
 
+Records may include `id` or `_id`, but they are not required. When a `where` condition is supplied, update, delete, bulk, and transaction paths apply changes to the matched row objects instead of guessing identity from missing identifiers.
+
 ## Initialization
 
 ### `init(options?)`
@@ -224,7 +220,8 @@ Behavior:
 - validates column types;
 - can seed `initialData`;
 - can start in `single` or `chunked` mode;
-- can apply field-level or full-table encryption options.
+- can apply field-level or full-table encryption options;
+- persists table metadata immediately after creation.
 
 ### `deleteTable(tableName, options?)`
 
@@ -281,7 +278,9 @@ Use this only for diagnosis or maintenance:
 await migrateToChunked('audit-log');
 ```
 
-Moves an existing table into chunked storage mode. Use this when a table has outgrown practical single-file behavior.
+Moves an existing table into chunked storage mode. Use this when a table has outgrown practical single-file behavior. The migration keeps column, risk, and encryption metadata; encrypted rows are moved in their stored form instead of passing through a decrypted rewrite window.
+
+Chunked writes use temp-file publication, overwrite journals, and append journals. If an append fails after one or more new chunks have been written, the runtime removes those partial chunks and leaves the previous table contents readable.
 
 ## Write API
 
@@ -305,9 +304,7 @@ Behavior:
 ### `overwrite(tableName, data, options?)`
 
 ```ts
-await overwrite('users', [
-  { id: '1', name: 'Alice v2' },
-]);
+await overwrite('users', [{ id: '1', name: 'Alice v2' }]);
 ```
 
 Behavior:
@@ -339,6 +336,7 @@ Behavior:
 - preserves operation order;
 - supports pure insert fast-path optimization internally;
 - can run inside a transaction;
+- matches update and delete operations by the supplied `where` condition, including rows without `id` fields;
 - returns a `WriteResult` whose `written` count reflects affected records under current runtime behavior.
 
 ## Read and Query API
@@ -385,10 +383,7 @@ Returns the first matching record or `null`.
 ```ts
 const users = await findMany('users', {
   where: {
-    $and: [
-      { active: true },
-      { age: { $gte: 18 } },
-    ],
+    $and: [{ active: true }, { age: { $gte: 18 } }],
   },
   sortBy: ['age', 'name'],
   order: ['desc', 'asc'],
@@ -413,19 +408,19 @@ findMany(tableName, {
 
 #### Supported query operators
 
-| Operator | Semantics | Example |
-| --- | --- | --- |
-| `$and` | All nested conditions must match | `{ $and: [{ active: true }, { age: { $gte: 18 } }] }` |
-| `$or` | Any nested condition may match | `{ $or: [{ role: 'admin' }, { role: 'moderator' }] }` |
-| `$eq` | Exact equality | `{ age: { $eq: 21 } }` |
-| `$ne` | Not equal | `{ status: { $ne: 'archived' } }` |
-| `$gt` | Greater than | `{ price: { $gt: 100 } }` |
-| `$gte` | Greater than or equal | `{ score: { $gte: 90 } }` |
-| `$lt` | Less than | `{ stock: { $lt: 10 } }` |
-| `$lte` | Less than or equal | `{ retries: { $lte: 3 } }` |
-| `$in` | Included in a set | `{ role: { $in: ['admin', 'editor'] } }` |
-| `$nin` | Excluded from a set | `{ status: { $nin: ['deleted', 'blocked'] } }` |
-| `$like` | SQL-style pattern matching | `{ email: { $like: '%@example.com' } }` |
+| Operator | Semantics                        | Example                                               |
+| -------- | -------------------------------- | ----------------------------------------------------- |
+| `$and`   | All nested conditions must match | `{ $and: [{ active: true }, { age: { $gte: 18 } }] }` |
+| `$or`    | Any nested condition may match   | `{ $or: [{ role: 'admin' }, { role: 'moderator' }] }` |
+| `$eq`    | Exact equality                   | `{ age: { $eq: 21 } }`                                |
+| `$ne`    | Not equal                        | `{ status: { $ne: 'archived' } }`                     |
+| `$gt`    | Greater than                     | `{ price: { $gt: 100 } }`                             |
+| `$gte`   | Greater than or equal            | `{ score: { $gte: 90 } }`                             |
+| `$lt`    | Less than                        | `{ stock: { $lt: 10 } }`                              |
+| `$lte`   | Less than or equal               | `{ retries: { $lte: 3 } }`                            |
+| `$in`    | Included in a set                | `{ role: { $in: ['admin', 'editor'] } }`              |
+| `$nin`   | Excluded from a set              | `{ status: { $nin: ['deleted', 'blocked'] } }`        |
+| `$like`  | SQL-style pattern matching       | `{ email: { $like: '%@example.com' } }`               |
 
 #### Sorting notes
 
@@ -444,35 +439,27 @@ If you do not force an algorithm, the runtime may choose a more suitable one bas
 ### `update(tableName, data, options)`
 
 ```ts
-const updatedCount = await update(
-  'users',
-  { active: false },
-  { where: { id: '1' } }
-);
+const updatedCount = await update('users', { active: false }, { where: { id: '1' } });
 ```
 
 Operator-driven update:
 
 ```ts
-const updatedCount = await update(
-  'accounts',
-  { $inc: { balance: -200 } },
-  { where: { id: 'acct-1' } }
-);
+const updatedCount = await update('accounts', { $inc: { balance: -200 } }, { where: { id: 'acct-1' } });
 ```
 
 Returns the number of matched records updated.
 
 #### Supported update operators
 
-| Operator | Semantics | Example |
-| --- | --- | --- |
-| `$inc` | Increment or decrement numeric values | `{ $inc: { balance: -200 } }` |
-| `$set` | Assign explicit values | `{ $set: { status: 'active' } }` |
-| `$unset` | Remove fields | `{ $unset: ['temporaryField'] }` |
-| `$push` | Push a single value into an array | `{ $push: { tags: 'new' } }` |
-| `$pull` | Remove a matching value from an array | `{ $pull: { tags: 'obsolete' } }` |
-| `$addToSet` | Push only if absent | `{ $addToSet: { tags: 'admin' } }` |
+| Operator    | Semantics                             | Example                            |
+| ----------- | ------------------------------------- | ---------------------------------- |
+| `$inc`      | Increment or decrement numeric values | `{ $inc: { balance: -200 } }`      |
+| `$set`      | Assign explicit values                | `{ $set: { status: 'active' } }`   |
+| `$unset`    | Remove fields                         | `{ $unset: ['temporaryField'] }`   |
+| `$push`     | Push a single value into an array     | `{ $push: { tags: 'new' } }`       |
+| `$pull`     | Remove a matching value from an array | `{ $pull: { tags: 'obsolete' } }`  |
+| `$addToSet` | Push only if absent                   | `{ $addToSet: { tags: 'admin' } }` |
 
 Direct field assignment without an operator is also valid and is treated as a replace-on-field update.
 
@@ -526,6 +513,8 @@ Discards the active transaction.
 - Starting a second transaction before ending the first raises `TRANSACTION_IN_PROGRESS`.
 - Calling `commit()` or `rollback()` with no active transaction raises `NO_TRANSACTION_IN_PROGRESS`.
 - The surface is selected by the same `encrypted` and `requireAuthOnAccess` flags used by normal CRUD calls.
+- Explicit rollback discards queued operations without rewriting table files. A partially failed commit restores existing table snapshots and removes tables created by that transaction.
+- Transactions are in-process and are not crash-durable or cross-process ACID transactions.
 
 ## Configuration API
 
@@ -590,6 +579,8 @@ Current precedence from lowest to highest:
 5. programmatic config manager overrides
 
 ### `app.json` example
+
+`autoSync.enabled` is `false` by default. The following example opts into background dirty-cache syncing explicitly.
 
 ```json
 {
@@ -739,20 +730,20 @@ try {
 
 ### Common `StorageErrorCode` values
 
-| Code | Meaning |
-| --- | --- |
-| `EXPO_MODULE_MISSING` | Required Expo runtime package is missing |
+| Code                         | Meaning                                                                    |
+| ---------------------------- | -------------------------------------------------------------------------- |
+| `EXPO_MODULE_MISSING`        | Required Expo runtime package is missing                                   |
 | `AUTH_ON_ACCESS_UNSUPPORTED` | Strict per-access authentication cannot be enforced in the current runtime |
-| `TABLE_NOT_FOUND` | The requested table does not exist |
-| `TABLE_NAME_INVALID` | The table name is empty or invalid |
-| `TABLE_COLUMN_INVALID` | A declared column uses an unsupported type |
-| `QUERY_FAILED` | The query engine failed to execute the condition |
-| `MIGRATION_FAILED` | Table migration failed |
-| `TRANSACTION_IN_PROGRESS` | A transaction already exists on the current surface |
-| `NO_TRANSACTION_IN_PROGRESS` | `commit()` or `rollback()` was called with no active transaction |
-| `LOCK_TIMEOUT` | Concurrent write lock acquisition exceeded the timeout budget |
-| `TIMEOUT` | An operation exceeded a configured timeout |
-| `CORRUPTED_DATA` | On-disk data could not be parsed safely |
+| `TABLE_NOT_FOUND`            | The requested table does not exist                                         |
+| `TABLE_NAME_INVALID`         | The table name is empty or invalid                                         |
+| `TABLE_COLUMN_INVALID`       | A declared column uses an unsupported type                                 |
+| `QUERY_FAILED`               | The query engine failed to execute the condition                           |
+| `MIGRATION_FAILED`           | Table migration failed                                                     |
+| `TRANSACTION_IN_PROGRESS`    | A transaction already exists on the current surface                        |
+| `NO_TRANSACTION_IN_PROGRESS` | `commit()` or `rollback()` was called with no active transaction           |
+| `LOCK_TIMEOUT`               | Concurrent write lock acquisition exceeded the timeout budget              |
+| `TIMEOUT`                    | An operation exceeded a configured timeout                                 |
+| `CORRUPTED_DATA`             | On-disk data could not be parsed safely                                    |
 
 ### `CryptoError`
 

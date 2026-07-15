@@ -198,7 +198,7 @@ export class AutoSyncService {
   private _updateConfigFromGlobalConfig(): void {
     const globalConfig = configManager.getConfig();
     this.config = {
-      enabled: globalConfig.autoSync?.enabled ?? true,
+      enabled: globalConfig.autoSync?.enabled ?? false,
       interval: globalConfig.autoSync?.interval ?? 5000,
       minItems: globalConfig.autoSync?.minItems ?? 1,
       batchSize: globalConfig.autoSync?.batchSize ?? 100,

@@ -49,6 +49,8 @@ npx expo install react-native-quick-crypto
 
 - Runtime QA guide (English): [docs/EXPO_RUNTIME_QA.en.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/EXPO_RUNTIME_QA.en.md)
 - Runtime QA guide (简体中文): [docs/EXPO_RUNTIME_QA.zh-CN.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/EXPO_RUNTIME_QA.zh-CN.md)
+- CI/CD operations (English): [docs/CI_CD.en.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/CI_CD.en.md)
+- CI/CD 运维手册（简体中文）: [docs/CI_CD.zh-CN.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/CI_CD.zh-CN.md)
 - Changelog (English): [docs/CHANGELOG.en.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/CHANGELOG.en.md)
 - Changelog (简体中文): [docs/CHANGELOG.zh-CN.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/CHANGELOG.zh-CN.md)
 - Update log (English): [docs/updatelog.en.md](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/docs/updatelog.en.md)

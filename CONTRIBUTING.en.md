@@ -81,6 +81,7 @@ This repository uses the following documentation policy:
 - Formal English guides use the `.en.md` filename.
 - Simplified Chinese counterparts use `.zh-CN.md`.
 - Bare `.md` files are repository indexes or internal maintenance documents, not the primary end-user manuals.
+- Maintainer CI/CD and npm release operations are documented in [docs/CI_CD.en.md](./docs/CI_CD.en.md).
 
 When updating public behavior, installation requirements, QA semantics, or release policy:
 

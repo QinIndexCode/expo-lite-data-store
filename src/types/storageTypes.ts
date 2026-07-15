@@ -29,9 +29,9 @@ export type FilterCondition =
  * Write result type containing detailed information about a write operation.
  */
 export type WriteResult = {
-  /** Number of bytes written in this operation */
+  /** Number of records written or affected in this operation */
   written: number;
-  /** Total number of bytes after the write operation */
+  /** Total number of records after the write operation */
   totalAfterWrite: number;
   /** Whether chunked writing was used */
   chunked: boolean;

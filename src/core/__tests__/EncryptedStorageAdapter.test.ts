@@ -2,6 +2,7 @@
 import { EncryptedStorageAdapter } from '../EncryptedStorageAdapter';
 import { MetadataManager } from '../meta/MetadataManager';
 import storage from '../adapter/FileSystemStorageAdapter';
+import { configManager } from '../config/ConfigManager';
 
 describe('EncryptedStorageAdapter', () => {
   let adapter: EncryptedStorageAdapter;
@@ -9,6 +10,7 @@ describe('EncryptedStorageAdapter', () => {
   const tableName = 'test_encrypted_table';
 
   beforeEach(async () => {
+    configManager.resetConfig();
     metadataManager = new MetadataManager();
     adapter = new EncryptedStorageAdapter();
     await adapter.createTable(tableName);
@@ -23,6 +25,7 @@ describe('EncryptedStorageAdapter', () => {
     if (metadataManager) {
       metadataManager.cleanup();
     }
+    configManager.resetConfig();
   });
 
   describe('基本操作', () => {
@@ -57,9 +60,33 @@ describe('EncryptedStorageAdapter', () => {
       }
     });
 
+    it('应该在表启用加密且 encryptedFields 为空时加密并解密所有字段', async () => {
+      const encryptedAllFieldsTable = 'test_encrypted_all_fields';
+      const testData = [{ id: 1, name: 'Alice', age: 25, active: true }];
+
+      try {
+        configManager.updateConfig({ encryption: { encryptedFields: [] } });
+        await adapter.createTable(encryptedAllFieldsTable, {
+          encrypted: true,
+          encryptedFields: [],
+          initialData: testData,
+        });
+
+        const rawData = await storage.read(encryptedAllFieldsTable, { bypassCache: true });
+        expect(rawData[0]?.id).not.toBe(1);
+        expect(rawData[0]?.name).not.toBe('Alice');
+        expect(rawData[0]?.age).not.toBe(25);
+        expect(rawData[0]?.active).not.toBe(true);
+
+        await expect(adapter.read(encryptedAllFieldsTable, { bypassCache: true })).resolves.toEqual(testData);
+      } finally {
+        await adapter.deleteTable(encryptedAllFieldsTable);
+      }
+    });
+
     it('应该能够写入和读取加密数据', async () => {
       const testData = { id: 1, name: 'Alice', age: 25 };
-      
+
       await adapter.overwrite(tableName, testData);
       const result = await adapter.read(tableName);
 
@@ -73,7 +100,7 @@ describe('EncryptedStorageAdapter', () => {
         { id: 2, name: 'Bob', age: 30 },
         { id: 3, name: 'Charlie', age: 35 },
       ];
-      
+
       await adapter.overwrite(tableName, testData);
       const result = await adapter.read(tableName);
 
@@ -119,11 +146,36 @@ describe('EncryptedStorageAdapter', () => {
         { id: 1, name: 'Alice', age: 25 },
         { id: 2, name: 'Bob', age: 30 },
       ];
-      
+
       await adapter.overwrite(tableName, testData);
       const count = await adapter.count(tableName);
 
       expect(count).toBe(2);
+    });
+
+    it('整表加密应报告并持久化逻辑记录数，而不是物理密文包数', async () => {
+      const fullTable = 'test_full_table_count';
+      const testData = [
+        { id: 1, secret: 'alpha' },
+        { id: 2, secret: 'beta' },
+        { id: 3, secret: 'gamma' },
+      ];
+
+      try {
+        await adapter.createTable(fullTable, { encrypted: true, encryptFullTable: true });
+        const result = await adapter.write(fullTable, testData, {
+          mode: 'overwrite',
+          encrypted: true,
+          encryptFullTable: true,
+        });
+
+        expect(result).toMatchObject({ written: 3, totalAfterWrite: 3 });
+        await expect(storage.read(fullTable, { bypassCache: true })).resolves.toHaveLength(1);
+        await expect(adapter.count(fullTable)).resolves.toBe(3);
+        await expect(adapter.verifyCount(fullTable)).resolves.toEqual({ metadata: 3, actual: 3, match: true });
+      } finally {
+        await adapter.deleteTable(fullTable);
+      }
     });
   });
 
@@ -139,9 +191,9 @@ describe('EncryptedStorageAdapter', () => {
 
     it('应该能够根据条件删除数据', async () => {
       const deletedCount = await adapter.delete(tableName, { id: 1 });
-      
+
       const remainingData = await adapter.read(tableName, { bypassCache: true });
-      
+
       expect(deletedCount).toBe(1);
       expect(remainingData.length).toBe(2);
       expect(remainingData).not.toContainEqual({ id: 1, name: 'Alice', age: 25 });
@@ -154,11 +206,11 @@ describe('EncryptedStorageAdapter', () => {
         { type: 'insert' as const, data: { id: 1, name: 'Alice' } },
         { type: 'insert' as const, data: { id: 2, name: 'Bob' } },
       ];
-      
+
       const result = await adapter.bulkWrite(tableName, operations);
-      
+
       const allData = await adapter.read(tableName, { bypassCache: true });
-      
+
       expect(result.written).toBe(2);
       expect(allData.length).toBe(2);
     });
@@ -179,7 +231,7 @@ describe('EncryptedStorageAdapter', () => {
       const result = await adapter.bulkWrite(tableName, operations);
 
       const updatedData = await adapter.read(tableName, { bypassCache: true });
-      
+
       expect(result.written).toBe(2);
       expect(updatedData[0]?.['age']).toBe(26);
       expect(updatedData[1]?.['age']).toBe(31);
@@ -202,7 +254,7 @@ describe('EncryptedStorageAdapter', () => {
       const result = await adapter.bulkWrite(tableName, operations);
 
       const remainingData = await adapter.read(tableName, { bypassCache: true });
-      
+
       expect(result.written).toBe(2);
       expect(remainingData.length).toBe(1);
       expect(remainingData[0]?.['id']).toBe(3);
@@ -220,8 +272,37 @@ describe('EncryptedStorageAdapter', () => {
       await adapter.migrateToChunked(tableName);
 
       const migratedData = await adapter.read(tableName);
-      
+
       expect(migratedData).toEqual(testData);
+    });
+
+    it('迁移时保留加密与列元数据并避免明文重写窗口', async () => {
+      const testData = [
+        { id: 1, secret: 'alpha', visible: 'one' },
+        { id: 2, secret: 'beta', visible: 'two' },
+      ];
+      await adapter.deleteTable(tableName);
+      await adapter.createTable(tableName, {
+        encrypted: true,
+        encryptedFields: ['secret'],
+        columns: { id: 'number', secret: 'string', visible: 'string' },
+        initialData: testData,
+      });
+
+      const rawBeforeMigration = await storage.read(tableName, { bypassCache: true });
+      expect(rawBeforeMigration[0]?.secret).not.toBe('alpha');
+
+      await adapter.migrateToChunked(tableName);
+
+      await expect(adapter.read(tableName, { bypassCache: true })).resolves.toEqual(testData);
+      const rawAfterMigration = await storage.read(tableName, { bypassCache: true });
+      expect(rawAfterMigration[0]?.secret).toBe(rawBeforeMigration[0]?.secret);
+      expect((storage as any).getTableMeta(tableName)).toMatchObject({
+        mode: 'chunked',
+        encrypted: true,
+        encryptedFields: ['secret'],
+        columns: { id: 'number', secret: 'string', visible: 'string' },
+      });
     });
   });
 });

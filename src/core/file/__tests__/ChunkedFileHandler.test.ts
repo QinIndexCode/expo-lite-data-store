@@ -3,6 +3,8 @@
 import { MetadataManager } from '../../meta/MetadataManager';
 import { ChunkedFileHandler } from '../ChunkedFileHandler';
 import logger from '../../../utils/logger';
+import { configManager } from '../../config/ConfigManager';
+import { getFileSystem } from '../../../utils/fileSystemCompat';
 
 describe('ChunkedFileHandler', () => {
   let chunkedFileHandler: ChunkedFileHandler;
@@ -10,6 +12,7 @@ describe('ChunkedFileHandler', () => {
   const metadataManager = new MetadataManager();
 
   beforeEach(() => {
+    configManager.resetConfig();
     // 清理mock文件系统中的数据
     if ((global as any).__expo_file_system_mock__) {
       (global as any).__expo_file_system_mock__.mockFileSystem = {};
@@ -27,6 +30,7 @@ describe('ChunkedFileHandler', () => {
     if ((global as any).__expo_file_system_mock__) {
       (global as any).__expo_file_system_mock__.mockFileSystem = {};
     }
+    configManager.resetConfig();
   });
 
   describe('Basic Functionality Tests', () => {
@@ -276,6 +280,69 @@ describe('ChunkedFileHandler', () => {
 
       await expect(chunkedFileHandler.readAll()).rejects.toMatchObject({ code: 'CORRUPTED_DATA' });
     });
+
+    it('should roll back partial append chunks when a later chunk write fails', async () => {
+      configManager.updateConfig({ chunkSize: 256 });
+      const originalData = [{ id: 1, name: 'original' }];
+      const appendData = [
+        { id: 2, payload: 'x'.repeat(300) },
+        { id: 3, payload: 'y'.repeat(300) },
+      ];
+      await chunkedFileHandler.write(originalData);
+
+      const handler = chunkedFileHandler as any;
+      const originalWriteChunk = handler.writeChunk.bind(handler);
+      let appendWriteAttempts = 0;
+      const writeSpy = jest.spyOn(handler, 'writeChunk').mockImplementation(async (...args: any[]) => {
+        appendWriteAttempts++;
+        if (appendWriteAttempts === 2) {
+          throw new Error('injected append chunk failure');
+        }
+        return originalWriteChunk(...args);
+      });
+
+      await expect(chunkedFileHandler.append(appendData)).rejects.toThrow();
+      writeSpy.mockRestore();
+
+      await expect(chunkedFileHandler.readAll()).resolves.toEqual(originalData);
+
+      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+      expect(fileSystem['/mock/documents/lite-data-store/test_chunked_table/000001.ldb']).toBeUndefined();
+      expect(fileSystem['/mock/documents/lite-data-store/test_chunked_table/000002.ldb']).toBeUndefined();
+      expect(fileSystem['/mock/documents/lite-data-store/test_chunked_table.append-journal']).toBeUndefined();
+    });
+
+    it('rolls back completed append chunks when metadata was not committed before restart', async () => {
+      const originalData = [{ id: 1, name: 'original' }];
+      const appendData = [{ id: 2, name: 'interrupted' }];
+      await chunkedFileHandler.write(originalData);
+
+      const handler = chunkedFileHandler as any;
+      await handler.writeAppendJournal(1, 1, [1], appendData);
+      await handler.writeChunk(1, appendData);
+
+      const restartedHandler = new ChunkedFileHandler(testTableName, metadataManager);
+      await expect(restartedHandler.readAll()).resolves.toEqual(originalData);
+
+      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+      expect(fileSystem['/mock/documents/lite-data-store/test_chunked_table/000001.ldb']).toBeUndefined();
+      expect(fileSystem['/mock/documents/lite-data-store/test_chunked_table.append-journal']).toBeUndefined();
+    });
+
+    it('rejects a chunk set with a missing middle chunk', async () => {
+      configManager.updateConfig({ chunkSize: 256 });
+      await chunkedFileHandler.write([
+        { id: 1, payload: 'x'.repeat(300) },
+        { id: 2, payload: 'y'.repeat(300) },
+        { id: 3, payload: 'z'.repeat(300) },
+      ]);
+
+      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+      delete fileSystem['/mock/documents/lite-data-store/test_chunked_table/000001.ldb'];
+
+      const restartedHandler = new ChunkedFileHandler(testTableName, metadataManager);
+      await expect(restartedHandler.readAll()).rejects.toMatchObject({ code: 'CORRUPTED_DATA' });
+    });
   });
 
   describe('Chunk Processing Tests', () => {
@@ -306,7 +373,7 @@ describe('ChunkedFileHandler', () => {
       expect(result[600]).toEqual(batch3[0]);
     });
 
-    it('truncates large chunk debug output', async () => {
+    it('does not include stored record content in chunk debug output', async () => {
       const debugSpy = jest.spyOn(logger, 'debug').mockImplementation(() => {});
       const payload = 'x'.repeat(6000);
       let readLog: string | undefined;
@@ -315,18 +382,45 @@ describe('ChunkedFileHandler', () => {
         await chunkedFileHandler.write([{ id: 'large-debug', payload }]);
         await chunkedFileHandler.readAll();
 
-        readLog = debugSpy.mock.calls
-          .map(args => String(args[0]))
-          .find(message => message.includes('Read chunk file'));
+        readLog = debugSpy.mock.calls.map(args => String(args[0])).find(message => message.includes('Read chunk file'));
       } finally {
         debugSpy.mockRestore();
       }
 
       expect(readLog).toBeDefined();
       expect(readLog).toContain('contentLength=');
-      expect(readLog).toContain('contentPreview=');
-      expect(readLog).toContain('[truncated ');
+      expect(readLog).not.toContain('contentPreview=');
       expect(readLog).not.toContain(payload);
+    });
+
+    it('persists append metadata before deleting the recovery journal', async () => {
+      await chunkedFileHandler.write([{ id: 1 }]);
+
+      const events: string[] = [];
+      const originalSave = metadataManager.saveImmediately.bind(metadataManager);
+      const saveSpy = jest.spyOn(metadataManager, 'saveImmediately').mockImplementation(async () => {
+        events.push('metadata');
+        await originalSave();
+      });
+      const fileSystem = getFileSystem();
+      const originalDelete = fileSystem.deleteAsync.bind(fileSystem);
+      const deleteSpy = jest.spyOn(fileSystem, 'deleteAsync').mockImplementation(async (uri, options) => {
+        if (uri.endsWith('.append-journal')) {
+          events.push('journal');
+        }
+        await originalDelete(uri, options);
+      });
+
+      try {
+        await chunkedFileHandler.append([{ id: 2 }]);
+      } finally {
+        saveSpy.mockRestore();
+        deleteSpy.mockRestore();
+      }
+
+      expect(events).toContain('metadata');
+      expect(events).toContain('journal');
+      expect(events.indexOf('metadata')).toBeLessThan(events.indexOf('journal'));
     });
 
     it('preserves chunk order when a later chunk is preloaded', async () => {

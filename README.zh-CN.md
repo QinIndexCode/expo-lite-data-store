@@ -2,7 +2,7 @@
 
 面向 Expo 应用的本地结构化存储库，已针对 Expo SDK 56 下的 Expo Go、managed app 和原生开发构建完成运行时验证。
 
-[README 入口](./README.md) | [English](./README.en.md) | [API 参考](./docs/API.zh-CN.md) | [运行时 QA 指南](./docs/EXPO_RUNTIME_QA.zh-CN.md) | [变更日志](./docs/CHANGELOG.zh-CN.md)
+[README 入口](./README.md) | [English](./README.en.md) | [API 参考](./docs/API.zh-CN.md) | [运行时 QA 指南](./docs/EXPO_RUNTIME_QA.zh-CN.md) | [CI/CD 运维](./docs/CI_CD.zh-CN.md) | [变更日志](./docs/CHANGELOG.zh-CN.md)
 
 ## 概览
 
@@ -19,13 +19,13 @@
 
 ## 支持矩阵
 
-| 运行面 | 状态 |
-| --- | --- |
-| Expo SDK | `56.x` |
-| React | `19.2.x` |
-| React Native | `0.85.x` |
-| Managed App | 支持 |
-| Expo Go | 支持本文档定义的运行契约 |
+| 运行面                       | 状态                             |
+| ---------------------------- | -------------------------------- |
+| Expo SDK                     | `56.x`                           |
+| React                        | `19.2.x`                         |
+| React Native                 | `0.85.x`                         |
+| Managed App                  | 支持                             |
+| Expo Go                      | 支持本文档定义的运行契约         |
 | Native Dev Client / 独立应用 | 支持，且推荐用于原生加密性能验证 |
 
 ## 安装
@@ -58,20 +58,20 @@ npx expo install react-native-quick-crypto
 
 ### 安装契约
 
-| 契约 | 状态 | 说明 |
-| --- | --- | --- |
-| `npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store` | 正式支持 | Expo SDK 56 下的 managed-compatible 安装契约 |
-| 在上一条基础上额外安装 `react-native-quick-crypto` | 正式支持 | 用于 native dev client 或独立应用中的原生旗舰加密验证 |
-| 仅执行 `npm install expo-lite-data-store` | 不支持 | 可能导致 Expo peer 依赖缺失或版本未对齐 |
+| 契约                                                                                                  | 状态     | 说明                                                  |
+| ----------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------- |
+| `npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store` | 正式支持 | Expo SDK 56 下的 managed-compatible 安装契约          |
+| 在上一条基础上额外安装 `react-native-quick-crypto`                                                    | 正式支持 | 用于 native dev client 或独立应用中的原生旗舰加密验证 |
+| 仅执行 `npm install expo-lite-data-store`                                                             | 不支持   | 可能导致 Expo peer 依赖缺失或版本未对齐               |
 
 ### 必需运行时包
 
-| 包名 | 用途 |
-| --- | --- |
-| `expo-file-system` | 负责表文件、chunk 文件、元数据文件和目录管理 |
-| `expo-constants` | 负责从 `app.json` 读取运行时配置，并识别 Expo 运行环境 |
-| `expo-crypto` | 负责随机数、哈希和 Expo 兼容的加密辅助流程 |
-| `expo-secure-store` | 负责安全存储派生后的主密钥材料 |
+| 包名                | 用途                                                   |
+| ------------------- | ------------------------------------------------------ |
+| `expo-file-system`  | 负责表文件、chunk 文件、元数据文件和目录管理           |
+| `expo-constants`    | 负责从 `app.json` 读取运行时配置，并识别 Expo 运行环境 |
+| `expo-crypto`       | 负责随机数、哈希和 Expo 兼容的加密辅助流程             |
+| `expo-secure-store` | 负责安全存储派生后的主密钥材料                         |
 
 `expo-modules-core` 也会作为 Expo 原生模块桥接层被内部使用，但它由宿主 Expo 运行时提供，不作为单独的 consumer 安装契约项暴露给使用者。
 
@@ -169,6 +169,8 @@ const activeUsers = await db.findMany('users', {
 
 如果初始数据明显超过配置的 chunk 阈值，运行时也可能自动切换到 chunked 存储方式。
 
+chunked 覆盖写和追加写都带恢复日志，并会清理失败时已经写出的部分 chunk。追加写会先提交元数据、再移除恢复日志；读取遇到不完整 chunk 集合时会明确报错，而不是静默返回部分数据。表元数据采用串行化临时文件发布，并发表写不会吞掉较晚的元数据更新。
+
 ### 列定义
 
 `createTable()` 接受 `columns` 配置。当前运行时接受以下列类型：
@@ -181,6 +183,8 @@ const activeUsers = await db.findMany('users', {
 
 列定义主要用于表元数据和写入验证，公开 API 里的记录本质上仍然是普通 JavaScript 对象。
 
+记录不强制要求包含 `id` 或 `_id`。这些字段适合作为业务标识，也能在存在索引时帮助加速；但基于 `where` 的更新、删除、批量操作和事务路径会按查询引擎实际命中的行来处理，所以没有 id 的记录也会被安全地逐行匹配。
+
 ### 写入数据
 
 当你希望追加新记录时，使用 `insert()`：
@@ -192,9 +196,7 @@ await db.insert('events', { id: 'evt-1', type: 'login' });
 当你希望逻辑上替换整张表的内容时，使用 `overwrite()`：
 
 ```ts
-await db.overwrite('cache', [
-  { id: 'cfg', version: 2, payload: { theme: 'dark' } },
-]);
+await db.overwrite('cache', [{ id: 'cfg', version: 2, payload: { theme: 'dark' } }]);
 ```
 
 当前运行时返回的 `WriteResult` 结构如下：
@@ -229,10 +231,7 @@ const rows = await db.read('users');
 ```ts
 const expensiveElectronics = await db.findMany('products', {
   where: {
-    $and: [
-      { category: 'Electronics' },
-      { price: { $gt: 100 } },
-    ],
+    $and: [{ category: 'Electronics' }, { price: { $gt: 100 } }],
   },
   sortBy: 'price',
   order: 'desc',
@@ -242,18 +241,18 @@ const expensiveElectronics = await db.findMany('products', {
 
 当前支持的查询操作符如下：
 
-| 操作符 | 含义 |
-| --- | --- |
-| `$and` | 对多个条件做逻辑与 |
-| `$or` | 对多个条件做逻辑或 |
-| `$eq` | 精确相等 |
-| `$ne` | 不相等 |
-| `$gt` | 大于 |
-| `$gte` | 大于等于 |
-| `$lt` | 小于 |
-| `$lte` | 小于等于 |
-| `$in` | 值或数组成员出现在候选集合中 |
-| `$nin` | 值或数组成员不在候选集合中 |
+| 操作符  | 含义                                |
+| ------- | ----------------------------------- |
+| `$and`  | 对多个条件做逻辑与                  |
+| `$or`   | 对多个条件做逻辑或                  |
+| `$eq`   | 精确相等                            |
+| `$ne`   | 不相等                              |
+| `$gt`   | 大于                                |
+| `$gte`  | 大于等于                            |
+| `$lt`   | 小于                                |
+| `$lte`  | 小于等于                            |
+| `$in`   | 值或数组成员出现在候选集合中        |
+| `$nin`  | 值或数组成员不在候选集合中          |
 | `$like` | 使用 `%` 和 `_` 的 SQL 风格模糊匹配 |
 
 ### 更新记录
@@ -263,32 +262,24 @@ const expensiveElectronics = await db.findMany('products', {
 简单字段更新：
 
 ```ts
-await db.update(
-  'users',
-  { active: false },
-  { where: { id: '2' } }
-);
+await db.update('users', { active: false }, { where: { id: '2' } });
 ```
 
 基于操作符的更新：
 
 ```ts
-await db.update(
-  'accounts',
-  { $inc: { balance: -200 } },
-  { where: { id: 'acct-1' } }
-);
+await db.update('accounts', { $inc: { balance: -200 } }, { where: { id: 'acct-1' } });
 ```
 
 当前支持的更新操作符如下：
 
-| 操作符 | 含义 |
-| --- | --- |
-| `$inc` | 数值递增或递减 |
-| `$set` | 显式设置字段值 |
-| `$unset` | 删除字段 |
-| `$push` | 向数组字段追加一个值 |
-| `$pull` | 从数组字段移除匹配值 |
+| 操作符      | 含义                         |
+| ----------- | ---------------------------- |
+| `$inc`      | 数值递增或递减               |
+| `$set`      | 显式设置字段值               |
+| `$unset`    | 删除字段                     |
+| `$push`     | 向数组字段追加一个值         |
+| `$pull`     | 从数组字段移除匹配值         |
 | `$addToSet` | 仅当数组中不存在该值时再追加 |
 
 ### 批量操作
@@ -315,18 +306,22 @@ await db.beginTransaction();
 try {
   await db.update('accounts', { $inc: { balance: -200 } }, { where: { id: 'acct-1' } });
   await db.update('accounts', { $inc: { balance: 200 } }, { where: { id: 'acct-2' } });
-  await db.commit();
 } catch (error) {
   await db.rollback();
   throw error;
 }
+
+// commit 失败时会在内部恢复快照，然后重新抛出错误。
+await db.commit();
 ```
 
 当前事务行为需要注意：
 
 - 同一适配器表面一次只能有一个活动事务；
 - 在未结束前再次调用 `beginTransaction()` 会抛出 `TRANSACTION_IN_PROGRESS`；
-- 没有活动事务时调用 `commit()` 或 `rollback()` 会抛出 `NO_TRANSACTION_IN_PROGRESS`。
+- 没有活动事务时调用 `commit()` 或 `rollback()` 会抛出 `NO_TRANSACTION_IN_PROGRESS`；
+- 显式回滚只丢弃排队写入，不会重写表文件；若提交执行到一半失败，已有表会恢复，事务中新建的表会被移除；
+- 事务是进程内协调能力，不是跨进程或应用崩溃后仍可恢复的 ACID 实现。
 
 ### 计数与校验
 
@@ -368,38 +363,38 @@ const result = await db.verifyCountTable('users');
 
 ### 常用运行时配置项
 
-| Key | 默认值 | 作用 |
-| --- | --- | --- |
-| `chunkSize` | `5242880` | chunk 切分阈值，单位为字节 |
-| `storageFolder` | `lite-data-store` | Expo 文件系统下的根目录名 |
-| `sortMethods` | `default` | 默认排序策略提示 |
-| `timeout` | `10000` | 部分文件操作的超时时间 |
-| `encryption.algorithm` | `auto` | 首选加密算法模式 |
-| `encryption.keyIterations` | `600000` | PBKDF2 目标迭代次数，Expo Go 下会自动下调 |
-| `performance.maxConcurrentOperations` | `5` | 写入侧最大并发数 |
-| `cache.maxSize` | `1000` | 缓存项预算 |
-| `monitoring.enablePerformanceTracking` | `false` | 是否开启性能采样 |
-| `monitoring.enableHealthChecks` | `true` | 是否开启健康检查 |
-| `autoSync.enabled` | `true` | 自动同步服务开关 |
-| `autoSync.interval` | `30000` | 自动同步间隔，单位毫秒 |
-| `autoSync.minItems` | `1` | 触发自动同步前的最小排队项数 |
-| `autoSync.batchSize` | `100` | 每批自动同步的最大项目数 |
+| Key                                    | 默认值            | 作用                                           |
+| -------------------------------------- | ----------------- | ---------------------------------------------- |
+| `chunkSize`                            | `5242880`         | chunk 切分阈值，单位为字节                     |
+| `storageFolder`                        | `lite-data-store` | Expo 文件系统下的根目录名                      |
+| `sortMethods`                          | `default`         | 默认排序策略提示                               |
+| `timeout`                              | `10000`           | 部分文件操作的超时时间                         |
+| `encryption.algorithm`                 | `auto`            | 首选加密算法模式                               |
+| `encryption.keyIterations`             | `600000`          | PBKDF2 目标迭代次数，Expo Go 下会自动下调      |
+| `performance.maxConcurrentOperations`  | `5`               | 写入侧最大并发数                               |
+| `cache.maxSize`                        | `1000`            | 缓存项预算                                     |
+| `monitoring.enablePerformanceTracking` | `false`           | 是否开启性能采样                               |
+| `monitoring.enableHealthChecks`        | `true`            | 是否开启健康检查                               |
+| `autoSync.enabled`                     | `false`           | 自动同步服务开关；需要后台脏缓存同步时显式开启 |
+| `autoSync.interval`                    | `30000`           | 自动同步间隔，单位毫秒                         |
+| `autoSync.minItems`                    | `1`               | 触发自动同步前的最小排队项数                   |
+| `autoSync.batchSize`                   | `100`             | 每批自动同步的最大项目数                       |
 
 ### 当前支持的环境变量
 
-| 环境变量 | 对应配置 |
-| --- | --- |
-| `LITE_STORE_CHUNK_SIZE` | `chunkSize` |
-| `LITE_STORE_STORAGE_FOLDER` | `storageFolder` |
-| `LITE_STORE_SORT_METHODS` | `sortMethods` |
-| `LITE_STORE_TIMEOUT` | `timeout` |
-| `LITE_STORE_ENCRYPTION_KEY_ITERATIONS` | `encryption.keyIterations` |
+| 环境变量                                           | 对应配置                              |
+| -------------------------------------------------- | ------------------------------------- |
+| `LITE_STORE_CHUNK_SIZE`                            | `chunkSize`                           |
+| `LITE_STORE_STORAGE_FOLDER`                        | `storageFolder`                       |
+| `LITE_STORE_SORT_METHODS`                          | `sortMethods`                         |
+| `LITE_STORE_TIMEOUT`                               | `timeout`                             |
+| `LITE_STORE_ENCRYPTION_KEY_ITERATIONS`             | `encryption.keyIterations`            |
 | `LITE_STORE_PERFORMANCE_MAX_CONCURRENT_OPERATIONS` | `performance.maxConcurrentOperations` |
-| `LITE_STORE_PERFORMANCE_MEMORY_WARNING_THRESHOLD` | `performance.memoryWarningThreshold` |
-| `LITE_STORE_CACHE_MAX_SIZE` | `cache.maxSize` |
-| `LITE_STORE_CACHE_DEFAULT_EXPIRY` | `cache.defaultExpiry` |
-| `LITE_STORE_AUTO_SYNC_ENABLED` | `autoSync.enabled` |
-| `LITE_STORE_AUTO_SYNC_INTERVAL` | `autoSync.interval` |
+| `LITE_STORE_PERFORMANCE_MEMORY_WARNING_THRESHOLD`  | `performance.memoryWarningThreshold`  |
+| `LITE_STORE_CACHE_MAX_SIZE`                        | `cache.maxSize`                       |
+| `LITE_STORE_CACHE_DEFAULT_EXPIRY`                  | `cache.defaultExpiry`                 |
+| `LITE_STORE_AUTO_SYNC_ENABLED`                     | `autoSync.enabled`                    |
+| `LITE_STORE_AUTO_SYNC_INTERVAL`                    | `autoSync.interval`                   |
 
 ### 程序化配置
 
@@ -530,6 +525,7 @@ npm run qa:baseline:release
 - API 参考： [docs/API.zh-CN.md](./docs/API.zh-CN.md)
 - 英文 API 参考： [docs/API.en.md](./docs/API.en.md)
 - 运行时 QA 流程、lane 定义、verdict 语义与工件结构： [docs/EXPO_RUNTIME_QA.zh-CN.md](./docs/EXPO_RUNTIME_QA.zh-CN.md)
+- CI/CD 触发条件、npm 凭据、发布步骤与失败恢复： [docs/CI_CD.zh-CN.md](./docs/CI_CD.zh-CN.md)
 - 变更日志： [docs/CHANGELOG.zh-CN.md](./docs/CHANGELOG.zh-CN.md)
 - 英文变更日志： [docs/CHANGELOG.en.md](./docs/CHANGELOG.en.md)
 - 架构说明： [docs/ARCHITECTURE.zh-CN.md](./docs/ARCHITECTURE.zh-CN.md)

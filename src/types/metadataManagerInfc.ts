@@ -40,4 +40,9 @@ export interface IMetadataManager {
    * Get record count for a table
    */
   count(tableName: string): number;
+
+  /**
+   * Persist pending metadata immediately when the implementation supports it.
+   */
+  saveImmediately?(): Promise<void>;
 }

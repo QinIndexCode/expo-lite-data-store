@@ -17,15 +17,7 @@ import { StorageError } from '../../types/storageErrorInfc';
 
 const CHUNK_EXT = '.ldb';
 const OVERWRITE_JOURNAL_EXT = '.overwrite-journal';
-const MAX_DEBUG_CONTENT_PREVIEW = 160;
-
-const summarizeDebugText = (text: string): string => {
-  if (text.length <= MAX_DEBUG_CONTENT_PREVIEW) {
-    return text;
-  }
-
-  return `${text.slice(0, MAX_DEBUG_CONTENT_PREVIEW)}...[truncated ${text.length - MAX_DEBUG_CONTENT_PREVIEW} chars]`;
-};
+const APPEND_JOURNAL_EXT = '.append-journal';
 
 interface OverwriteJournal {
   version: 1;
@@ -34,6 +26,17 @@ interface OverwriteJournal {
   previousHash: string;
   targetHash: string;
   targetCount: number;
+  createdAt: number;
+}
+
+interface AppendJournal {
+  version: 1;
+  tableName: string;
+  previousCount: number;
+  previousChunks: number;
+  targetChunkIndices: number[];
+  targetCount: number;
+  targetHash: string;
   createdAt: number;
 }
 
@@ -63,6 +66,10 @@ export class ChunkedFileHandler extends FileHandlerBase {
     return `${getRootPathSync()}${this.tableName}${OVERWRITE_JOURNAL_EXT}`;
   }
 
+  private getAppendJournalPath(): string {
+    return `${getRootPathSync()}${this.tableName}${APPEND_JOURNAL_EXT}`;
+  }
+
   async write(data: Record<string, any>[]): Promise<void> {
     this.validateArrayData(data);
     const previousData = await this.readAll();
@@ -80,6 +87,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
         count: data.length,
         updatedAt: Date.now(),
       });
+      await this.persistMetadataIfSupported();
 
       await this.deleteOverwriteJournal();
     } catch (error) {
@@ -193,6 +201,156 @@ export class ChunkedFileHandler extends FileHandlerBase {
     }
   }
 
+  private async writeAppendJournal(
+    previousCount: number,
+    previousChunks: number,
+    targetChunkIndices: number[],
+    targetData: Record<string, any>[]
+  ): Promise<void> {
+    const journalPath = this.getAppendJournalPath();
+    const tempJournalPath = `${journalPath}.tmp`;
+    const journal: AppendJournal = {
+      version: 1,
+      tableName: this.tableName,
+      previousCount,
+      previousChunks,
+      targetChunkIndices,
+      targetCount: targetData.length,
+      targetHash: await this.computeHash(targetData),
+      createdAt: Date.now(),
+    };
+    const content = JSON.stringify({
+      journal,
+      hash: await this.computeHash(journal),
+    });
+
+    await withTimeout(
+      getFileSystem().writeAsStringAsync(tempJournalPath, content, { encoding: getEncodingType().UTF8 }),
+      10000,
+      `write append journal ${journalPath}`
+    );
+    await withTimeout(
+      getFileSystem().moveAsync({ from: tempJournalPath, to: journalPath }),
+      10000,
+      `publish append journal ${journalPath}`
+    );
+    this.clearFileInfoCache(journalPath);
+  }
+
+  private async readAppendJournal(): Promise<AppendJournal | null> {
+    const journalPath = this.getAppendJournalPath();
+    const info = await super.getFileInfo(journalPath);
+    if (!info.exists) {
+      return null;
+    }
+
+    try {
+      const text = await withTimeout(
+        getFileSystem().readAsStringAsync(journalPath, { encoding: getEncodingType().UTF8 }),
+        10000,
+        `read append journal ${journalPath}`
+      );
+      const parsed = JSON.parse(text);
+
+      if (!parsed || typeof parsed !== 'object' || !parsed.journal || typeof parsed.hash !== 'string') {
+        throw new StorageError(`APPEND JOURNAL ${journalPath} FORMAT_ERROR`, 'CORRUPTED_DATA');
+      }
+
+      const journal = parsed.journal as Partial<AppendJournal>;
+      const hash = await this.computeHash(journal);
+      if (hash !== parsed.hash) {
+        throw new StorageError(`APPEND JOURNAL ${journalPath} CORRUPTED: hash mismatch`, 'CORRUPTED_DATA');
+      }
+
+      if (
+        journal.version !== 1 ||
+        journal.tableName !== this.tableName ||
+        typeof journal.previousCount !== 'number' ||
+        typeof journal.previousChunks !== 'number' ||
+        !Array.isArray(journal.targetChunkIndices) ||
+        typeof journal.targetCount !== 'number' ||
+        typeof journal.targetHash !== 'string'
+      ) {
+        throw new StorageError(`APPEND JOURNAL ${journalPath} FORMAT_ERROR`, 'CORRUPTED_DATA');
+      }
+
+      return journal as AppendJournal;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+      if (error instanceof SyntaxError) {
+        throw new StorageError(`APPEND JOURNAL ${journalPath} FORMAT_ERROR: invalid JSON`, 'CORRUPTED_DATA', {
+          cause: error,
+        });
+      }
+      throw this.formatReadError(`READ APPEND JOURNAL ${journalPath} FAILED`, error);
+    }
+  }
+
+  private async deleteAppendJournal(suppressErrors = false): Promise<void> {
+    const journalPath = this.getAppendJournalPath();
+    try {
+      await withTimeout(
+        getFileSystem().deleteAsync(journalPath, { idempotent: true }),
+        10000,
+        `delete append journal ${journalPath}`
+      );
+      this.clearFileInfoCache(journalPath);
+    } catch (error) {
+      logger.warn(`DELETE APPEND JOURNAL ${journalPath} FAILED`, error);
+      if (!suppressErrors) {
+        throw error;
+      }
+    }
+  }
+
+  private async deleteChunkFiles(indices: number[]): Promise<void> {
+    const results = await Promise.allSettled(
+      indices.map(async index => {
+        const filePath = this.getChunkFilePath(index);
+        await withTimeout(
+          getFileSystem().deleteAsync(filePath, { idempotent: true }),
+          10000,
+          `delete appended chunk ${index}`
+        );
+        this.clearFileInfoCache(filePath);
+        this.chunkCache.delete(index);
+      })
+    );
+
+    const failedResult = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failedResult) {
+      throw new StorageError(`Failed to remove partial chunks for table ${this.tableName}`, 'FILE_DELETE_FAILED', {
+        cause: failedResult.reason,
+        suggestion: 'Retry the operation so the pending append journal can finish recovery',
+      });
+    }
+  }
+
+  private async recoverPendingAppendJournal(): Promise<void> {
+    const journal = await this.readAppendJournal();
+    if (!journal) {
+      return;
+    }
+
+    logger.warn(`Rolling back pending append journal for chunked table ${this.tableName}`);
+    await this.deleteChunkFiles(journal.targetChunkIndices);
+    this.metadataManager.update(this.tableName, {
+      count: journal.previousCount,
+      chunks: journal.previousChunks,
+      updatedAt: Date.now(),
+    });
+    await this.persistMetadataIfSupported();
+    await this.deleteAppendJournal();
+  }
+
+  private async persistMetadataIfSupported(): Promise<void> {
+    if (typeof this.metadataManager.saveImmediately === 'function') {
+      await this.metadataManager.saveImmediately();
+    }
+  }
+
   private async recoverPendingOverwriteJournal(): Promise<void> {
     const journal = await this.readOverwriteJournal();
     if (!journal) {
@@ -201,7 +359,10 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
     const previousHash = await this.computeHash(journal.previousData);
     if (previousHash !== journal.previousHash) {
-      throw new StorageError(`OVERWRITE JOURNAL ${this.getOverwriteJournalPath()} CORRUPTED: previous data hash mismatch`, 'CORRUPTED_DATA');
+      throw new StorageError(
+        `OVERWRITE JOURNAL ${this.getOverwriteJournalPath()} CORRUPTED: previous data hash mismatch`,
+        'CORRUPTED_DATA'
+      );
     }
 
     let currentData: Record<string, any>[] | null = null;
@@ -233,9 +394,11 @@ export class ChunkedFileHandler extends FileHandlerBase {
   }
 
   async append(data: Record<string, any>[]) {
+    const writtenChunkIndices: number[] = [];
     try {
       this.validateArrayData(data);
       if (data.length === 0) return;
+      await this.recoverPendingAppendJournal();
 
       await withTimeout(
         getFileSystem().makeDirectoryAsync(this.tableDirPath, { intermediates: true }),
@@ -257,22 +420,29 @@ export class ChunkedFileHandler extends FileHandlerBase {
       const chunkSize = configManager.getConfig().chunkSize || 1024 * 1024;
       const chunksToWrite = await this.preprocessData(data, chunkSize);
       const chunkIndex = currentMeta.chunks || 0;
+      const targetChunkIndices = chunksToWrite.map((_, index) => chunkIndex + index);
+      await this.writeAppendJournal(currentMeta.count, chunkIndex, targetChunkIndices, data);
       const parallelLimit = 4;
-      const writePromises: Promise<void>[] = [];
 
-      for (let i = 0; i < chunksToWrite.length; i++) {
-        const chunkData = chunksToWrite[i];
-        const currentIndex = chunkIndex + i;
-        writePromises.push(this.writeChunk(currentIndex, chunkData || []));
+      for (let i = 0; i < chunksToWrite.length; i += parallelLimit) {
+        const batch = chunksToWrite.slice(i, i + parallelLimit);
+        const results = await Promise.allSettled(
+          batch.map((chunkData, batchIndex) => {
+            const currentIndex = chunkIndex + i + batchIndex;
+            return this.writeChunk(currentIndex, chunkData || []).then(() => currentIndex);
+          })
+        );
 
-        if (writePromises.length >= parallelLimit) {
-          await Promise.all(writePromises);
-          writePromises.length = 0;
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            writtenChunkIndices.push(result.value);
+          }
         }
-      }
 
-      if (writePromises.length > 0) {
-        await Promise.all(writePromises);
+        const failedResult = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        if (failedResult) {
+          throw failedResult.reason;
+        }
       }
 
       this.metadataManager.update(this.tableName, {
@@ -281,7 +451,19 @@ export class ChunkedFileHandler extends FileHandlerBase {
         chunks: chunkIndex + chunksToWrite.length,
         updatedAt: Date.now(),
       });
+      await this.persistMetadataIfSupported();
+      await this.deleteAppendJournal();
     } catch (error) {
+      let chunksCleaned = false;
+      try {
+        await this.deleteChunkFiles(writtenChunkIndices);
+        chunksCleaned = true;
+      } catch (cleanupError) {
+        logger.error(`failed to remove partial chunks for table ${this.tableName}`, cleanupError);
+      }
+      if (chunksCleaned) {
+        await this.deleteAppendJournal(true);
+      }
       logger.error(`append data to table ${this.tableName} failed`, error);
       throw this.formatWriteError(`append data to table ${this.tableName} failed`, error);
     }
@@ -427,6 +609,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
   async preloadChunks(chunkIndices: number[]): Promise<void> {
     await this.recoverPendingOverwriteJournal();
+    await this.recoverPendingAppendJournal();
     const chunkFiles = await this.getChunkFiles();
     const filesToLoad = chunkIndices
       .map(index => {
@@ -478,9 +661,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
         `READ CHUNK ${filePath} CONTENT`
       );
 
-      logger.debug(
-        `Read chunk file ${filePath}, contentLength=${text.length}, contentPreview=${summarizeDebugText(text)}`
-      );
+      logger.debug(`Read chunk file ${filePath}, contentLength=${text.length}`);
 
       const parsed = JSON.parse(text);
 
@@ -520,6 +701,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
   async readAll(): Promise<Record<string, any>[]> {
     await this.recoverPendingOverwriteJournal();
+    await this.recoverPendingAppendJournal();
     return this.readAllChunks();
   }
 
@@ -527,7 +709,31 @@ export class ChunkedFileHandler extends FileHandlerBase {
     const chunkFiles = await this.getChunkFiles();
 
     if (chunkFiles.length === 0) {
+      const expectedChunks = this.metadataManager.get(this.tableName)?.chunks;
+      if (expectedChunks && expectedChunks > 0) {
+        throw new StorageError(
+          `CHUNK SET ${this.tableName} INCOMPLETE: expected ${expectedChunks} chunks but found none`,
+          'CORRUPTED_DATA'
+        );
+      }
       return [];
+    }
+
+    const chunkIndices = chunkFiles.map(filePath => {
+      const fileName = filePath.split('/').pop() || '';
+      return parseInt(fileName.replace(CHUNK_EXT, ''), 10);
+    });
+    const expectedChunks = this.metadataManager.get(this.tableName)?.chunks;
+    const hasContiguousIndices = chunkIndices.every((chunkIndex, position) => chunkIndex === position);
+    const matchesMetadata = expectedChunks === undefined || expectedChunks === chunkFiles.length;
+    if (!hasContiguousIndices || !matchesMetadata) {
+      throw new StorageError(
+        `CHUNK SET ${this.tableName} INCOMPLETE: expected ${expectedChunks ?? 'contiguous'} chunks, found indices ${chunkIndices.join(',')}`,
+        'CORRUPTED_DATA',
+        {
+          suggestion: 'Restore the missing chunk files from a known-good backup before reading the table',
+        }
+      );
     }
 
     const allChunkData = new Map<number, Record<string, any>[]>();
@@ -575,9 +781,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       }
     }
 
-    return [...allChunkData.entries()]
-      .sort(([left], [right]) => left - right)
-      .flatMap(([, data]) => data);
+    return [...allChunkData.entries()].sort(([left], [right]) => left - right).flatMap(([, data]) => data);
   }
 
   private async getChunkFiles(): Promise<string[]> {
@@ -603,7 +807,9 @@ export class ChunkedFileHandler extends FileHandlerBase {
         logger.debug(
           `List directory failed, falling back to file detection: ${listError instanceof Error ? listError.message : 'Unknown error'}`
         );
-        for (let i = 0; i < 20; i++) {
+        const knownChunkCount = this.metadataManager.get(this.tableName)?.chunks ?? 0;
+        const probeLimit = Math.max(20, knownChunkCount);
+        for (let i = 0; i < probeLimit; i++) {
           const filePath = this.getChunkFilePath(i);
           try {
             const fileInfo = await super.getFileInfo(filePath);
@@ -627,6 +833,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
   async readRange(startIndex: number, endIndex: number): Promise<Record<string, any>[]> {
     await this.recoverPendingOverwriteJournal();
+    await this.recoverPendingAppendJournal();
     const allChunkFiles = await this.getChunkFiles();
     const rangeChunkFiles = allChunkFiles.filter(filePath => {
       const fileName = filePath.split('/').pop() || '';
@@ -662,6 +869,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
         chunks: 0,
         updatedAt: Date.now(),
       });
+      await this.persistMetadataIfSupported();
     } catch (error) {
       logger.error('CLEAR CHUNKED TABLE FAILED', error);
       throw this.formatDeleteError('CLEAR CHUNKED TABLE FAILED', error);

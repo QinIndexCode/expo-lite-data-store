@@ -6,6 +6,8 @@
  */
 import type { IStorageAdapter } from '../types/storageAdapterInfc';
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from '../types/storageTypes';
+import type { LiteStoreConfig } from '../types/config';
+import type { TableSchema } from './meta/MetadataManager';
 import {
   decrypt,
   getMasterKey,
@@ -106,6 +108,20 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     }
   }
 
+  private async normalizeFullTableWriteResult(
+    tableName: string,
+    result: WriteResult,
+    written: number,
+    totalAfterWrite: number
+  ): Promise<WriteResult> {
+    await storage.setLogicalRecordCount(tableName, totalAfterWrite);
+    return {
+      ...result,
+      written,
+      totalAfterWrite,
+    };
+  }
+
   private async key() {
     return await this.getOrInitKey();
   }
@@ -123,6 +139,57 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   private clearTableCache(tableName: string): void {
     this.cachedData.delete(tableName);
     this.queryIndexes.delete(tableName);
+  }
+
+  private resolveConfiguredEncryptedFields(tableMeta: TableSchema | undefined, config: LiteStoreConfig): string[] {
+    const tableEncryptedFields = tableMeta?.encryptedFields;
+    if (tableEncryptedFields && tableEncryptedFields.length > 0) {
+      return tableEncryptedFields;
+    }
+
+    return config.encryption.encryptedFields || [];
+  }
+
+  private resolveAllRecordFields(data: Record<string, unknown>[]): string[] {
+    const fields = new Set<string>();
+    for (const item of data) {
+      Object.keys(item).forEach(field => fields.add(field));
+    }
+    return [...fields];
+  }
+
+  private resolveFieldsForWrite(
+    data: Record<string, unknown>[],
+    tableMeta: TableSchema | undefined,
+    config: LiteStoreConfig
+  ): string[] {
+    const configuredFields = this.resolveConfiguredEncryptedFields(tableMeta, config);
+    if (configuredFields.length > 0) {
+      return configuredFields;
+    }
+
+    if (tableMeta?.encrypted) {
+      return this.resolveAllRecordFields(data);
+    }
+
+    return [];
+  }
+
+  private resolveFieldsForRead(
+    raw: Record<string, unknown>[],
+    tableMeta: TableSchema | undefined,
+    config: LiteStoreConfig
+  ): string[] {
+    const configuredFields = this.resolveConfiguredEncryptedFields(tableMeta, config);
+    if (configuredFields.length > 0) {
+      return configuredFields;
+    }
+
+    if (tableMeta?.encrypted) {
+      return this.resolveAllRecordFields(raw);
+    }
+
+    return [];
   }
 
   /**
@@ -264,41 +331,21 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
         if (useFieldLevelEncryption) {
           // Field-level encryption mode
-          const encryptedFields =
-            tableMeta?.encryptedFields?.length > 0
-              ? tableMeta.encryptedFields
-              : config.encryption.encryptedFields || [];
+          const encryptedFields = this.resolveFieldsForWrite(finalData, tableMeta, config);
 
-          if (encryptedFields.length > 0) {
-            if (config.encryption.useBulkOperations && finalData.length > 1) {
-              encryptedData = await encryptFieldsBulk(finalData, {
+          if (config.encryption.useBulkOperations && finalData.length > 1) {
+            encryptedData = await encryptFieldsBulk(finalData, {
+              fields: encryptedFields,
+              masterKey: key,
+            });
+          } else {
+            const encryptionPromises = finalData.map(item =>
+              encryptFields(item, {
                 fields: encryptedFields,
                 masterKey: key,
-              });
-            } else {
-              const encryptionPromises = finalData.map(item =>
-                encryptFields(item, {
-                  fields: encryptedFields,
-                  masterKey: key,
-                })
-              );
-              encryptedData = await Promise.all(encryptionPromises);
-            }
-          } else {
-            if (config.encryption.useBulkOperations && finalData.length > 1) {
-              encryptedData = await encryptFieldsBulk(finalData, {
-                fields: Object.keys(finalData[0] || {}),
-                masterKey: key,
-              });
-            } else {
-              const encryptionPromises = finalData.map(item =>
-                encryptFields(item, {
-                  fields: Object.keys(item),
-                  masterKey: key,
-                })
-              );
-              encryptedData = await Promise.all(encryptionPromises);
-            }
+              })
+            );
+            encryptedData = await Promise.all(encryptionPromises);
           }
 
           return storage.write(tableName, encryptedData, { ...options, mode: 'overwrite' });
@@ -317,7 +364,8 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
           }
         }
 
-        return storage.write(tableName, encryptedData, { ...options, mode: 'overwrite' });
+        const result = await storage.write(tableName, encryptedData, { ...options, mode: 'overwrite' });
+        return this.normalizeFullTableWriteResult(tableName, result, finalData.length, finalData.length);
       },
       cause =>
         StorageErrorHandler.createGeneralError(
@@ -344,6 +392,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         const key = await this.key();
 
         let encryptedData: Record<string, any>[] = [];
+        let fullTableTotal: number | undefined;
 
         // Get配置，优先使用表级配置，然后是全局配置
         const config = configManager.getConfig();
@@ -372,51 +421,23 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         if (useFieldLevelEncryption) {
           // Field-level encryption mode - 性能更好，支持增量写入
           // Prefer table metadata encrypted fields over global config
-          const encryptedFields =
-            tableMeta?.encryptedFields?.length > 0
-              ? tableMeta.encryptedFields
-              : config.encryption.encryptedFields || [];
+          const encryptedFields = this.resolveFieldsForWrite(finalData, tableMeta, config);
 
-          // Without specified fields, still use field-level (encrypt all fields)
-          // This gives better performance while maintaining security
-          if (encryptedFields.length > 0) {
-            // Has specified fields, encrypt only those
-            if (config.encryption.useBulkOperations && finalData.length > 1) {
-              // Batch field-level encryption - 只加密新增数据
-              encryptedData = await encryptFieldsBulk(finalData, {
+          if (config.encryption.useBulkOperations && finalData.length > 1) {
+            // Batch field-level encryption - 只加密新增数据
+            encryptedData = await encryptFieldsBulk(finalData, {
+              fields: encryptedFields,
+              masterKey: key,
+            });
+          } else {
+            // Single field-level encryption - 只加密新增数据
+            const encryptionPromises = finalData.map(item =>
+              encryptFields(item, {
                 fields: encryptedFields,
                 masterKey: key,
-              });
-            } else {
-              // Single field-level encryption - 只加密新增数据
-              const encryptionPromises = finalData.map(item =>
-                encryptFields(item, {
-                  fields: encryptedFields,
-                  masterKey: key,
-                })
-              );
-              encryptedData = await Promise.all(encryptionPromises);
-            }
-          } else {
-            // No fields specified, encrypt all fields
-            // This is the optimization key: by default，即使没有配置encryptedFields，也使用字段级加密
-            // This gives better performance than full-table encryption
-            if (config.encryption.useBulkOperations && finalData.length > 1) {
-              // Batch encrypt all fields
-              encryptedData = await encryptFieldsBulk(finalData, {
-                fields: Object.keys(finalData[0] || {}), // Encrypt所有字段
-                masterKey: key,
-              });
-            } else {
-              // Single encrypt all fields
-              const encryptionPromises = finalData.map(item =>
-                encryptFields(item, {
-                  fields: Object.keys(item), // Encrypt所有字段
-                  masterKey: key,
-                })
-              );
-              encryptedData = await Promise.all(encryptionPromises);
-            }
+              })
+            );
+            encryptedData = await Promise.all(encryptionPromises);
           }
 
           // Field-level encryption supports direct append，不需要重新加密整个表
@@ -472,11 +493,13 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
               const serializedData = JSON.stringify(combinedData);
               const encrypted = await encrypt(serializedData, key);
               encryptedData = [{ __enc: encrypted }];
+              fullTableTotal = combinedData.length;
             } else {
               // Overwrite mode: Direct encrypted write
               const serializedData = JSON.stringify(finalData);
               const encrypted = await encrypt(serializedData, key);
               encryptedData = [{ __enc: encrypted }];
+              fullTableTotal = finalData.length;
 
               // Clear cache because data was overwritten
               const cacheKey = `__enc_full_table_${tableName}`;
@@ -517,7 +540,11 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
         // Removeencrypted和requireAuthOnAccess选项，因为数据已经被加密了，避免重复加密
         const { encrypted: encOpt, requireAuthOnAccess: reqAuth, ...finalWriteOptions } = options || {};
-        return storage.write(tableName, encryptedData, { ...finalWriteOptions, mode: options?.mode });
+        const result = await storage.write(tableName, encryptedData, { ...finalWriteOptions, mode: options?.mode });
+        if (fullTableTotal !== undefined) {
+          return this.normalizeFullTableWriteResult(tableName, result, finalData.length, fullTableTotal);
+        }
+        return result;
       },
       cause =>
         StorageErrorHandler.createGeneralError(
@@ -554,8 +581,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         const tableMeta = await this.getTableMeta(tableName);
         const config = configManager.getConfig();
         // Prefer table metadata encrypted fields over global config
-        const encryptedFields =
-          tableMeta?.encryptedFields?.length > 0 ? tableMeta.encryptedFields : config.encryption.encryptedFields || [];
+        const encryptedFields = this.resolveFieldsForRead(raw, tableMeta, config);
 
         if (first?.['__enc']) {
           // Full data decryption
@@ -643,8 +669,18 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
    * 对于加密表，计数直接从数据读取，不涉及元数据
    */
   async verifyCount(tableName: string): Promise<{ metadata: number; actual: number; match: boolean }> {
-    // Encrypt适配器：直接从底层存储适配器获取验证结果
-    return storage.verifyCount(tableName);
+    const tableMeta = await this.getTableMeta(tableName);
+    if (!tableMeta?.encryptFullTable) {
+      return storage.verifyCount(tableName);
+    }
+
+    const metadata = tableMeta.count ?? 0;
+    const actual = await this.count(tableName);
+    const match = metadata === actual;
+    if (!match) {
+      await storage.setLogicalRecordCount(tableName, actual);
+    }
+    return { metadata, actual, match };
   }
 
   async findOne(tableName: string, filter: Record<string, any>, options?: any): Promise<Record<string, any> | null> {
@@ -794,13 +830,11 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         if (operation.where) {
           // Update with where condition
           const matchedItems = QueryEngine.filter(finalData, operation.where);
-          for (const matchedItem of matchedItems) {
-            const index = finalData.findIndex(item => item.id === matchedItem.id);
-            if (index !== -1) {
-              finalData[index] = QueryEngine.update(finalData[index], operation.data);
-              writtenCount++;
-            }
-          }
+          const matchedItemRefs = new Set(matchedItems);
+          finalData = finalData.map(item =>
+            matchedItemRefs.has(item) ? QueryEngine.update(item, operation.data) : item
+          );
+          writtenCount += matchedItems.length;
         } else {
           // Update by id
           const index = finalData.findIndex(item => item.id === operation.data.id);
@@ -814,13 +848,9 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         if (operation.where) {
           // Delete with where condition
           const matchedItems = QueryEngine.filter(finalData, operation.where);
-          for (const matchedItem of matchedItems) {
-            const index = finalData.findIndex(item => item.id === matchedItem.id);
-            if (index !== -1) {
-              finalData.splice(index, 1);
-              writtenCount++;
-            }
-          }
+          const matchedItemRefs = new Set(matchedItems);
+          finalData = finalData.filter(item => !matchedItemRefs.has(item));
+          writtenCount += matchedItems.length;
         } else {
           // Delete所有数据
           finalData = [];
@@ -837,22 +867,9 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   async migrateToChunked(tableName: string): Promise<void> {
-    const tableMeta = await this.getTableMeta(tableName);
-
-    // Read解密后的数据
-    const data = await this.read(tableName);
-
-    // Delete原加密表
-    await this.deleteTable(tableName);
-
-    // Create新的分片表并写入数据
-    await this.createTable(tableName, {
-      initialData: data,
-      mode: 'chunked',
-      encrypted: tableMeta?.encrypted ?? true,
-      encryptedFields: tableMeta?.encryptedFields ?? [],
-      encryptFullTable: tableMeta?.encryptFullTable ?? false,
-    });
+    this.clearTableCache(tableName);
+    await storage.migrateToChunked(tableName);
+    this.clearTableCache(tableName);
   }
 
   async delete(tableName: string, where: Record<string, any>, options?: any): Promise<number> {
@@ -865,11 +882,8 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     // 2. 使用QueryEngine处理复杂条件过滤
     const matchedItems = QueryEngine.filter(allData, where);
 
-    // 3. 过滤掉匹配的记录
-    const remainingData = allData.filter(item => {
-      const itemId = item.id || item._id;
-      return !matchedItems.some(matched => matched.id === itemId || matched._id === itemId);
-    });
+    const matchedItemRefs = new Set(matchedItems);
+    const remainingData = allData.filter(item => !matchedItemRefs.has(item));
 
     // 4. 重新写入数据
     await this.write(tableName, remainingData, { ...options, mode: 'overwrite' });
@@ -913,13 +927,11 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     // Use QueryEngine for complex condition filtering
     const matchedItems = QueryEngine.filter(allData, where);
 
-    // Create匹配项的ID映射，用于快速查找
-    const matchedIds = new Set(matchedItems.map(item => item.id || item._id));
+    const matchedItemRefs = new Set(matchedItems);
 
     // Update数据
     const updatedData = allData.map(item => {
-      const itemId = item.id || item._id;
-      if (matchedIds.has(itemId)) {
+      if (matchedItemRefs.has(item)) {
         updatedCount++;
         return QueryEngine.update(item, data);
       }
@@ -945,7 +957,8 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     const removedCount = matchedItems.length;
 
     // 3. 过滤掉匹配的记录
-    const remainingData = allData.filter(item => !matchedItems.some(matched => matched.id === item.id));
+    const matchedItemRefs = new Set(matchedItems);
+    const remainingData = allData.filter(item => !matchedItemRefs.has(item));
 
     // 4. 使用write方法重新写入数据，确保加密逻辑正确应用
     await this.write(tableName, remainingData, options);

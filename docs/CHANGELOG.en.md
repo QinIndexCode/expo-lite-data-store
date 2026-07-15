@@ -7,23 +7,37 @@ All notable changes to this project will be documented in this file.
 ## [2.0.2] - 2026-06-28
 
 ### Changed
+
 - Aligned the local React development dependency exactly to `19.2.3`, matching the Expo SDK 56 dependency validation contract used by `expo-doctor`
-- Updated the GitHub npm publish workflow to run the full `prepublishOnly` gate and `npm pack --dry-run --ignore-scripts` before publishing
-- Added a manual `workflow_dispatch` entry point for the npm publish workflow, while retaining tag-triggered publishing for `v*.*.*` tags
+- Added a push/PR CI workflow that installs deterministically, type-checks, tests, builds, runs the Expo consumer smoke test, and verifies package contents
+- Replaced the manually disabled npm workflow with a new tag-only release workflow that validates tag/package version alignment and npm authentication before publishing
+- Added a bilingual CI/CD operations runbook covering repository secrets, release sequencing, remote observation, and failure recovery
+- Disabled auto-sync by default so importing or initializing the library does not start background dirty-cache timers unless the host app opts in explicitly
 
 ### Fixed
+
 - Restored the Expo consumer smoke test after npm resolved React to a newer patch version that Expo SDK 56 rejected
 - Made the GitHub publish workflow match the documented release gate before `npm publish --ignore-scripts --access public --provenance`
+- Fixed `where`-based update, delete, bulk, and transaction paths for records that do not carry `id` or `_id` fields
+- Added chunked append recovery journals and partial-chunk cleanup so failed appends leave the previous table contents readable
+- Made encrypted tables with an empty `encryptedFields` list consistently encrypt and decrypt all record fields
+- Flushed table/write metadata immediately and preserved the actual chunk count for chunked `initialData`
+- Serialized atomic metadata publication so overlapping flushes cannot lose later table updates
+- Committed chunk append metadata before deleting its recovery journal and rejected incomplete chunk sets on read
+- Preserved schema and encryption metadata during chunk migration without decrypting and rewriting encrypted tables
+- Removed transaction-created tables after a partially failed commit and made explicit rollback discard queued work without disk rewrites
 
 ## [2.0.1] - 2026-06-12
 
 ### Changed
+
 - Upgraded the supported Expo install contract to Expo SDK 56
 - Aligned Expo runtime peers and local development dependencies with `expo@~56.0.12`, `expo-constants@~56.0.18`, `expo-crypto@~56.0.4`, `expo-file-system@~56.0.8`, `expo-secure-store@~56.0.4`, React 19.2, React Native 0.85, and TypeScript 6.0
 - Updated README, runtime QA guidance, package metadata, and source headers to describe the 2.0.1 / SDK 56 release candidate consistently
 - Added `package-lock.json` to the release-controlled dependency surface and expanded the publish gate with production and no-high audit checks
 
 ### Fixed
+
 - Hardened storage reliability around chunk overwrite recovery, stale chunk-cache invalidation, metadata corruption handling, single-file corruption handling, and transaction rollback snapshots
 - Hardened security behavior so invalid table names are rejected at the adapter boundary and production encryption fails closed when secure storage or secure randomness is unavailable
 - Made the stress test bounded and reproducible by default while preserving environment-controlled scale-up
@@ -31,21 +45,25 @@ All notable changes to this project will be documented in this file.
 ## [2.0.0] - 2026-04-23
 
 ### Added
+
 - Formalized the Expo SDK 54 consumer installation contract in the root documentation, including managed-compatible and native flagship dependency paths
 - Added a smoke-test regression suite for the Expo consumer packaging workflow
 
 ### Changed
+
 - Promoted the package from beta to the stable `2.0.0` line
 - Standardized the developer-facing documentation set across the root README, API reference, runtime QA guide, changelog, and update log
 - Declared `babel-preset-expo` and `@babel/plugin-transform-modules-commonjs` explicitly for reproducible local Jest execution
 
 ### Fixed
+
 - `smoke:expo-consumer` now self-heals missing build artifacts before packing and rejects tarballs that omit `dist/js`, `dist/cjs`, or `dist/types`
 - Release verification now passes end to end with `npm run prepublishOnly`, full Jest coverage for the current suite set, and `npm pack --dry-run --ignore-scripts`
 
 ## [2.0.0-beta.5] - 2026-04-04
 
 ### Added
+
 - AES-256-GCM encryption mode (NIST SP 800-38D and OWASP MASVS 2026 compliant)
 - PBKDF2 + HKDF two-tier key derivation (600,000 iterations default, ~3μs per-record after initial ~2s)
 - Automatic encryption version detection (GCM for new data, CTR+HMAC backward compatible)
@@ -65,6 +83,7 @@ All notable changes to this project will be documented in this file.
 - `docs/COMMENT_SPECIFICATION.md` - Unified comment specification
 
 ### Changed
+
 - PBKDF2 default iterations increased from 120,000 to 600,000 (OWASP 2026 recommendation)
 - `encryption.algorithm` now supports 'AES-CTR' | 'AES-GCM' | 'auto' (default: 'auto')
 - Resolved ConfigManager circular dependency with ROOTPath via PathHelper
@@ -92,6 +111,7 @@ All notable changes to this project will be documented in this file.
 - Fixed `sortAlgorithm` type from `any` to union type
 
 ### Fixed
+
 - Import extension inconsistency (.js vs .ts in 3 files)
 - Cross-platform build script (Windows `del` command)
 - ConfigManager circular dependency with ROOTPath
@@ -102,6 +122,7 @@ All notable changes to this project will be documented in this file.
 - Test mocks for `hkdfDerive` function
 
 ### Performance
+
 - $like query: 20-50% faster with precompiled regex patterns
 - Cache expiry cleanup: 5-10x faster with min-heap
 - Cache size calculation: 10-100x faster with JSON approximation
@@ -112,6 +133,7 @@ All notable changes to this project will be documented in this file.
 ## [2.0.0-beta.4] - 2026-01-28
 
 ### Changed
+
 - Reduced PBKDF2 iterations for Expo Go environment
 - Added react-native-quick-crypto for native KDF acceleration
 - Cached native module loading to avoid repeated require calls
@@ -120,11 +142,13 @@ All notable changes to this project will be documented in this file.
 - Hash input now uses TextEncoder encoding
 
 ### Added
+
 - Test for Expo Go iteration count reduction behavior
 
 ## [2.0.0-beta.3] - 2026-01-22
 
 ### Changed
+
 - Migrated from crypto-es to @noble/ciphers and @noble/hashes
 - Simplified package management (single package.json)
 - Implemented AES-256-CTR + HMAC-SHA512 encryption
@@ -134,16 +158,19 @@ All notable changes to this project will be documented in this file.
 ## [2.0.0-beta.2] - 2025-12-24
 
 ### Fixed
+
 - Prototype pollution vulnerability in ConfigManager.ts
 - Added key name validation to prevent malicious key modification
 
 ### Added
+
 - GitHub-standard SECURITY.md file
 - Updated architecture documentation (Chinese and English)
 
 ## [2.0.0-beta.1] - 2025-12-18
 
 ### Changed
+
 - Enhanced field-level encryption logic
 - Removed enableFieldLevelEncryption config option (auto-based on encryptedFields)
 - Optimized encryption key management and cache
@@ -155,6 +182,7 @@ All notable changes to this project will be documented in this file.
 ## [1.1.0] - 2025-12-16
 
 ### Changed
+
 - Removed config generation script on npm install
 - Fixed config file usage in Expo projects
 - Removed config API (direct config file editing)
@@ -162,6 +190,7 @@ All notable changes to this project will be documented in this file.
 - Unified language usage in documentation
 
 ### Fixed
+
 - CacheManager handling of removed cache.enableCompression property
 - Removed references to deleted requireAuthOnAccess property
 - First startup "delete from table app_settings failed" error
@@ -169,12 +198,14 @@ All notable changes to this project will be documented in this file.
 ## [1.0.5] - 2025-12-12
 
 ### Fixed
+
 - Cache issues with update and delete operations
 - Missing interface methods
 
 ## [1.0.0] - 2025-12-08
 
 ### Changed
+
 - Implemented secure npm publish workflow
 - Refactored npm publish workflow
 - Updated documentation and code
@@ -184,6 +215,7 @@ All notable changes to this project will be documented in this file.
 ## [1.0.0] - 2025-12-07
 
 ### Changed
+
 - Improved README.md quality
 - Enhanced functionality descriptions
 - Removed test coverage directory from commits
@@ -192,31 +224,37 @@ All notable changes to this project will be documented in this file.
 ## [1.0.0] - 2025-12-06
 
 ### Added
+
 - Wiki documentation
 - Improved architecture and system stability
 
 ### Fixed
+
 - Main entry point not correctly calling some features
 
 ## [1.0.0] - 2025-12-03
 
 ### Changed
+
 - Optimized encryption field handling for correct encryption/decryption on read/write
 
 ## [0.1.0] - 2025-11-29
 
 ### Added
+
 - Updated test files and configuration
 - Default export from src/index.ts
 - English README link
 
 ### Changed
+
 - Adjusted chunkSize to 5MB
 - Updated README.md MIT license link
 
 ## [0.1.0] - 2025-11-28
 
 ### Changed
+
 - Refactored core architecture with complete storage engine
 - Updated documentation and encrypted storage adapter
 - Added API tests
@@ -225,23 +263,27 @@ All notable changes to this project will be documented in this file.
 ## [0.1.0] - 2025-11-27
 
 ### Changed
+
 - Code modifications for improved performance and stability
 
 ## [0.1.0] - 2025-11-26
 
 ### Added
+
 - Cache adapter interface
 - Storage error code interface
 - Sorting tools for data sorting
 - Merge data and cache utilities
 
 ### Changed
+
 - Fixed encryption decorator, file system adapter, chunked file handler
 - Renamed ldb.config.js to liteStore.config.js
 
 ## [0.1.0] - 2025-11-25
 
 ### Added
+
 - File system adapter
 - Chunked file handler
 - Single file handler
@@ -253,6 +295,7 @@ All notable changes to this project will be documented in this file.
 ## [0.0.1] - 2025-11-23
 
 ### Added
+
 - File system storage adapter
 - Core storage
 - Chunked file handler
@@ -264,11 +307,13 @@ All notable changes to this project will be documented in this file.
 ## [0.0.1] - 2025-11-19
 
 ### Added
+
 - Encrypted storage adapter (AES-CTR mode)
 
 ## [0.0.1] - 2025-11-17
 
 ### Added
+
 - Basic project skeleton
 - Encryption support (AES-CTR mode)
 - Basic StorageAdapter interface
@@ -276,5 +321,6 @@ All notable changes to this project will be documented in this file.
 ## [0.0.1] - 2025-11-15
 
 ### Added
+
 - README.md with project information
 - Initial project commit

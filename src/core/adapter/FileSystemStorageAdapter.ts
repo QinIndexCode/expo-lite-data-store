@@ -80,7 +80,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       | {
           type: 'delete';
           where: Record<string, any>;
-      }
+        }
     >
   ): Record<string, any>[] | null {
     if (operations.length === 0) {
@@ -100,9 +100,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       return null;
     }
 
-    return insertOperations.flatMap(operation =>
-      Array.isArray(operation.data) ? operation.data : [operation.data]
-    );
+    return insertOperations.flatMap(operation => (Array.isArray(operation.data) ? operation.data : [operation.data]));
   }
 
   /**
@@ -370,7 +368,11 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
         // Transaction handling logic
         if (this.transactionService.isInTransaction()) {
           const currentData = await this.dataReader.read(tableName, { bypassCache: true });
-          this.transactionService.saveSnapshot(tableName, currentData);
+          this.transactionService.saveSnapshot(
+            tableName,
+            currentData,
+            this.metadataManager.get(tableName) !== undefined
+          );
 
           // Add operation to transaction queue
           this.transactionService.addOperation({
@@ -466,7 +468,11 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
         // Transaction handling logic
         if (this.transactionService.isInTransaction() && !options?.directWrite) {
           const currentData = await this.dataReader.read(tableName, { bypassCache: true });
-          this.transactionService.saveSnapshot(tableName, currentData);
+          this.transactionService.saveSnapshot(
+            tableName,
+            currentData,
+            this.metadataManager.get(tableName) !== undefined
+          );
 
           // Add operation to transaction queue
           this.transactionService.addOperation({
@@ -596,6 +602,33 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     return this.metadataManager.get(tableName);
   }
 
+  /**
+   * Keep decorator-level logical record counts in the shared metadata store.
+   * Full-table encryption stores one physical envelope for many logical rows,
+   * so the encrypted decorator must publish the logical count after a write.
+   * @internal
+   */
+  async setLogicalRecordCount(tableName: string, count: number): Promise<void> {
+    await this.ensureInitialized();
+    this.validateTableName(tableName);
+
+    if (!Number.isSafeInteger(count) || count < 0) {
+      throw new StorageError('Invalid logical record count', 'FILE_CONTENT_INVALID', {
+        details: `Expected a non-negative safe integer, received: ${count}`,
+      });
+    }
+
+    if (!this.metadataManager.get(tableName)) {
+      throw new StorageError(`Table '${tableName}' does not exist`, 'TABLE_NOT_FOUND');
+    }
+
+    this.metadataManager.update(tableName, {
+      count,
+      updatedAt: Date.now(),
+    });
+    await this.metadataManager.saveImmediately?.();
+  }
+
   private async recoverTableMetaFromFiles(tableName: string, recordCount: number): Promise<any | undefined> {
     this.validateTableName(tableName);
     const fileSystem = getFileSystem();
@@ -699,7 +732,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     if (this.transactionService.isInTransaction() && !options?.directWrite) {
       // Save数据快照（只在第一次操作该表时保存），用于事务回滚
       const currentData = await this.dataReader.read(tableName, { bypassCache: true });
-      this.transactionService.saveSnapshot(tableName, currentData);
+      this.transactionService.saveSnapshot(tableName, currentData, this.metadataManager.get(tableName) !== undefined);
 
       // Add operation to transaction queue
       this.transactionService.addOperation({
@@ -789,13 +822,13 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       return 0;
     }
 
-    // Create匹配项的ID映射，用于快速查找
-    const matchedIds = new Set(matchedItems.map(item => item.id || item._id));
+    // Use object identity from QueryEngine.filter instead of id/_id so tables
+    // without an identifier field still update only the matched rows.
+    const matchedItemRefs = new Set(matchedItems);
 
     // Update数据
     const finalData = allData.map((item: Record<string, any>) => {
-      const itemId = item.id || item._id;
-      if (matchedIds.has(itemId)) {
+      if (matchedItemRefs.has(item)) {
         return QueryEngine.update(item, data);
       }
       return item;
@@ -803,7 +836,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
     if (this.transactionService.isInTransaction() && !options?.directWrite) {
       const currentData = await this.dataReader.read(tableName, { bypassCache: true });
-      this.transactionService.saveSnapshot(tableName, currentData);
+      this.transactionService.saveSnapshot(tableName, currentData, this.metadataManager.get(tableName) !== undefined);
 
       // Add operation to transaction queue
       this.transactionService.addOperation({
@@ -882,7 +915,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     // If in transaction且directWrite为false，将操作添加到事务队列
     if (this.transactionService.isInTransaction() && !options?.directWrite) {
       const currentData = await this.dataReader.read(tableName, { bypassCache: true });
-      this.transactionService.saveSnapshot(tableName, currentData);
+      this.transactionService.saveSnapshot(tableName, currentData, this.metadataManager.get(tableName) !== undefined);
 
       // Add到事务操作队列
       this.transactionService.addOperation({
@@ -920,8 +953,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       };
     }
 
-    // Execute batch operations directly to avoid recursion
-    // Optimization:
+    // Execute batch operations directly to avoid recursion.
     const BATCH_SIZE = 1000; // Data per batch
 
     // Read当前数据
@@ -933,97 +965,53 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     for (let i = 0; i < operations.length; i += BATCH_SIZE) {
       const batchOperations = operations.slice(i, i + BATCH_SIZE);
 
-      // Optimization:
-      const dataMap = new Map<string | number, Record<string, any>>();
-
-      // Save没有id的数据（包括原有数据和新插入的数据）
-      let itemsWithoutId = finalData.filter((item: Record<string, any>) => item['id'] === undefined);
-
-      // Convert existing data to Map for better lookup
-      finalData.forEach((item: Record<string, any>) => {
-        if (item.id !== undefined) {
-          dataMap.set(item.id, item);
-        }
-      });
-
       // Process当前批次的操作
       for (const op of batchOperations) {
         switch (op.type) {
           case 'insert':
             const insertItems = Array.isArray(op.data) ? op.data : [op.data];
-            insertItems.forEach((item: Record<string, any>) => {
-              if (item['id'] !== undefined) {
-                dataMap.set(item.id, item);
-              } else {
-                // Process没有id的插入项
-                itemsWithoutId.push(item);
-              }
-              writtenCount++;
-            });
+            finalData = [...finalData, ...insertItems];
+            writtenCount += insertItems.length;
             break;
           case 'update':
             if (op.where) {
-              // Use QueryEngine for complex condition filtering，确保与findOne/findMany一致
-              // Convert Map to array进行过滤
-              const allData = Array.from(dataMap.values());
-              const matchedItems = QueryEngine.filter(allData, op.where);
-
-              // Update所有匹配的记录
-              for (const matchedItem of matchedItems) {
-                if (matchedItem.id !== undefined) {
-                  const updatedItem = QueryEngine.update(matchedItem, op.data);
-
-                  dataMap.set(matchedItem.id, updatedItem);
-                  writtenCount++;
-                }
-              }
+              const matchedItems = QueryEngine.filter(finalData, op.where);
+              const matchedItemRefs = new Set(matchedItems);
+              finalData = finalData.map(item => (matchedItemRefs.has(item) ? QueryEngine.update(item, op.data) : item));
+              writtenCount += matchedItems.length;
             } else {
               // Original: Update record by id
               const updateItems = Array.isArray(op.data) ? op.data : [op.data];
-              updateItems.forEach((item: Record<string, any>) => {
-                if (item.id !== undefined) {
-                  const existing = dataMap.get(item['id']);
-                  if (existing) {
-                    dataMap.set(item['id'], { ...existing, ...item });
+              for (const updateItem of updateItems) {
+                if (updateItem.id !== undefined) {
+                  let updated = false;
+                  finalData = finalData.map(item => {
+                    if (item.id === updateItem.id) {
+                      updated = true;
+                      return { ...item, ...updateItem };
+                    }
+                    return item;
+                  });
+                  if (updated) {
                     writtenCount++;
                   }
                 }
-              });
+              }
             }
             break;
           case 'delete':
             if (op.where) {
-              // Use QueryEngine for complex condition filtering，确保与findOne/findMany一致
-              // Convert Map to array进行过滤
-              const allData = Array.from(dataMap.values());
-              const matchedItems = QueryEngine.filter(allData, op.where);
-
-              // Delete所有匹配的记录
-              for (const matchedItem of matchedItems) {
-                if (matchedItem.id !== undefined) {
-                  dataMap.delete(matchedItem.id);
-                  writtenCount++;
-                }
-              }
+              const matchedItems = QueryEngine.filter(finalData, op.where);
+              const matchedItemRefs = new Set(matchedItems);
+              finalData = finalData.filter(item => !matchedItemRefs.has(item));
+              writtenCount += matchedItems.length;
             } else {
-              // Original: Delete record by id（不再使用op.data，因为delete操作只需要where条件）
-              const allData = Array.from(dataMap.values());
-              for (const item of allData) {
-                if (item.id !== undefined) {
-                  dataMap.delete(item.id);
-                  writtenCount++;
-                }
-              }
+              writtenCount += finalData.length;
+              finalData = [];
             }
             break;
         }
       }
-
-      // Convert Map back to array，合并有id和无id的数据
-      const mapData = Array.from(dataMap.values());
-
-      // UpdatefinalData，准备处理下一批次
-      finalData = [...mapData, ...itemsWithoutId];
     }
 
     // Write更新后的数据
@@ -1089,10 +1077,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
           return 0;
         }
 
-        const matchedIds = new Set(matchedItems.map(item => item.id || item._id));
+        const matchedItemRefs = new Set(matchedItems);
         const finalData = allData.map((item: Record<string, any>) => {
-          const itemId = item.id || item._id;
-          if (matchedIds.has(itemId)) {
+          if (matchedItemRefs.has(item)) {
             return QueryEngine.update(item, data);
           }
           return item;
@@ -1102,7 +1089,8 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
         await this.write(tableName, finalData, { mode: 'overwrite', directWrite: true });
 
         return updatedCount;
-      }
+      },
+      (tableName: string) => this.deleteTable(tableName)
     );
   }
 
@@ -1115,8 +1103,11 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   async rollback(_options?: any): Promise<void> {
     await this.ensureInitialized();
     // Call transaction service rollback，传入writeFn用于恢复数据
-    await this.transactionService.rollback((tableName: string, data: Record<string, any>[], options?: any) =>
-      this.dataWriter.write(tableName, data, { ...options, directWrite: true })
+    await this.transactionService.rollback(
+      (tableName: string, data: Record<string, any>[], options?: any) =>
+        this.dataWriter.write(tableName, data, { ...options, directWrite: true }),
+      (tableName: string) => this.deleteTable(tableName),
+      false
     );
   }
 
@@ -1136,13 +1127,34 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     const data = await this.read(tableName);
 
     // Get当前表的元数据
-    const tableMeta = this.metadataManager.get(tableName) ?? (await this.recoverTableMetaFromFiles(tableName, data.length));
+    const tableMeta =
+      this.metadataManager.get(tableName) ?? (await this.recoverTableMetaFromFiles(tableName, data.length));
     if (!tableMeta) {
       throw new StorageError(`Table ${tableName} not found`, 'TABLE_NOT_FOUND', {
         details: `Failed to migrate table ${tableName} to chunked mode: table not found`,
         suggestion: 'Check if the table name is correct',
       });
     }
+
+    if (tableMeta.mode === 'chunked') {
+      return;
+    }
+
+    const restoreMetadata = async (mode: 'single' | 'chunked', count: number): Promise<void> => {
+      const currentMeta = this.metadataManager.get(tableName);
+      this.metadataManager.update(tableName, {
+        ...tableMeta,
+        mode,
+        path: mode === 'chunked' ? `${tableName}/` : `${tableName}.ldb`,
+        count,
+        chunks: mode === 'chunked' ? (currentMeta?.chunks ?? 0) : 0,
+        createdAt: tableMeta.createdAt,
+        updatedAt: Date.now(),
+      });
+      if (typeof this.metadataManager.saveImmediately === 'function') {
+        await this.metadataManager.saveImmediately();
+      }
+    };
 
     // Generate temporary table name，避免与原表冲突
     const tempTableName = `${tableName}_temp_${Date.now()}`;
@@ -1152,8 +1164,12 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       await this.createTable(tempTableName, {
         mode: 'chunked',
         initialData: data,
+        columns: tableMeta.columns,
         isHighRisk: tableMeta.isHighRisk,
         highRiskFields: tableMeta.highRiskFields,
+        encryptedFields: tableMeta.encryptedFields,
+        encrypted: tableMeta.encrypted,
+        encryptFullTable: tableMeta.encryptFullTable,
       });
 
       // 2. 验证临时表数据完整性
@@ -1176,9 +1192,15 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       await this.createTable(tableName, {
         mode: 'chunked',
         initialData: tempTableData,
+        columns: tableMeta.columns,
         isHighRisk: tableMeta.isHighRisk,
         highRiskFields: tableMeta.highRiskFields,
+        encryptedFields: tableMeta.encryptedFields,
+        encrypted: tableMeta.encrypted,
+        encryptFullTable: tableMeta.encryptFullTable,
       });
+
+      await restoreMetadata('chunked', tempTableData.length);
 
       // 5. 验证新表数据完整性
       const newTableData = await this.read(tableName);
@@ -1201,15 +1223,21 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
         // Validate临时表是否存在且数据完整
         const tempTableData = await this.read(tempTableName);
         if (tempTableData.length === data.length) {
-          // If original deleted but new creation failed, restore from temp
-          if (!(await this.hasTable(tableName))) {
-            await this.createTable(tableName, {
-              mode: tableMeta.mode || 'single',
-              initialData: tempTableData,
-              isHighRisk: tableMeta.isHighRisk,
-              highRiskFields: tableMeta.highRiskFields,
-            });
+          // Restore the original storage mode and metadata from the verified temp copy.
+          if (await this.hasTable(tableName)) {
+            await this.deleteTable(tableName);
           }
+          await this.createTable(tableName, {
+            mode: tableMeta.mode || 'single',
+            initialData: tempTableData,
+            columns: tableMeta.columns,
+            isHighRisk: tableMeta.isHighRisk,
+            highRiskFields: tableMeta.highRiskFields,
+            encryptedFields: tableMeta.encryptedFields,
+            encrypted: tableMeta.encrypted,
+            encryptFullTable: tableMeta.encryptFullTable,
+          });
+          await restoreMetadata(tableMeta.mode || 'single', tempTableData.length);
         }
         // Cleanup临时表
         await this.deleteTable(tempTableName);
@@ -1247,4 +1275,3 @@ const storage = new Proxy({} as FileSystemStorageAdapter, {
 });
 
 export default storage;
-

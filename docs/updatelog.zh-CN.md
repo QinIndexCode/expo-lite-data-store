@@ -2,6 +2,14 @@
 
 [README 入口](../README.md) | [English](./updatelog.en.md) | [消费者文档](../README.zh-CN.md)
 
+### 📅 2026-07-15 存储可靠性与 CI/CD 恢复
+
+> 存储可靠性：加固元数据串行原子发布、分片追加恢复顺序、不完整 chunk 拒绝、事务回滚语义、加密迁移和整表加密逻辑计数
+> Workflow 替换：用 main push/PR 主 CI 和单独注册的 tag-only release workflow 替换被手动禁用的旧发布流程
+> 发布安全：加入 tag/版本精确匹配、main 分支归属校验、显式 `NPM_TOKEN` 前置条件、完整 `prepublishOnly` 门禁、包内容检查和 npm provenance
+> 维护者文档：增加中英文 CI/CD 运维手册，覆盖 Secret、发布顺序、GitHub CLI 观察和安全故障恢复
+> 验证结果：58 个 Jest 套件 / 515 项测试、完整 `prepublishOnly`、Expo Doctor 21/21、Android Metro 导出、类型检查、actionlint、格式检查和 npm 包内容检查全部通过
+
 ### 📅 2026-06-28 `v2.0.2` Expo Consumer Smoke 与 GitHub 发布门禁对齐
 
 > Expo 兼容性：将本地 React 开发依赖固定到 `19.2.3`，避免临时 Expo SDK 56 consumer app 被 npm 解析到 `expo-doctor` 拒绝的更新 patch 版本
@@ -44,7 +52,7 @@
 > 代码组织：移动 CryptoService 到 core/crypto/，删除空目录
 > 新增文件：crypto-gcm.ts（GCM 加密模块）、crypto-errors.ts（错误定义）、crypto-types.ts（类型定义）
 > 新增文件：PathHelper.ts（路径管理）、envUtils.ts（环境检测）
-> 新增文件：.prettierignore、COMMENT\_SPECIFICATION 文档（中英文）
+> 新增文件：.prettierignore、COMMENT_SPECIFICATION 文档（中英文）
 > 测试：365 个测试全部通过，新增 GCM 加密测试
 
 ### 📅 2026-01-28 `v2.0.0-beta.2`  Expo Go 加密性能与 Provider 加固
@@ -77,7 +85,7 @@
 
 ### 📅 2025-12-22 `v2.0.0-beta.2`  配置系统简化与文档完善
 
-> 文档更新：更新README.md、README.en.md、WIKI.md、WIKI\_EN.md，简化配置描述和加密推荐模式
+> 文档更新：更新README.md、README.en.md、WIKI.md、WIKI_EN.md，简化配置描述和加密推荐模式
 > 配置系统：移除了根目录下创建配置文件的代码，仅支持app.json配置和源代码默认配置，适配Expo Go环境
 > 配置清理：移除了api.version、encryption.requireAuthOnAccess、cache.enableCompression等非必要配置
 > 性能配置：启用performance.maxConcurrentOperations、performance.enableBatchOptimization、performance.memoryWarningThreshold、cache.cleanupInterval配置
@@ -85,7 +93,7 @@
 > 修复：CacheManager.ts中处理已移除的cache.enableCompression属性，返回默认值false
 > 修复：ConfigManager.test.ts中移除对已删除requireAuthOnAccess属性的引用
 > 修复：ConfigValidator.ts中移除对已删除配置选项的验证
-> 修复：首次启动时"delete from table app\_settings failed"的错误
+> 修复：首次启动时"delete from table app_settings failed"的错误
 > 包配置：调整package-env.json的exports配置，适配简化的npm上传版本
 > 文档优化：简化README内容，详细内容移至WIKI，并添加加密写入/读取性能优化的Q\&A
 
