@@ -44,6 +44,17 @@ const SHORT_PROFILE_NAMES = {
   [EXPO_GO_PROFILE]: 'egj',
   [NATIVE_PROFILE]: 'nqc',
 };
+const DEFAULT_ARTIFACTS_ROOT = path.join(repoRoot, 'artifacts', 'expo-runtime-qa');
+const DEFAULT_ARTIFACT_RETENTION_COUNT = 3;
+const MAX_ARTIFACT_TEXT_BYTES = 512 * 1024;
+const MAX_COMMAND_CAPTURE_BYTES = 2 * 1024 * 1024;
+const MAX_PARTIAL_STREAM_LINE_BYTES = 64 * 1024;
+const MAX_LOGCAT_EVENT_BYTES = 1024 * 1024;
+const STREAM_LOG_FLUSH_BYTES = 32 * 1024;
+const ARTIFACT_RUN_NAME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/u;
+
+const createDefaultArtifactsDir = () =>
+  path.join(DEFAULT_ARTIFACTS_ROOT, new Date().toISOString().replace(/[:.]/g, '-'));
 
 const parseArgs = argv => {
   const options = {
@@ -57,7 +68,8 @@ const parseArgs = argv => {
     deviceSerial: null,
     keepEmulator: true,
     cleanupConsumers: true,
-    artifactsDir: path.join(repoRoot, 'artifacts', 'expo-runtime-qa', new Date().toISOString().replace(/[:.]/g, '-')),
+    artifactsDir: createDefaultArtifactsDir(),
+    usesDefaultArtifacts: true,
   };
 
   for (const arg of argv) {
@@ -107,6 +119,7 @@ const parseArgs = argv => {
         break;
       case 'artifacts-dir':
         options.artifactsDir = path.resolve(value);
+        options.usesDefaultArtifacts = false;
         break;
       case 'keep-emulator':
         options.keepEmulator = value !== 'false';
@@ -130,6 +143,173 @@ const ensureDir = target => {
 };
 
 const nowIso = () => new Date().toISOString();
+
+const normalizeMaxBytes = maxBytes => Math.max(1, Math.floor(Number(maxBytes) || 1));
+
+const trimTextToTail = (value, maxBytes = MAX_ARTIFACT_TEXT_BYTES) => {
+  const text = String(value ?? '');
+  const limit = normalizeMaxBytes(maxBytes);
+  const buffer = Buffer.from(text, 'utf8');
+  if (buffer.length <= limit) {
+    return text;
+  }
+
+  let start = buffer.length - limit;
+  while (start < buffer.length && (buffer[start] & 0xc0) === 0x80) {
+    start += 1;
+  }
+  return buffer.subarray(start).toString('utf8');
+};
+
+const appendTextTail = (current, next, maxBytes = MAX_ARTIFACT_TEXT_BYTES) =>
+  trimTextToTail(`${current || ''}${next || ''}`, maxBytes);
+
+const readTailTextFile = (filePath, maxBytes = MAX_ARTIFACT_TEXT_BYTES) => {
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size === 0) {
+      return '';
+    }
+
+    const length = Math.min(stat.size, normalizeMaxBytes(maxBytes));
+    const buffer = Buffer.alloc(length);
+    const handle = fs.openSync(filePath, 'r');
+    try {
+      fs.readSync(handle, buffer, 0, length, stat.size - length);
+    } finally {
+      fs.closeSync(handle);
+    }
+    return trimTextToTail(buffer.toString('utf8'), maxBytes);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      return '';
+    }
+    throw error;
+  }
+};
+
+const writeBoundedTextFile = (filePath, value, maxBytes = MAX_ARTIFACT_TEXT_BYTES) => {
+  fs.writeFileSync(filePath, trimTextToTail(value, maxBytes), 'utf8');
+};
+
+const appendBoundedTextFile = (filePath, value, maxBytes = MAX_ARTIFACT_TEXT_BYTES) => {
+  const existing = readTailTextFile(filePath, maxBytes);
+  writeBoundedTextFile(filePath, `${existing}${value || ''}`, maxBytes);
+};
+
+const createBoundedTailFileWriter = ({
+  filePath,
+  maxBytes = MAX_ARTIFACT_TEXT_BYTES,
+  flushBytes = STREAM_LOG_FLUSH_BYTES,
+}) => {
+  let tail = '';
+  let pendingBytes = 0;
+  let closed = false;
+
+  writeBoundedTextFile(filePath, '', maxBytes);
+
+  const flush = () => {
+    if (closed || pendingBytes === 0) {
+      return;
+    }
+    writeBoundedTextFile(filePath, tail, maxBytes);
+    pendingBytes = 0;
+  };
+
+  return {
+    write: value => {
+      if (closed) {
+        return;
+      }
+      const text = String(value ?? '');
+      tail = appendTextTail(tail, text, maxBytes);
+      pendingBytes += Buffer.byteLength(text, 'utf8');
+      if (pendingBytes >= flushBytes) {
+        flush();
+      }
+    },
+    close: () => {
+      if (closed) {
+        return;
+      }
+      flush();
+      closed = true;
+    },
+  };
+};
+
+const trimJsonLinesToTail = (value, maxBytes = MAX_ARTIFACT_TEXT_BYTES) => {
+  const text = String(value ?? '');
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes) {
+    return text;
+  }
+
+  const tail = trimTextToTail(text, maxBytes);
+  const firstNewline = tail.indexOf('\n');
+  return firstNewline === -1 ? '' : tail.slice(firstNewline + 1);
+};
+
+const writeBoundedJsonLinesFile = (filePath, value, maxBytes = MAX_ARTIFACT_TEXT_BYTES) => {
+  fs.writeFileSync(filePath, trimJsonLinesToTail(value, maxBytes), 'utf8');
+};
+
+const isRegularFile = filePath => {
+  try {
+    return fs.lstatSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+};
+
+const isSafeCompletedArtifactRun = ({ artifactsRoot, entry }) => {
+  if (!entry.isDirectory() || entry.isSymbolicLink() || !ARTIFACT_RUN_NAME_PATTERN.test(entry.name)) {
+    return false;
+  }
+
+  const root = path.resolve(artifactsRoot);
+  const artifactDir = path.resolve(root, entry.name);
+  const relative = path.relative(root, artifactDir);
+  if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    return false;
+  }
+
+  return (
+    isRegularFile(path.join(artifactDir, '.complete')) && !fs.existsSync(path.join(artifactDir, '.in-progress'))
+  );
+};
+
+const pruneCompletedArtifactRuns = ({
+  artifactsRoot = DEFAULT_ARTIFACTS_ROOT,
+  keep = DEFAULT_ARTIFACT_RETENTION_COUNT,
+} = {}) => {
+  let rootStat;
+  try {
+    rootStat = fs.lstatSync(artifactsRoot);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+    return [];
+  }
+
+  const completedRuns = fs
+    .readdirSync(artifactsRoot, { withFileTypes: true })
+    .filter(entry => isSafeCompletedArtifactRun({ artifactsRoot, entry }))
+    .sort((left, right) => right.name.localeCompare(left.name));
+  const removed = [];
+
+  for (const entry of completedRuns.slice(Math.max(0, keep))) {
+    const artifactDir = path.join(artifactsRoot, entry.name);
+    fs.rmSync(artifactDir, { recursive: true, force: true });
+    removed.push(artifactDir);
+  }
+
+  return removed;
+};
 
 const sanitizeTempToken = (value, fallback) => {
   const normalized = String(value || '')
@@ -201,8 +381,47 @@ const writeJson = (filePath, value) => {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 };
 
+const startArtifactRun = ({ artifactsDir, usesDefaultArtifacts }) => {
+  ensureDir(artifactsDir);
+  const inProgressPath = path.join(artifactsDir, '.in-progress');
+  const completePath = path.join(artifactsDir, '.complete');
+  writeJson(inProgressPath, {
+    startedAt: nowIso(),
+    pid: process.pid,
+    usesDefaultArtifacts,
+  });
+
+  return {
+    artifactsDir,
+    inProgressPath,
+    completePath,
+    usesDefaultArtifacts,
+  };
+};
+
+const completeArtifactRun = ({ artifactRun, status, error }) => {
+  writeJson(artifactRun.completePath, {
+    status,
+    completedAt: nowIso(),
+    error: error
+      ? {
+          name: error.name || 'Error',
+          message: error.message || String(error),
+        }
+      : undefined,
+  });
+  fs.rmSync(artifactRun.inProgressPath, { force: true });
+
+  if (artifactRun.usesDefaultArtifacts) {
+    return pruneCompletedArtifactRuns();
+  }
+  return [];
+};
+
 const appendJsonLine = (filePath, value) => {
-  fs.appendFileSync(filePath, `${JSON.stringify(value)}\n`, 'utf8');
+  const existing = readTailTextFile(filePath);
+  const combined = `${existing}${JSON.stringify(value)}\n`;
+  fs.writeFileSync(filePath, trimJsonLinesToTail(combined), 'utf8');
 };
 
 const createCaseRecorder = filePath => record => {
@@ -222,14 +441,17 @@ const runCommand = (command, args, options = {}) => {
     },
     encoding: 'utf8',
     timeout: options.timeoutMs,
+    maxBuffer: options.maxBuffer || MAX_COMMAND_CAPTURE_BYTES,
     windowsHide: true,
     shell: needsShell(command),
   });
   const durationMs = Date.now() - startTime;
+  const stdout = trimTextToTail(result.stdout || '');
+  const stderr = trimTextToTail(result.stderr || '');
 
   if (options.logFile) {
     const header = `> ${command} ${args.join(' ')}\n`;
-    fs.writeFileSync(options.logFile, `${header}\n${result.stdout || ''}\n${result.stderr || ''}`, 'utf8');
+    writeBoundedTextFile(options.logFile, `${header}\n${stdout}\n${stderr}`);
   }
 
   return {
@@ -237,8 +459,8 @@ const runCommand = (command, args, options = {}) => {
     args,
     cwd: options.cwd,
     code: typeof result.status === 'number' ? result.status : result.error ? 1 : 0,
-    stdout: result.stdout || '',
-    stderr: result.stderr || '',
+    stdout,
+    stderr,
     durationMs,
     error: result.error || null,
   };
@@ -246,7 +468,7 @@ const runCommand = (command, args, options = {}) => {
 
 const appendCommandLog = (filePath, result) => {
   const header = `> ${result.command} ${result.args.join(' ')}\n`;
-  fs.appendFileSync(filePath, `${header}\n${result.stdout || ''}\n${result.stderr || ''}\n`, 'utf8');
+  appendBoundedTextFile(filePath, `${header}\n${result.stdout || ''}\n${result.stderr || ''}\n`);
 };
 
 const ensureCommandSuccess = (result, message) => {
@@ -777,7 +999,7 @@ const captureUiTree = (serial, outputFile) => {
     const start = xmlText.indexOf('<?xml');
     const end = xmlText.lastIndexOf('</hierarchy>');
     const normalizedXml = start >= 0 && end >= 0 ? xmlText.slice(start, end + '</hierarchy>'.length) : xmlText;
-    fs.writeFileSync(outputFile, normalizedXml, 'utf8');
+    writeBoundedTextFile(outputFile, normalizedXml);
     return true;
   }
   return false;
@@ -838,9 +1060,7 @@ const getProfileRuntime = ({ consumerDir, profile }) => {
 
 const createLogcatMonitor = ({ serial, outputFile, acceptEvent = () => true }) => {
   const emitter = new EventEmitter();
-  const output = fs.createWriteStream(outputFile, {
-    encoding: 'utf8',
-  });
+  const output = createBoundedTailFileWriter({ filePath: outputFile });
 
   runCommand(adbCmd, ['-s', serial, 'logcat', '-c'], {
     timeoutMs: 20000,
@@ -855,9 +1075,26 @@ const createLogcatMonitor = ({ serial, outputFile, acceptEvent = () => true }) =
   let stderrBuffer = '';
   let closed = false;
   const events = [];
+  const eventSizes = [];
+  let eventBytes = 0;
+
+  const retainEvent = event => {
+    const eventSize = Buffer.byteLength(JSON.stringify(event), 'utf8');
+    if (eventSize > MAX_LOGCAT_EVENT_BYTES) {
+      return;
+    }
+
+    events.push(event);
+    eventSizes.push(eventSize);
+    eventBytes += eventSize;
+    while (eventBytes > MAX_LOGCAT_EVENT_BYTES && events.length > 0) {
+      eventBytes -= eventSizes.shift();
+      events.shift();
+    }
+  };
 
   const handleChunk = chunk => {
-    stdoutBuffer += chunk.toString('utf8');
+    stdoutBuffer = appendTextTail(stdoutBuffer, chunk.toString('utf8'), MAX_PARTIAL_STREAM_LINE_BYTES);
     const lines = stdoutBuffer.split(/\r?\n/u);
     stdoutBuffer = lines.pop() || '';
 
@@ -869,7 +1106,7 @@ const createLogcatMonitor = ({ serial, outputFile, acceptEvent = () => true }) =
         try {
           const event = JSON.parse(payload);
           if (acceptEvent(event)) {
-            events.push(event);
+            retainEvent(event);
             emitter.emit('event', event);
           }
         } catch {
@@ -881,8 +1118,9 @@ const createLogcatMonitor = ({ serial, outputFile, acceptEvent = () => true }) =
 
   child.stdout.on('data', handleChunk);
   child.stderr.on('data', chunk => {
-    stderrBuffer += chunk.toString('utf8');
-    output.write(chunk.toString('utf8'));
+    const text = chunk.toString('utf8');
+    stderrBuffer = appendTextTail(stderrBuffer, text);
+    output.write(text);
   });
 
   const waitForEvent = (predicate, timeoutMs, description) =>
@@ -928,7 +1166,7 @@ const createLogcatMonitor = ({ serial, outputFile, acceptEvent = () => true }) =
           return;
         }
         finalized = true;
-        output.end();
+        output.close();
         resolve({
           events,
           stderr: stderrBuffer,
@@ -965,9 +1203,7 @@ const createLogcatMonitor = ({ serial, outputFile, acceptEvent = () => true }) =
 };
 
 const createProcessLogger = ({ processHandle, outputFile, onLine }) => {
-  const output = fs.createWriteStream(outputFile, {
-    encoding: 'utf8',
-  });
+  const output = createBoundedTailFileWriter({ filePath: outputFile });
 
   let stdoutBuffer = '';
   let stderrBuffer = '';
@@ -975,7 +1211,7 @@ const createProcessLogger = ({ processHandle, outputFile, onLine }) => {
 
   const handle = bufferName => chunk => {
     if (bufferName === 'stdout') {
-      stdoutBuffer += chunk.toString('utf8');
+      stdoutBuffer = appendTextTail(stdoutBuffer, chunk.toString('utf8'), MAX_PARTIAL_STREAM_LINE_BYTES);
       const lines = stdoutBuffer.split(/\r?\n/u);
       stdoutBuffer = lines.pop() || '';
       for (const line of lines) {
@@ -985,9 +1221,10 @@ const createProcessLogger = ({ processHandle, outputFile, onLine }) => {
       return;
     }
 
-    stderrBuffer += chunk.toString('utf8');
-    const lines = chunk.toString('utf8').split(/\r?\n/u);
-    output.write(chunk.toString('utf8'));
+    const text = chunk.toString('utf8');
+    stderrBuffer = appendTextTail(stderrBuffer, text);
+    const lines = text.split(/\r?\n/u);
+    output.write(text);
     for (const line of lines.filter(Boolean)) {
       onLine(line);
     }
@@ -1008,7 +1245,11 @@ const createProcessLogger = ({ processHandle, outputFile, onLine }) => {
             return;
           }
           finalized = true;
-          output.end();
+          if (stdoutBuffer) {
+            output.write(`${stdoutBuffer}\n`);
+            onLine(stdoutBuffer);
+          }
+          output.close();
           resolve({
             code,
             stdoutRemainder: stdoutBuffer,
@@ -1153,7 +1394,7 @@ const ensureNativeBuildInstalled = ({ consumerDir, serial, port, outputFile }) =
   const gradleWrapper = path.join(androidDir, process.platform === 'win32' ? 'gradlew.bat' : 'gradlew');
 
   if (outputFile) {
-    fs.writeFileSync(outputFile, '', 'utf8');
+    writeBoundedTextFile(outputFile, '');
   }
 
   if (!fs.existsSync(gradleWrapper)) {
@@ -1196,7 +1437,7 @@ const ensureNativeBuildInstalled = ({ consumerDir, serial, port, outputFile }) =
   });
   if (outputFile) {
     appendCommandLog(outputFile, installResult);
-    fs.appendFileSync(outputFile, `\n[qa] installed apk=${apkPath} serial=${serial}\n`, 'utf8');
+    appendBoundedTextFile(outputFile, `\n[qa] installed apk=${apkPath} serial=${serial}\n`);
   }
   ensureCommandSuccess(installResult, 'Failed to install the native flagship dev client');
   return installResult;
@@ -1280,7 +1521,7 @@ const collectMeminfo = (serial, packageName, outputFile) => {
   const result = runCommand(adbCmd, ['-s', serial, 'shell', 'dumpsys', 'meminfo', packageName], {
     timeoutMs: 60000,
   });
-  fs.writeFileSync(outputFile, `${result.stdout}\n${result.stderr}`, 'utf8');
+  writeBoundedTextFile(outputFile, `${result.stdout}\n${result.stderr}`);
   return result.code === 0;
 };
 
@@ -1288,7 +1529,7 @@ const collectCrashLog = (serial, outputFile) => {
   const result = runCommand(adbCmd, ['-s', serial, 'logcat', '-b', 'crash', '-d'], {
     timeoutMs: 30000,
   });
-  fs.writeFileSync(outputFile, `${result.stdout}\n${result.stderr}`, 'utf8');
+  writeBoundedTextFile(outputFile, `${result.stdout}\n${result.stderr}`);
   return result.code === 0;
 };
 
@@ -1458,10 +1699,9 @@ const runExpoPhase = async ({
     collectMeminfo(serial, runtime.packageName, meminfoAfter);
     collectCrashLog(serial, crashLogFile);
     monitorResult = await logcatMonitor.stop();
-    fs.writeFileSync(
+    writeBoundedJsonLinesFile(
       eventsFile,
-      `${(monitorResult.events || []).map(event => JSON.stringify(event)).join('\n')}${monitorResult.events?.length ? '\n' : ''}`,
-      'utf8'
+      `${(monitorResult.events || []).map(event => JSON.stringify(event)).join('\n')}${monitorResult.events?.length ? '\n' : ''}`
     );
     await expoServer.stop();
   }
@@ -1516,7 +1756,7 @@ const captureDependencyTree = ({ consumerDir, outputFile }) => {
     cwd: consumerDir,
     timeoutMs: 120000,
   });
-  fs.writeFileSync(outputFile, result.stdout || result.stderr, 'utf8');
+  writeBoundedTextFile(outputFile, result.stdout || result.stderr);
   return result;
 };
 
@@ -1974,46 +2214,46 @@ const removeTarball = tarballPath => {
 
 const main = async () => {
   const options = parseArgs(process.argv.slice(2));
-  ensureDir(options.artifactsDir);
-
+  const artifactRun = startArtifactRun(options);
   const casesFile = path.join(options.artifactsDir, 'cases.jsonl');
   const recordCase = createCaseRecorder(casesFile);
-
-  const emulatorInfo = await ensureAndroidDeviceReady({
-    avdName: options.avdName,
-    deviceSerial: options.deviceSerial,
-  });
-  const environment = {
-    generatedAt: nowIso(),
-    host: {
-      cwd: repoRoot,
-      nodeVersion: process.version,
-      platform: process.platform,
-      arch: process.arch,
-    },
-    expoCliVersion: ensureCommandSuccess(
-      runCommand(npxCmd, ['expo', '--version'], {
-        cwd: repoRoot,
-        timeoutMs: 120000,
-      }),
-      'Failed to resolve Expo CLI version'
-    ).stdout.trim(),
-    android: {
-      adbPath: adbCmd,
-      emulatorPath: emulatorCmd,
-      avdName: options.avdName,
-      requestedDeviceSerial: options.deviceSerial,
-      serial: emulatorInfo.serial,
-      expoGoInstalled: getExpoGoInstalled(emulatorInfo.serial),
-      startedByScript: emulatorInfo.startedByScript,
-      deviceSource: emulatorInfo.deviceSource,
-    },
-    qaOptions: options,
-  };
-  writeJson(path.join(options.artifactsDir, 'environment.json'), environment);
-
   let tarballPath = null;
+  let emulatorInfo = null;
+  let runError = null;
   try {
+    emulatorInfo = await ensureAndroidDeviceReady({
+      avdName: options.avdName,
+      deviceSerial: options.deviceSerial,
+    });
+    const environment = {
+      generatedAt: nowIso(),
+      host: {
+        cwd: repoRoot,
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+      },
+      expoCliVersion: ensureCommandSuccess(
+        runCommand(npxCmd, ['expo', '--version'], {
+          cwd: repoRoot,
+          timeoutMs: 120000,
+        }),
+        'Failed to resolve Expo CLI version'
+      ).stdout.trim(),
+      android: {
+        adbPath: adbCmd,
+        emulatorPath: emulatorCmd,
+        avdName: options.avdName,
+        requestedDeviceSerial: options.deviceSerial,
+        serial: emulatorInfo.serial,
+        expoGoInstalled: getExpoGoInstalled(emulatorInfo.serial),
+        startedByScript: emulatorInfo.startedByScript,
+        deviceSource: emulatorInfo.deviceSource,
+      },
+      qaOptions: options,
+    };
+    writeJson(path.join(options.artifactsDir, 'environment.json'), environment);
+
     const buildResults = buildPackageForQa(options.artifactsDir);
     writeJson(
       path.join(options.artifactsDir, 'build-results.json'),
@@ -2062,11 +2302,27 @@ const main = async () => {
     };
     writeJson(path.join(options.artifactsDir, 'summary.json'), summary);
     console.log(JSON.stringify(summary, null, 2));
+  } catch (error) {
+    runError = error;
+    throw error;
   } finally {
-    removeTarball(tarballPath);
-    if (!options.keepEmulator && emulatorInfo.startedByScript) {
-      runCommand(adbCmd, ['-s', emulatorInfo.serial, 'emu', 'kill'], {
-        timeoutMs: 30000,
+    try {
+      removeTarball(tarballPath);
+      if (!options.keepEmulator && emulatorInfo?.startedByScript) {
+        runCommand(adbCmd, ['-s', emulatorInfo.serial, 'emu', 'kill'], {
+          timeoutMs: 30000,
+        });
+      }
+    } catch (error) {
+      if (!runError) {
+        runError = error;
+      }
+      throw error;
+    } finally {
+      completeArtifactRun({
+        artifactRun,
+        status: runError ? 'failed' : 'completed',
+        error: runError,
       });
     }
   }
@@ -2077,10 +2333,16 @@ module.exports = {
   buildNativeRunAndroidArgs,
   buildVerdicts,
   buildQaConsumerTempPrefix,
+  completeArtifactRun,
+  createBoundedTailFileWriter,
   isSinglePackageExpoGoDoctorPeerWarning,
   parseAdbDevicesOutput,
+  parseArgs,
+  pruneCompletedArtifactRuns,
   resolveRequestedAdbSerial,
   resolveExpoAndroidDeviceTargetFromDevices,
+  startArtifactRun,
+  trimTextToTail,
 };
 
 if (require.main === module) {

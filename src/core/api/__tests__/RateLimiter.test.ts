@@ -2,6 +2,7 @@
 // RateLimiter 单元测试
 
 import { GlobalRateLimiter, RateLimiter } from '../RateLimiter';
+import type { ClientRateLimitInfo } from '../RateLimiter';
 
 describe('RateLimiter', () => {
   let rateLimiter: RateLimiter;
@@ -37,6 +38,24 @@ describe('RateLimiter', () => {
       expect(result.retryAfter).toBeDefined();
     });
 
+    it('uses the configured refill rate for check retry delays', () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+      try {
+        const limiter = new RateLimiter({ rate: 10, capacity: 1, enabled: true });
+        expect(limiter.check('client').allowed).toBe(true);
+
+        jest.advanceTimersByTime(50);
+        expect(limiter.check('client')).toMatchObject({
+          allowed: false,
+          retryAfter: 50,
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('should be able to reset client rate limiting info', () => {
       // Consume some tokens
       rateLimiter.consume('test-client', 5);
@@ -60,6 +79,36 @@ describe('RateLimiter', () => {
       expect(rateLimiter.getClientInfo('client1')).toBeUndefined();
       expect(rateLimiter.getClientInfo('client2')).toBeUndefined();
       expect(rateLimiter.getClientInfo('client3')).toBeUndefined();
+    });
+
+    it('bounds untrusted client identity state and does not expose mutable entries', () => {
+      const oversizedClientId = 'x'.repeat(129);
+      expect(rateLimiter.consume(oversizedClientId, 1).allowed).toBe(true);
+      expect(rateLimiter.getClientInfo(oversizedClientId)).toBeUndefined();
+
+      for (let index = 0; index < 1100; index++) {
+        rateLimiter.consume(`client-${index}`, 1);
+      }
+
+      const trackedClients = (rateLimiter as unknown as { clientLimits: Map<string, ClientRateLimitInfo> }).clientLimits;
+      expect(trackedClients.size).toBeLessThanOrEqual(1024);
+
+      const snapshot = rateLimiter.getClientInfo('client-0');
+      expect(snapshot).toBeDefined();
+      snapshot!.tokens = 999;
+      expect(rateLimiter.getClientInfo('client-0')?.tokens).not.toBe(999);
+    });
+
+    it('rejects non-positive and non-finite token costs without changing bucket state', () => {
+      const before = rateLimiter.getClientInfo('test-client');
+
+      for (const tokens of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+        const result = rateLimiter.consume('test-client', tokens);
+        expect(result.allowed).toBe(false);
+        expect(Number.isFinite(result.retryAfter)).toBe(true);
+      }
+
+      expect(rateLimiter.getClientInfo('test-client')).toEqual(before);
     });
   });
 
@@ -175,5 +224,16 @@ describe('GlobalRateLimiter', () => {
     const limiter1 = globalRateLimiter.getLimiter('limiter1');
     const limiter2 = globalRateLimiter.getLimiter('limiter1');
     expect(limiter1).toBe(limiter2);
+  });
+
+  it('bounds global limiter state for arbitrary keys', () => {
+    globalRateLimiter.getLimiter('x'.repeat(129));
+
+    for (let index = 0; index < 300; index++) {
+      globalRateLimiter.getLimiter(`limiter-${index}`);
+    }
+
+    const limiters = (globalRateLimiter as unknown as { limiters: Map<string, RateLimiter> }).limiters;
+    expect(limiters.size).toBeLessThanOrEqual(256);
   });
 });

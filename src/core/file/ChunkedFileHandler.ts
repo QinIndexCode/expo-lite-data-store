@@ -2,7 +2,7 @@
  * @module ChunkedFileHandler
  * @description Chunked file handler for large data storage with automatic splitting
  * @since 2025-11-28
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import { configManager } from '../config/ConfigManager';

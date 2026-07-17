@@ -2,7 +2,7 @@
  * @module ApiRouter
  * @description API router for version management and request routing
  * @since 2025-12-03
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 /**

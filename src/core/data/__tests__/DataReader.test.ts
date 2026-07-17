@@ -134,6 +134,96 @@ describe('DataReader', () => {
       expect(result).toEqual([]);
     });
 
+    it('should apply every filter condition after narrowing results with an index', async () => {
+      const records = [
+        { id: '1', team: 'alpha', active: true },
+        { id: '2', team: 'alpha', active: false },
+        { id: '3', team: 'beta', active: true },
+      ];
+      metadataManager.update(testTableName, {
+        mode: 'single',
+        path: `${testTableName}.ldb`,
+        count: records.length,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        columns: { id: 'string', team: 'string', active: 'boolean' },
+      });
+      await new SingleFileHandler('/mock/documents/lite-data-store/test_table.ldb').write(records);
+      await indexManager.createIndex(testTableName, 'team');
+      records.forEach(record => indexManager.addToIndex(testTableName, record));
+      const queryIndexSpy = jest.spyOn(indexManager, 'queryIndex');
+
+      try {
+        const result = await dataReader.read(testTableName, {
+          filter: { team: 'alpha', active: true },
+          bypassCache: true,
+        });
+
+        expect(queryIndexSpy).toHaveBeenCalledWith(testTableName, 'team', 'alpha');
+        expect(result).toEqual([{ id: '1', team: 'alpha', active: true }]);
+      } finally {
+        queryIndexSpy.mockRestore();
+      }
+    });
+
+    it('should not cache function filters with each other or with an unfiltered read', async () => {
+      const records = [
+        { id: '1', team: 'alpha' },
+        { id: '2', team: 'beta' },
+      ];
+      metadataManager.update(testTableName, {
+        mode: 'single',
+        path: `${testTableName}.ldb`,
+        count: records.length,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        columns: { id: 'string', team: 'string' },
+      });
+      await new SingleFileHandler('/mock/documents/lite-data-store/test_table.ldb').write(records);
+
+      const alpha = await dataReader.read(testTableName, {
+        filter: (item: Record<string, any>) => item.team === 'alpha',
+      });
+      const beta = await dataReader.read(testTableName, {
+        filter: (item: Record<string, any>) => item.team === 'beta',
+      });
+      const unfiltered = await dataReader.read(testTableName);
+
+      expect(alpha).toEqual([{ id: '1', team: 'alpha' }]);
+      expect(beta).toEqual([{ id: '2', team: 'beta' }]);
+      expect(unfiltered).toEqual(records);
+    });
+
+    it('keeps cached records isolated from callers on cache fill and cache hits', async () => {
+      const records = [{ id: '1', profile: { name: 'Alice' } }];
+      metadataManager.update(testTableName, {
+        mode: 'single',
+        path: `${testTableName}.ldb`,
+        count: records.length,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        columns: { id: 'string', profile: 'blob' },
+      });
+      await new SingleFileHandler('/mock/documents/lite-data-store/test_table.ldb').write(records);
+
+      const initialRead = await dataReader.read(testTableName);
+      initialRead[0].profile.name = 'changed-before-cache-hit';
+      initialRead.push({ id: '2', profile: { name: 'Injected' } });
+
+      const cachedRead = await dataReader.read(testTableName);
+      expect(cachedRead).toEqual(records);
+      expect(cachedRead).not.toBe(initialRead);
+      expect(cachedRead[0]).not.toBe(initialRead[0]);
+      expect(cachedRead[0].profile).not.toBe(initialRead[0].profile);
+
+      cachedRead[0].profile.name = 'changed-from-cache-hit';
+
+      const nextCachedRead = await dataReader.read(testTableName);
+      expect(nextCachedRead).toEqual(records);
+      expect(nextCachedRead[0]).not.toBe(cachedRead[0]);
+      expect(nextCachedRead[0].profile).not.toBe(cachedRead[0].profile);
+    });
+
     it('should be able to query data with pagination', async () => {
       // Create table metadata first
       metadataManager.update(testTableName, {

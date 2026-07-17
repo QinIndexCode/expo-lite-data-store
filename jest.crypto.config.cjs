@@ -18,13 +18,10 @@ module.exports = {
   testPathIgnorePatterns: ['<rootDir>/node_modules/', '<rootDir>/test.ts'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   testEnvironment: 'node',
-  verbose: true,
   moduleNameMapper: {},
   setupFilesAfterEnv: ['<rootDir>/jest.setup.cjs'],
   // 加密测试可能需要更长的超时时间
   testTimeout: 300000, // 5分钟
-  forceExit: true,
-  detectOpenHandles: true,
   // 加密测试适合串行执行，避免资源竞争
   maxWorkers: 1,
   // 启用测试结果缓存

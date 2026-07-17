@@ -4,7 +4,7 @@
  * 
  * @module db
  * @since 2025-11-23
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import storage from './adapter/FileSystemStorageAdapter';

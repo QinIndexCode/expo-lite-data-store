@@ -4,7 +4,7 @@
  *
  * @module expo-lite-data-store
  * @since 2025-11-19
- * @version 2.0.1
+ * @version 3.0.0
  */
 import { plainStorage, dbManager } from './core/db';
 import { configManager, ConfigManager } from './core/config/ConfigManager';
@@ -19,21 +19,171 @@ import {
   getKeyCacheStats,
   resetMasterKey,
 } from './utils/crypto';
-import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult, TableOptions } from './types/storageTypes';
+import type { CommonOptions, CreateTableOptions, ReadOptions, WriteOptions, WriteResult, TableOptions } from './types/storageTypes';
 import type { PerformanceStats, HealthCheckResult } from './core/monitor/PerformanceMonitor';
 import type { KeyCacheStats } from './utils/crypto';
+import { StorageError } from './types/storageErrorInfc';
 import * as CryptoService from './core/crypto/CryptoService';
 
 const normalizeSecurity = (opts?: { encrypted?: boolean; requireAuthOnAccess?: boolean }) => {
   const requireAuthOnAccess = opts?.requireAuthOnAccess ?? false;
-  const encrypted = opts?.encrypted ?? (requireAuthOnAccess ? true : false);
+  // Per-access authentication is meaningful only for encrypted storage. Do not
+  // let an explicit encrypted:false silently route this request to plain storage.
+  const encrypted = requireAuthOnAccess || opts?.encrypted === true;
   return { encrypted, requireAuthOnAccess };
 };
 
+type TransactionSecurity = ReturnType<typeof normalizeSecurity>;
+type ResolvedStorageAdapter = ReturnType<typeof resolveStorageAdapter>;
+
+let activeTransactionSecurity: TransactionSecurity | null = null;
+const tablePolicyLocks = new Map<string, Promise<void>>();
+
+const hasExplicitSecurityOptions = (options?: CommonOptions): boolean =>
+  !!options &&
+  (Object.prototype.hasOwnProperty.call(options, 'encrypted') ||
+    Object.prototype.hasOwnProperty.call(options, 'requireAuthOnAccess'));
+
+const matchesTransactionSecurity = (left: TransactionSecurity, right: TransactionSecurity): boolean =>
+  left.encrypted === right.encrypted && left.requireAuthOnAccess === right.requireAuthOnAccess;
+
 /**
- * Plain storage instance, no encryption support
+ * A transaction is shared by the underlying storage singleton, so every public
+ * operation must use the security facade that opened it. This prevents a later
+ * call with omitted or weaker options from queueing plaintext or committing
+ * without the required access authentication.
  */
-export { plainStorage };
+const resolveStorageAdapter = (options?: CommonOptions) => {
+  const requestedSecurity = normalizeSecurity(options);
+  const security = activeTransactionSecurity ?? requestedSecurity;
+
+  if (
+    activeTransactionSecurity &&
+    hasExplicitSecurityOptions(options) &&
+    !matchesTransactionSecurity(requestedSecurity, activeTransactionSecurity)
+  ) {
+    throw new Error('Transaction security options must match the active transaction');
+  }
+
+  return {
+    ...security,
+    adapter: dbManager.getDbInstance(security.encrypted, security.requireAuthOnAccess),
+  };
+};
+
+/**
+ * Serializes public operations for one table from policy resolution through the
+ * underlying adapter call. This closes the window where a table can become
+ * encrypted after a plain caller has already passed its policy check.
+ */
+const withTablePolicyLock = async <T>(tableName: string, operation: () => Promise<T>): Promise<T> => {
+  const previous = tablePolicyLocks.get(tableName);
+  let releaseCurrent: (() => void) | undefined;
+  const current = new Promise<void>(resolve => {
+    releaseCurrent = resolve;
+  });
+  const queued = previous ? previous.then(() => current) : current;
+  tablePolicyLocks.set(tableName, queued);
+
+  if (previous) {
+    await previous;
+  }
+
+  try {
+    return await operation();
+  } finally {
+    releaseCurrent?.();
+    if (tablePolicyLocks.get(tableName) === queued) {
+      tablePolicyLocks.delete(tableName);
+    }
+  }
+};
+
+type TableMetadataInspector = {
+  ensureInitialized?: () => Promise<void>;
+  getTableMeta?: (tableName: string) => { encrypted?: boolean; requireAuthOnAccess?: boolean } | undefined;
+  listTables?: () => Promise<string[]>;
+};
+
+const assertTableAccessPolicy = async (tableName: string, security: TransactionSecurity): Promise<void> => {
+  const inspector = plainStorage as typeof plainStorage & TableMetadataInspector;
+  await inspector.ensureInitialized?.();
+  const tableMeta = inspector.getTableMeta?.(tableName);
+
+  if (tableMeta?.encrypted === true && !security.encrypted) {
+    throw new StorageError(
+      `Table '${tableName}' requires encrypted storage access`,
+      'PERMISSION_DENIED',
+      {
+        details: 'The table is encrypted and cannot be accessed through the plain storage facade.',
+        suggestion: 'Repeat the operation with encrypted: true.',
+        tableName,
+      }
+    );
+  }
+
+  if (tableMeta?.requireAuthOnAccess === true && !security.requireAuthOnAccess) {
+    throw new StorageError(
+      `Table '${tableName}' requires strict access authentication`,
+      'PERMISSION_DENIED',
+      {
+        details: 'The table is bound to the requireAuthOnAccess key scope.',
+        suggestion: 'Repeat the operation with encrypted: true and requireAuthOnAccess: true.',
+        tableName,
+      }
+    );
+  }
+};
+
+const resolveTableStorageAdapter = async (tableName: string, options?: CommonOptions) => {
+  const resolved = resolveStorageAdapter(options);
+  await assertTableAccessPolicy(tableName, resolved);
+  return resolved;
+};
+
+const runTableOperation = async <T>(
+  tableName: string,
+  options: CommonOptions | undefined,
+  operation: (resolved: ResolvedStorageAdapter) => Promise<T>
+): Promise<T> => withTablePolicyLock(tableName, async () => operation(await resolveTableStorageAdapter(tableName, options)));
+
+const assertListAccessPolicy = (
+  tableNames: string[],
+  security: TransactionSecurity,
+  inspector: TableMetadataInspector
+): void => {
+  if (security.requireAuthOnAccess) {
+    return;
+  }
+
+  const hasStrictTable = tableNames.some(tableName => inspector.getTableMeta?.(tableName)?.requireAuthOnAccess === true);
+  if (hasStrictTable) {
+    throw new StorageError('Listing tables requires strict access authentication', 'PERMISSION_DENIED', {
+      details: 'At least one table is bound to the requireAuthOnAccess key scope.',
+      suggestion: 'Repeat the operation with encrypted: true and requireAuthOnAccess: true.',
+    });
+  }
+};
+
+const resolveListStorageAdapter = async (options?: CommonOptions) => {
+  const resolved = resolveStorageAdapter(options);
+  if (resolved.requireAuthOnAccess) {
+    return resolved;
+  }
+
+  const inspector = plainStorage as typeof plainStorage & TableMetadataInspector;
+  await inspector.ensureInitialized?.();
+  const tableNames = (await inspector.listTables?.()) ?? [];
+  assertListAccessPolicy(tableNames, resolved, inspector);
+
+  return resolved;
+};
+
+const clearTransactionSecurityIfSettled = (operationCompleted: boolean): void => {
+  if (operationCompleted || !plainStorage.isInTransaction()) {
+    activeTransactionSecurity = null;
+  }
+};
 
 /**
  * Configuration management
@@ -54,8 +204,8 @@ export type { KeyCacheStats };
 export { CryptoService };
 
 export const init = async (options: TableOptions = {}): Promise<void> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess) as any;
+  const { adapter: baseAdapter } = resolveStorageAdapter(options);
+  const adapter = baseAdapter as typeof baseAdapter & { ensureInitialized?: () => Promise<void> };
 
   if (typeof adapter.ensureInitialized === 'function') {
     await adapter.ensureInitialized();
@@ -72,15 +222,15 @@ export const init = async (options: TableOptions = {}): Promise<void> => {
  * @returns Promise<void>
  */
 export const createTable = async (tableName: string, options: CreateTableOptions = {}): Promise<void> => {
-  const { encryptedFields = [], encryptFullTable = false, ...tableOptions } = options ?? {};
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.createTable(tableName, {
-    ...tableOptions,
-    encrypted,
-    requireAuthOnAccess,
-    encryptedFields,
-    encryptFullTable,
+  return runTableOperation(tableName, options, async ({ encrypted, requireAuthOnAccess, adapter }) => {
+    const { encryptedFields = [], encryptFullTable = false, ...tableOptions } = options ?? {};
+    return adapter.createTable(tableName, {
+      ...tableOptions,
+      encrypted,
+      requireAuthOnAccess,
+      encryptedFields,
+      encryptFullTable,
+    });
   });
 };
 
@@ -91,9 +241,7 @@ export const createTable = async (tableName: string, options: CreateTableOptions
  * @returns Promise<void>
  */
 export const deleteTable = async (tableName: string, options: TableOptions = {}): Promise<void> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.deleteTable(tableName, options);
+  return runTableOperation(tableName, options, ({ adapter }) => adapter.deleteTable(tableName, options));
 };
 
 /**
@@ -103,9 +251,7 @@ export const deleteTable = async (tableName: string, options: TableOptions = {})
  * @returns Promise<boolean>
  */
 export const hasTable = async (tableName: string, options: TableOptions = {}): Promise<boolean> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.hasTable(tableName, options);
+  return runTableOperation(tableName, options, ({ adapter }) => adapter.hasTable(tableName, options));
 };
 
 /**
@@ -114,9 +260,14 @@ export const hasTable = async (tableName: string, options: TableOptions = {}): P
  * @returns Promise<string[]>
  */
 export const listTables = async (options: TableOptions = {}): Promise<string[]> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.listTables(options);
+  const resolved = await resolveListStorageAdapter(options);
+  const tableNames = await resolved.adapter.listTables(options);
+  if (!resolved.requireAuthOnAccess) {
+    const inspector = plainStorage as typeof plainStorage & TableMetadataInspector;
+    await inspector.ensureInitialized?.();
+    assertListAccessPolicy(tableNames, resolved, inspector);
+  }
+  return tableNames;
 };
 
 /**
@@ -144,10 +295,10 @@ export const insert = async (
   data: Record<string, any> | Record<string, any>[],
   options: WriteOptions = {}
 ): Promise<WriteResult> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const { ...finalWriteOptions } = options ?? {};
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.insert(tableName, data, finalWriteOptions);
+  return runTableOperation(tableName, options, async ({ adapter }) => {
+    const { ...finalWriteOptions } = options ?? {};
+    return adapter.insert(tableName, data, finalWriteOptions);
+  });
 };
 
 /**
@@ -176,10 +327,10 @@ export const overwrite = async (
   data: Record<string, any> | Record<string, any>[],
   options: Omit<WriteOptions, 'mode'> = {}
 ): Promise<WriteResult> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options as any);
-  const { ...finalWriteOptions } = options ?? {};
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.overwrite(tableName, data, finalWriteOptions);
+  return runTableOperation(tableName, options, async ({ adapter }) => {
+    const { ...finalWriteOptions } = options ?? {};
+    return adapter.overwrite(tableName, data, finalWriteOptions);
+  });
 };
 
 /**
@@ -202,16 +353,16 @@ export const overwrite = async (
  * @returns Promise<Record<string, any>[]> Array of records
  */
 export const read = async (tableName: string, options: ReadOptions = {}): Promise<Record<string, any>[]> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  const { ...readOptions } = options ?? {};
-  delete readOptions.filter;
-  delete readOptions.skip;
-  delete readOptions.limit;
-  delete readOptions.sortBy;
-  delete readOptions.order;
-  delete readOptions.sortAlgorithm;
-  return adapter.read(tableName, readOptions);
+  return runTableOperation(tableName, options, async ({ adapter }) => {
+    const { ...readOptions } = options ?? {};
+    delete readOptions.filter;
+    delete readOptions.skip;
+    delete readOptions.limit;
+    delete readOptions.sortBy;
+    delete readOptions.order;
+    delete readOptions.sortAlgorithm;
+    return adapter.read(tableName, readOptions);
+  });
 };
 
 /**
@@ -221,9 +372,7 @@ export const read = async (tableName: string, options: ReadOptions = {}): Promis
  * @returns Promise<number>
  */
 export const countTable = async (tableName: string, options: TableOptions = {}): Promise<number> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.count(tableName);
+  return runTableOperation(tableName, options, ({ adapter }) => adapter.count(tableName));
 };
 
 /**
@@ -254,9 +403,7 @@ export const verifyCountTable = async (
   tableName: string,
   options: TableOptions = {}
 ): Promise<{ metadata: number; actual: number; match: boolean }> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.verifyCount(tableName);
+  return runTableOperation(tableName, options, ({ adapter }) => adapter.verifyCount(tableName));
 };
 
 /**
@@ -281,10 +428,10 @@ export const findOne = async (
   tableName: string,
   options: { where: Record<string, any>; encrypted?: boolean; requireAuthOnAccess?: boolean }
 ): Promise<Record<string, any> | null> => {
-  const { where } = options ?? {};
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.findOne(tableName, where, options);
+  return runTableOperation(tableName, options, async ({ adapter }) => {
+    const { where } = options ?? {};
+    return adapter.findOne(tableName, where, options);
+  });
 };
 
 /**
@@ -327,20 +474,20 @@ export const findMany = async (
     requireAuthOnAccess?: boolean;
   }
 ): Promise<Record<string, any>[]> => {
-  const { where = {}, skip, limit, sortBy, order, sortAlgorithm } = options ?? {};
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
+  return runTableOperation(tableName, options, async ({ adapter }) => {
+    const { where = {}, skip, limit, sortBy, order, sortAlgorithm } = options ?? {};
 
-  // Extract query-specific options, exclude common options
-  const finalFindOptions = {
-    skip,
-    limit,
-    sortBy,
-    order,
-    sortAlgorithm,
-  };
+    // Extract query-specific options, exclude common options
+    const finalFindOptions = {
+      skip,
+      limit,
+      sortBy,
+      order,
+      sortAlgorithm,
+    };
 
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.findMany(tableName, where, finalFindOptions, options);
+    return adapter.findMany(tableName, where, finalFindOptions, options);
+  });
 };
 
 /**
@@ -365,10 +512,10 @@ export const remove = async (
   tableName: string,
   options: { where: Record<string, any>; encrypted?: boolean; requireAuthOnAccess?: boolean }
 ): Promise<number> => {
-  const { where } = options ?? {};
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.delete(tableName, where, options);
+  return runTableOperation(tableName, options, async ({ adapter }) => {
+    const { where } = options ?? {};
+    return adapter.delete(tableName, where, options);
+  });
 };
 
 /**
@@ -411,9 +558,7 @@ export const bulkWrite = async (
   >,
   options: TableOptions = {}
 ): Promise<WriteResult> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.bulkWrite(tableName, operations);
+  return runTableOperation(tableName, options, ({ adapter }) => adapter.bulkWrite(tableName, operations));
 };
 
 /**
@@ -424,7 +569,8 @@ export const bulkWrite = async (
 export const beginTransaction = async (options: TableOptions = {}): Promise<void> => {
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.beginTransaction(options);
+  await adapter.beginTransaction(options);
+  activeTransactionSecurity = { encrypted, requireAuthOnAccess };
 };
 
 /**
@@ -433,9 +579,15 @@ export const beginTransaction = async (options: TableOptions = {}): Promise<void
  * @returns Promise<void>
  */
 export const commit = async (options: TableOptions = {}): Promise<void> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.commit(options);
+  const { adapter } = resolveStorageAdapter(options);
+  let operationCompleted = false;
+
+  try {
+    await adapter.commit(options);
+    operationCompleted = true;
+  } finally {
+    clearTransactionSecurityIfSettled(operationCompleted);
+  }
 };
 
 /**
@@ -444,9 +596,15 @@ export const commit = async (options: TableOptions = {}): Promise<void> => {
  * @returns Promise<void>
  */
 export const rollback = async (options: TableOptions = {}): Promise<void> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.rollback(options);
+  const { adapter } = resolveStorageAdapter(options);
+  let operationCompleted = false;
+
+  try {
+    await adapter.rollback(options);
+    operationCompleted = true;
+  } finally {
+    clearTransactionSecurityIfSettled(operationCompleted);
+  }
 };
 
 /**
@@ -456,9 +614,7 @@ export const rollback = async (options: TableOptions = {}): Promise<void> => {
  * @returns Promise<void>
  */
 export const migrateToChunked = async (tableName: string, options: TableOptions = {}): Promise<void> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.migrateToChunked(tableName);
+  return runTableOperation(tableName, options, ({ adapter }) => adapter.migrateToChunked(tableName));
 };
 
 /**
@@ -488,10 +644,10 @@ export const update = async (
   data: Record<string, any>,
   options: { where: Record<string, any>; encrypted?: boolean; requireAuthOnAccess?: boolean }
 ): Promise<number> => {
-  const { where } = options ?? {};
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.update(tableName, data, where, options);
+  return runTableOperation(tableName, options, async ({ adapter }) => {
+    const { where } = options ?? {};
+    return adapter.update(tableName, data, where, options);
+  });
 };
 
 /**
@@ -512,9 +668,7 @@ export const update = async (
  * ```
  */
 export const clearTable = async (tableName: string, options: TableOptions = {}): Promise<void> => {
-  const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
-  const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  return adapter.clearTable(tableName);
+  return runTableOperation(tableName, options, ({ adapter }) => adapter.clearTable(tableName));
 };
 
 export const db = {

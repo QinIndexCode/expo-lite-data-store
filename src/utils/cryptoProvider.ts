@@ -2,7 +2,7 @@
  * @module cryptoProvider
  * @description Cryptographic primitives provider with Expo Go compatibility
  * @since 2025-11-17
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import { bytesToHex, hexToBytes } from './byteEncoding';

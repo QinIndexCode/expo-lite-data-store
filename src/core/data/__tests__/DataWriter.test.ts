@@ -4,9 +4,35 @@
 import { CacheManager, CacheStrategy } from '../../cache/CacheManager';
 import { FileOperationManager } from '../../FileOperationManager';
 import { ChunkedFileHandler } from '../../file/ChunkedFileHandler';
+import { SingleFileHandler } from '../../file/SingleFileHandler';
 import { IndexManager } from '../../index/IndexManager';
 import { MetadataManager } from '../../meta/MetadataManager';
+import { getFileSystem } from '../../../utils/fileSystemCompat';
+import { getRootPathSync } from '../../../utils/ROOTPath';
+import logger from '../../../utils/logger';
 import { DataWriter } from '../DataWriter';
+
+const mockPendingSingleFileRead = () => {
+  let resolveRead!: (data: Record<string, any>[]) => void;
+  let signalReadStarted!: () => void;
+  const pendingRead = new Promise<Record<string, any>[]>(resolve => {
+    resolveRead = resolve;
+  });
+  const readStarted = new Promise<void>(resolve => {
+    signalReadStarted = resolve;
+  });
+  const readSpy = jest.spyOn(SingleFileHandler.prototype, 'read').mockImplementation(() => {
+    signalReadStarted();
+    return pendingRead;
+  });
+
+  return {
+    readStarted,
+    resolveRead,
+    restore: () => readSpy.mockRestore(),
+    getCallCount: () => readSpy.mock.calls.length,
+  };
+};
 
 describe('DataWriter', () => {
   let dataWriter: DataWriter;
@@ -195,6 +221,72 @@ describe('DataWriter', () => {
         readAllSpy.mockRestore();
       }
     });
+
+    it('honors forceChunked by converting a single-file table under the write lock', async () => {
+      const forceChunkedTable = 'force_chunked_table';
+      await dataWriter.createTable(forceChunkedTable, {
+        mode: 'single',
+        initialData: [{ id: '1', name: 'before-migration' }],
+      });
+
+      try {
+        const result = await dataWriter.write(
+          forceChunkedTable,
+          { id: '2', name: 'after-migration' },
+          { forceChunked: true }
+        );
+
+        expect(result).toMatchObject({
+          written: 1,
+          totalAfterWrite: 2,
+          chunked: true,
+        });
+        expect(metadataManager.get(forceChunkedTable)).toMatchObject({
+          mode: 'chunked',
+          path: `${forceChunkedTable}/`,
+          count: 2,
+        });
+        await expect(new ChunkedFileHandler(forceChunkedTable, metadataManager).readAll()).resolves.toEqual([
+          { id: '1', name: 'before-migration' },
+          { id: '2', name: 'after-migration' },
+        ]);
+      } finally {
+        await dataWriter.deleteTable(forceChunkedTable);
+      }
+    });
+
+    it('does not publish a forced migration when source-file cleanup fails', async () => {
+      const tableName = 'force_chunked_cleanup_failure_table';
+      const rootPath = getRootPathSync();
+      const sourceFilePath = `${rootPath}${tableName}.ldb`;
+      const fileSystem = getFileSystem();
+
+      await dataWriter.createTable(tableName, {
+        mode: 'single',
+        initialData: [{ id: 'source', value: 'still-authoritative' }],
+      });
+
+      const deleteAsync = fileSystem.deleteAsync.bind(fileSystem);
+      const deleteSpy = jest.spyOn(fileSystem, 'deleteAsync').mockImplementation(async (path, options) => {
+        if (path === sourceFilePath) {
+          throw new Error('simulated source cleanup failure');
+        }
+        await deleteAsync(path, options);
+      });
+
+      try {
+        await expect(dataWriter.write(tableName, { id: 'new', value: 'not-published' }, { forceChunked: true })).rejects.toMatchObject({
+          code: 'FILE_WRITE_FAILED',
+        });
+        expect(metadataManager.get(tableName)).toMatchObject({ mode: 'single', count: 1 });
+        await expect(new SingleFileHandler(sourceFilePath).read()).resolves.toEqual([
+          { id: 'source', value: 'still-authoritative' },
+        ]);
+      } finally {
+        deleteSpy.mockRestore();
+        await dataWriter.deleteTable(tableName);
+      }
+    });
   });
 
   describe('delete', () => {
@@ -268,6 +360,82 @@ describe('DataWriter', () => {
       expect(count).toBe(2);
     });
 
+    it('should return metadata count before its background validation completes', async () => {
+      const records = [
+        { id: '1', name: 'test1', age: 20 },
+        { id: '2', name: 'test2', age: 25 },
+      ];
+      await dataWriter.createTable(testTableName, {
+        mode: 'single',
+        columns: { id: 'string', name: 'string', age: 'number' },
+        initialData: records,
+      });
+
+      const pendingRead = mockPendingSingleFileRead();
+
+      try {
+        const countPromise = dataWriter.count(testTableName);
+        await pendingRead.readStarted;
+
+        let countResult: number | undefined;
+        void countPromise.then(result => {
+          countResult = result;
+        });
+        await Promise.resolve();
+
+        expect(countResult).toBe(2);
+
+        const validations = (dataWriter as unknown as { countValidationInFlight: Map<string, Promise<void>> })
+          .countValidationInFlight;
+        const validation = validations.get(testTableName);
+        expect(validation).toBeDefined();
+
+        pendingRead.resolveRead(records);
+        await validation;
+        await expect(countPromise).resolves.toBe(2);
+      } finally {
+        pendingRead.resolveRead(records);
+        pendingRead.restore();
+      }
+    });
+
+    it('should deduplicate concurrent background count validations per table', async () => {
+      const records = [
+        { id: '1', name: 'test1', age: 20 },
+        { id: '2', name: 'test2', age: 25 },
+      ];
+      await dataWriter.createTable(testTableName, {
+        mode: 'single',
+        columns: { id: 'string', name: 'string', age: 'number' },
+        initialData: records,
+      });
+
+      const pendingRead = mockPendingSingleFileRead();
+
+      try {
+        const countPromises = [
+          dataWriter.count(testTableName),
+          dataWriter.count(testTableName),
+          dataWriter.count(testTableName),
+        ];
+        await pendingRead.readStarted;
+
+        expect(pendingRead.getCallCount()).toBe(1);
+        await expect(Promise.all(countPromises)).resolves.toEqual([2, 2, 2]);
+
+        const validations = (dataWriter as unknown as { countValidationInFlight: Map<string, Promise<void>> })
+          .countValidationInFlight;
+        const validation = validations.get(testTableName);
+        expect(validation).toBeDefined();
+
+        pendingRead.resolveRead(records);
+        await validation;
+      } finally {
+        pendingRead.resolveRead(records);
+        pendingRead.restore();
+      }
+    });
+
     it('should be able to get record count for non-existent table, return 0', async () => {
       // Get record count for non-existent table
       const count = await dataWriter.count('non_existent_table');
@@ -328,6 +496,77 @@ describe('DataWriter', () => {
     it('should be able to safely delete non-existent table', async () => {
       // Directly delete non-existent table, should not throw error
       await expect(dataWriter.deleteTable('non_existent_table')).resolves.not.toThrow();
+    });
+
+    it('keeps metadata and the authoritative table when stale migration cleanup fails', async () => {
+      const tableName = 'delete_cleanup_failure_table';
+      const rootPath = getRootPathSync();
+      const staleSingleFilePath = `${rootPath}${tableName}.ldb`;
+      const fileSystem = getFileSystem();
+
+      await dataWriter.createTable(tableName, {
+        mode: 'chunked',
+        initialData: [{ id: 'current', value: 'authoritative' }],
+      });
+      await new SingleFileHandler(staleSingleFilePath).write([{ id: 'stale', value: 'residual' }]);
+
+      const deleteAsync = fileSystem.deleteAsync.bind(fileSystem);
+      const deleteSpy = jest.spyOn(fileSystem, 'deleteAsync').mockImplementation(async (path, options) => {
+        if (path === staleSingleFilePath) {
+          throw new Error('simulated stale-file cleanup failure');
+        }
+        await deleteAsync(path, options);
+      });
+      const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+
+      try {
+        await expect(dataWriter.deleteTable(tableName)).rejects.toMatchObject({ code: 'TABLE_DELETE_FAILED' });
+        expect(metadataManager.get(tableName)).toMatchObject({ mode: 'chunked', count: 1 });
+        await expect(new ChunkedFileHandler(tableName, metadataManager).readAll()).resolves.toEqual([
+          { id: 'current', value: 'authoritative' },
+        ]);
+        await expect(fileSystem.getInfoAsync(staleSingleFilePath)).resolves.toMatchObject({ exists: true });
+      } finally {
+        errorSpy.mockRestore();
+        deleteSpy.mockRestore();
+        await dataWriter.deleteTable(tableName);
+      }
+    });
+
+    it('purges pending chunk journals so deleted data cannot reappear after a same-name recreation', async () => {
+      const tableName = 'delete_journal_cleanup_table';
+      const rootPath = getRootPathSync();
+      const journalPaths = [
+        `${rootPath}${tableName}.overwrite-journal`,
+        `${rootPath}${tableName}.overwrite-journal.tmp`,
+        `${rootPath}${tableName}.append-journal`,
+        `${rootPath}${tableName}.append-journal.tmp`,
+      ];
+      const handler = new ChunkedFileHandler(tableName, metadataManager);
+
+      await dataWriter.createTable(tableName, {
+        mode: 'chunked',
+        initialData: [{ id: 'deleted', value: 'old-data' }],
+      });
+      await (handler as any).writeOverwriteJournal([{ id: 'deleted', value: 'old-data' }], [{ id: 'next' }]);
+
+      try {
+        await dataWriter.deleteTable(tableName);
+
+        for (const journalPath of journalPaths) {
+          await expect(getFileSystem().getInfoAsync(journalPath)).resolves.toMatchObject({ exists: false });
+        }
+
+        await dataWriter.createTable(tableName, {
+          mode: 'chunked',
+          initialData: [{ id: 'replacement', value: 'new-data' }],
+        });
+        await expect(new ChunkedFileHandler(tableName, metadataManager).readAll()).resolves.toEqual([
+          { id: 'replacement', value: 'new-data' },
+        ]);
+      } finally {
+        await dataWriter.deleteTable(tableName);
+      }
     });
   });
 

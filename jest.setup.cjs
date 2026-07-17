@@ -6,6 +6,7 @@ process.env.NODE_ENV = 'test';
 
 const loggerModule = require('./src/utils/logger');
 const logger = loggerModule?.default ?? loggerModule;
+const diagnosticsEnabled = process.env.EXPO_LITE_DATA_STORE_TEST_DIAGNOSTICS === '1';
 
 logger.info('[jest.setup] Test environment initialized, NODE_ENV =', process.env.NODE_ENV);
 
@@ -87,8 +88,8 @@ global.testMonitor = {
   },
 };
 
-// 添加Jest生命周期钩子来监控测试
-if (typeof beforeEach !== 'undefined') {
+// Per-test watchdogs are opt-in so normal test runs do not add timers or force exits.
+if (diagnosticsEnabled && typeof beforeEach !== 'undefined') {
   beforeEach(() => {
     const currentTest = expect.getState().currentTestName;
     const testPath = expect.getState().testPath;
@@ -98,7 +99,7 @@ if (typeof beforeEach !== 'undefined') {
   });
 }
 
-if (typeof afterEach !== 'undefined') {
+if (diagnosticsEnabled && typeof afterEach !== 'undefined') {
   afterEach(() => {
     const currentTest = expect.getState().currentTestName;
     if (global.testMonitor) {
@@ -144,11 +145,11 @@ if (typeof afterAll !== 'undefined') {
       const { db, plainStorage } = require('./src/core/db');
       if (db && typeof db.cleanup === 'function') {
         logger.info('[jest.setup] afterAll: Cleaning up global db instance');
-        db.cleanup();
+        await db.cleanup();
       }
       if (plainStorage && typeof plainStorage.cleanup === 'function' && plainStorage !== db) {
         logger.info('[jest.setup] afterAll: Cleaning up global plainStorage instance');
-        plainStorage.cleanup();
+        await plainStorage.cleanup();
       }
     } catch (e) {
       logger.warn('[jest.setup] afterAll: Failed to clean up global database instances', e);

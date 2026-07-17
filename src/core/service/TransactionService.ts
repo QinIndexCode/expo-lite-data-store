@@ -2,7 +2,7 @@
  * @module TransactionService
  * @description Transaction service managing begin, commit, and rollback operations
  * @since 2025-11-28
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import { QueryEngine } from '../query/QueryEngine';
@@ -141,7 +141,8 @@ export class TransactionService {
       where: WhereCondition,
       options?: OperationOptions
     ) => Promise<any>,
-    deleteTableFn?: (tableName: string) => Promise<any>
+    deleteTableFn?: (tableName: string) => Promise<any>,
+    finalize?: () => Promise<void>
   ): Promise<void> {
     if (!this.isInTransaction()) {
       throw new TransactionError(
@@ -193,6 +194,8 @@ export class TransactionService {
             break;
         }
       }
+
+      await finalize?.();
     } catch (error) {
       // If operation fails, try to rollback transaction
       await this.rollback(writeFn, deleteTableFn);

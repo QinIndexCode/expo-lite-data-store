@@ -2,7 +2,7 @@
  * @module EncryptedStorageAdapter
  * @description Encrypted storage adapter decorator with field-level encryption
  * @since 2025-11-19
- * @version 2.0.1
+ * @version 3.0.0
  */
 import type { IStorageAdapter } from '../types/storageAdapterInfc';
 import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from '../types/storageTypes';
@@ -11,6 +11,7 @@ import type { TableSchema } from './meta/MetadataManager';
 import {
   decrypt,
   getMasterKey,
+  getMasterKeyGeneration,
   decryptFields,
   decryptBulk,
   decryptFieldsBulk,
@@ -21,14 +22,33 @@ import {
 import { configManager } from './config/ConfigManager';
 import storage from './adapter/FileSystemStorageAdapter';
 import { ErrorHandler as StorageErrorHandler } from '../utils/StorageErrorHandler';
+import { StorageError } from '../types/storageErrorInfc';
 import { QueryEngine } from './query/QueryEngine';
 import logger from '../utils/logger';
+
+type CachedTableData = {
+  data: Record<string, any>[];
+  timestamp: number;
+  sourceCiphertext?: string;
+};
+
+type FullTableWriteSnapshot = {
+  existed: boolean;
+  records: Record<string, any>[];
+  logicalRecordCount?: number;
+};
+
 export class EncryptedStorageAdapter implements IStorageAdapter {
   private keyPromise: Promise<string> | null = null;
-  private cachedData: Map<string, { data: Record<string, any>[]; timestamp: number }> = new Map();
+  private keyGeneration = -1;
+  private cacheKeyGeneration = getMasterKeyGeneration();
+  private cachedData: Map<string, CachedTableData> = new Map();
   private cacheTimeout = configManager.getConfig().encryption.cacheTimeout; // Read cache timeout from config
   private maxCacheSize = configManager.getConfig().encryption.maxCacheSize; // Read max cache size from config
   private requireAuthOnAccess: boolean = false;
+  private pendingLogicalRecordCounts = new Map<string, number>();
+  private transactionLogicalRecordCountSnapshots = new Map<string, number>();
+  private static tableWriteLocks = new Map<string, Promise<void>>();
 
   // Optimization: Add query index cache
   private queryIndexes: Map<string, Map<string, Map<string | number, Record<string, any>[]>>> = new Map();
@@ -42,19 +62,55 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     this.validateConfig();
   }
 
+  private invalidateCachesIfMasterKeyChanged(): void {
+    const currentGeneration = getMasterKeyGeneration();
+    if (this.cacheKeyGeneration !== currentGeneration) {
+      this.cacheKeyGeneration = currentGeneration;
+      this.clearAllCache();
+    }
+  }
+
   /**
    * 获取或初始化密钥
    * 延迟初始化，只有在实际需要使用密钥时才调用getMasterKey()，避免不必要的生物识别/密码识别
    */
   private async getOrInitKey(): Promise<string> {
     if (this.requireAuthOnAccess) {
-      return getMasterKey(true);
+      while (true) {
+        const currentGeneration = getMasterKeyGeneration();
+        const key = await getMasterKey(true);
+        if (currentGeneration === getMasterKeyGeneration()) {
+          return key;
+        }
+      }
     }
 
-    if (!this.keyPromise) {
-      this.keyPromise = getMasterKey(false);
+    while (true) {
+      const currentGeneration = getMasterKeyGeneration();
+      if (!this.keyPromise || this.keyGeneration !== currentGeneration) {
+        this.keyPromise = getMasterKey(false);
+        this.keyGeneration = currentGeneration;
+      }
+
+      const keyPromise = this.keyPromise!;
+      try {
+        const key = await keyPromise;
+        if (currentGeneration === getMasterKeyGeneration()) {
+          return key;
+        }
+      } catch (error) {
+        if (this.keyPromise === keyPromise) {
+          this.keyPromise = null;
+          this.keyGeneration = -1;
+        }
+        throw error;
+      }
+
+      if (this.keyPromise === keyPromise) {
+        this.keyPromise = null;
+        this.keyGeneration = -1;
+      }
     }
-    return this.keyPromise;
   }
 
   async ensureInitialized(): Promise<void> {
@@ -63,7 +119,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     }
 
     if (this.requireAuthOnAccess) {
-      await this.getOrInitKey();
+      await this.key();
     }
   }
 
@@ -112,9 +168,20 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     tableName: string,
     result: WriteResult,
     written: number,
-    totalAfterWrite: number
+    totalAfterWrite: number,
+    snapshot?: FullTableWriteSnapshot
   ): Promise<WriteResult> {
-    await storage.setLogicalRecordCount(tableName, totalAfterWrite);
+    if (this.isStorageTransactionInProgress()) {
+      this.rememberLogicalRecordCountBeforeTransactionWrite(tableName);
+      this.pendingLogicalRecordCounts.set(tableName, totalAfterWrite);
+    } else {
+      try {
+        await storage.setLogicalRecordCount(tableName, totalAfterWrite);
+      } catch (error) {
+        await this.restoreFailedFullTableWrite(tableName, snapshot, error);
+        throw error;
+      }
+    }
     return {
       ...result,
       written,
@@ -123,14 +190,227 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   private async key() {
-    return await this.getOrInitKey();
+    this.invalidateCachesIfMasterKeyChanged();
+    const key = await this.getOrInitKey();
+    this.invalidateCachesIfMasterKeyChanged();
+    return key;
+  }
+
+  private async ensureAccessAuthorized(): Promise<string | undefined> {
+    if (this.requireAuthOnAccess) {
+      return this.key();
+    }
+
+    return undefined;
+  }
+
+  private isStorageTransactionInProgress(): boolean {
+    return typeof (storage as any).isInTransaction === 'function' && (storage as any).isInTransaction();
+  }
+
+  private async withTableWriteLock<T>(tableName: string, operation: () => Promise<T>): Promise<T> {
+    const previous = EncryptedStorageAdapter.tableWriteLocks.get(tableName);
+    let releaseCurrent: (() => void) | undefined;
+    const current = new Promise<void>(resolve => {
+      releaseCurrent = resolve;
+    });
+    const queued = previous ? previous.then(() => current) : current;
+    EncryptedStorageAdapter.tableWriteLocks.set(tableName, queued);
+
+    if (previous) {
+      await previous;
+    }
+
+    try {
+      return await operation();
+    } finally {
+      releaseCurrent?.();
+      if (EncryptedStorageAdapter.tableWriteLocks.get(tableName) === queued) {
+        EncryptedStorageAdapter.tableWriteLocks.delete(tableName);
+      }
+    }
+  }
+
+  private rememberLogicalRecordCountBeforeTransactionWrite(tableName: string): void {
+    if (this.transactionLogicalRecordCountSnapshots.has(tableName)) {
+      return;
+    }
+
+    const currentCount = (storage as any).getTableMeta(tableName)?.count;
+    if (Number.isSafeInteger(currentCount) && currentCount >= 0) {
+      this.transactionLogicalRecordCountSnapshots.set(tableName, currentCount);
+    }
+  }
+
+  private async restoreTransactionLogicalRecordCounts(): Promise<void> {
+    for (const [tableName, count] of this.transactionLogicalRecordCountSnapshots) {
+      await storage.setLogicalRecordCount(tableName, count);
+    }
+  }
+
+  private async restoreTransactionLogicalRecordCountsSafely(): Promise<void> {
+    try {
+      await this.restoreTransactionLogicalRecordCounts();
+    } catch (error) {
+      logger.error('Failed to restore logical record counts after transaction rollback', error);
+    }
+  }
+
+  private async captureFullTableWriteSnapshot(tableName: string): Promise<FullTableWriteSnapshot> {
+    const existed = await storage.hasTable(tableName);
+    if (!existed) {
+      return { existed: false, records: [] };
+    }
+
+    const logicalRecordCount = (storage as any).getTableMeta(tableName)?.count;
+    if (!Number.isSafeInteger(logicalRecordCount) || logicalRecordCount < 0) {
+      throw new StorageError(
+        `Cannot safely update full-table encrypted data for '${tableName}' because its logical record count is invalid`,
+        'TABLE_UPDATE_FAILED',
+        {
+          details: 'The existing logical record count must be a non-negative safe integer before a recoverable write.',
+          suggestion: 'Repair the table metadata before retrying the write.',
+          tableName,
+        }
+      );
+    }
+
+    const records = await storage.read(tableName, { bypassCache: true });
+    return {
+      existed: true,
+      records: this.cloneRecords(records),
+      logicalRecordCount,
+    };
+  }
+
+  private async prepareFullTableWriteSnapshot(tableName: string): Promise<FullTableWriteSnapshot | undefined> {
+    if (this.isStorageTransactionInProgress()) {
+      return undefined;
+    }
+
+    return this.captureFullTableWriteSnapshot(tableName);
+  }
+
+  private async restoreFullTableWriteSnapshot(tableName: string, snapshot: FullTableWriteSnapshot): Promise<void> {
+    try {
+      if (!snapshot.existed) {
+        await storage.deleteTable(tableName);
+        return;
+      }
+
+      await storage.write(tableName, this.cloneRecords(snapshot.records), { mode: 'overwrite' });
+      await storage.setLogicalRecordCount(tableName, snapshot.logicalRecordCount!);
+    } finally {
+      this.clearTableCache(tableName);
+      this.clearFullTableCache(tableName);
+    }
+  }
+
+  private async restoreFailedFullTableWrite(
+    tableName: string,
+    snapshot: FullTableWriteSnapshot | undefined,
+    originalError: unknown
+  ): Promise<void> {
+    if (!snapshot) {
+      throw new StorageError(
+        `Failed to recover full-table encrypted write for '${tableName}' after logical record count publication failed`,
+        'TABLE_UPDATE_FAILED',
+        {
+          cause: originalError,
+          details: 'No pre-write snapshot was available for recovery.',
+          suggestion: 'Verify the table contents before retrying the write.',
+          tableName,
+        }
+      );
+    }
+
+    try {
+      await this.restoreFullTableWriteSnapshot(tableName, snapshot);
+    } catch (recoveryError) {
+      throw new StorageError(
+        `Failed to recover full-table encrypted write for '${tableName}' after logical record count publication failed`,
+        'TABLE_UPDATE_FAILED',
+        {
+          cause: originalError,
+          details: `Recovery failed: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`,
+          suggestion: 'Verify the table contents and metadata before retrying the write.',
+          tableName,
+        }
+      );
+    }
   }
 
   private async getTableMeta(tableName: string) {
     if (typeof (storage as any).ensureInitialized === 'function') {
       await (storage as any).ensureInitialized();
     }
-    return (storage as any).getTableMeta(tableName);
+    const tableMeta = (storage as any).getTableMeta(tableName) as TableSchema | undefined;
+    this.assertTableAccessPolicy(tableName, tableMeta);
+    return tableMeta;
+  }
+
+  private assertTableAccessPolicy(tableName: string, tableMeta: TableSchema | undefined): void {
+    if (tableMeta?.requireAuthOnAccess === true && !this.requireAuthOnAccess) {
+      throw new StorageError(
+        `Table '${tableName}' requires strict access authentication`,
+        'PERMISSION_DENIED',
+        {
+          details: 'This table is bound to the requireAuthOnAccess key scope.',
+          suggestion: 'Repeat the operation with encrypted: true and requireAuthOnAccess: true.',
+          tableName,
+        }
+      );
+    }
+
+    if (this.requireAuthOnAccess && tableMeta && tableMeta.requireAuthOnAccess !== true) {
+      throw new StorageError(
+        `Table '${tableName}' is not bound to the strict access-authentication key scope`,
+        'MIGRATION_FAILED',
+        {
+          details: 'Switching an existing table between normal and strict encryption requires an explicit data migration.',
+          suggestion: 'Migrate the table with an application-controlled flow before enabling requireAuthOnAccess.',
+          tableName,
+        }
+      );
+    }
+  }
+
+  private fullTableCacheKey(tableName: string): string {
+    return `__enc_full_table_${tableName}`;
+  }
+
+  private cloneRecords(data: Record<string, any>[]): Record<string, any>[] {
+    return JSON.parse(JSON.stringify(data)) as Record<string, any>[];
+  }
+
+  private getCachedFullTableData(tableName: string, sourceCiphertext: string): Record<string, any>[] | undefined {
+    if (this.cacheTimeout <= 0) {
+      return undefined;
+    }
+
+    const entry = this.cachedData.get(this.fullTableCacheKey(tableName));
+    if (
+      !entry ||
+      entry.sourceCiphertext !== sourceCiphertext ||
+      Date.now() - entry.timestamp >= this.cacheTimeout
+    ) {
+      return undefined;
+    }
+
+    return this.cloneRecords(entry.data);
+  }
+
+  private cacheFullTableData(tableName: string, data: Record<string, any>[], sourceCiphertext: string): void {
+    if (this.cacheTimeout <= 0) {
+      return;
+    }
+
+    this.cachedData.set(this.fullTableCacheKey(tableName), {
+      data: this.cloneRecords(data),
+      timestamp: Date.now(),
+      sourceCiphertext,
+    });
+    this.manageCacheSize();
   }
 
   /**
@@ -139,6 +419,10 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   private clearTableCache(tableName: string): void {
     this.cachedData.delete(tableName);
     this.queryIndexes.delete(tableName);
+  }
+
+  private clearFullTableCache(tableName: string): void {
+    this.cachedData.delete(this.fullTableCacheKey(tableName));
   }
 
   private resolveConfiguredEncryptedFields(tableMeta: TableSchema | undefined, config: LiteStoreConfig): string[] {
@@ -211,7 +495,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
 
       // Remove最旧的条目，直到缓存大小回到安全范围内
-      const toRemove = entries.slice(0, this.cachedData.size - this.maxCacheSize + 1);
+      const toRemove = entries.slice(0, this.cachedData.size - this.maxCacheSize);
       toRemove.forEach(([tableName]) => {
         this.cachedData.delete(tableName);
         // Also clear corresponding query index
@@ -255,24 +539,48 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       encryptedFields?: string[];
     }
   ): Promise<void> {
+    const accessKey = await this.ensureAccessAuthorized();
     const { initialData = [], ...tableOptions } = options ?? {};
     const alreadyExists = await storage.hasTable(tableName);
     if (alreadyExists) {
+      await this.getTableMeta(tableName);
       return;
     }
 
-    await storage.createTable(tableName, { ...tableOptions, initialData: [] });
+    if (options?.requireAuthOnAccess === true && !this.requireAuthOnAccess) {
+      throw new StorageError(
+        `Table '${tableName}' requires a strict encrypted storage adapter`,
+        'PERMISSION_DENIED',
+        {
+          details: 'requireAuthOnAccess must be selected when the encrypted adapter is created.',
+          suggestion: 'Create the adapter with requireAuthOnAccess: true before creating the table.',
+          tableName,
+        }
+      );
+    }
+
+    await storage.createTable(tableName, {
+      ...tableOptions,
+      encrypted: this.requireAuthOnAccess || tableOptions.encrypted,
+      requireAuthOnAccess: this.requireAuthOnAccess,
+      initialData: [],
+    });
 
     if (initialData.length === 0) {
       return;
     }
 
     try {
-      await this.overwrite(tableName, initialData, {
-        encrypted: options?.encrypted,
-        requireAuthOnAccess: options?.requireAuthOnAccess,
-        encryptFullTable: options?.encryptFullTable,
-      });
+      await this.overwriteWithKey(
+        tableName,
+        initialData,
+        {
+          encrypted: options?.encrypted,
+          requireAuthOnAccess: options?.requireAuthOnAccess,
+          encryptFullTable: options?.encryptFullTable,
+        },
+        accessKey ?? (await this.key())
+      );
     } catch (error) {
       try {
         await storage.deleteTable(tableName);
@@ -284,14 +592,25 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   async deleteTable(tableName: string, _options?: any) {
-    return storage.deleteTable(tableName, _options);
+    await this.ensureAccessAuthorized();
+    return this.withTableWriteLock(tableName, async () => {
+      await this.getTableMeta(tableName);
+      try {
+        return await storage.deleteTable(tableName, _options);
+      } finally {
+        this.clearTableCache(tableName);
+        this.clearFullTableCache(tableName);
+      }
+    });
   }
 
   async hasTable(tableName: string, _options?: any) {
+    await this.ensureAccessAuthorized();
     return storage.hasTable(tableName, _options);
   }
 
   async listTables(_options?: any) {
+    await this.ensureAccessAuthorized();
     return storage.listTables(_options);
   }
 
@@ -307,27 +626,41 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     data: Record<string, any> | Record<string, any>[],
     options?: Omit<WriteOptions, 'mode'>
   ): Promise<WriteResult> {
+    return this.overwriteWithKey(tableName, data, options, await this.key());
+  }
+
+  private async overwriteWithKey(
+    tableName: string,
+    data: Record<string, any> | Record<string, any>[],
+    options: Omit<WriteOptions, 'mode'> | undefined,
+    key: string
+  ): Promise<WriteResult> {
+    return this.withTableWriteLock(tableName, () => this.overwriteWithKeyUnlocked(tableName, data, options, key));
+  }
+
+  private async overwriteWithKeyUnlocked(
+    tableName: string,
+    data: Record<string, any> | Record<string, any>[],
+    options: Omit<WriteOptions, 'mode'> | undefined,
+    key: string
+  ): Promise<WriteResult> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
         // Clear cache for this table
         this.clearTableCache(tableName);
 
-        const finalData = Array.isArray(data) ? data : [data];
-        const key = await this.key();
+        const finalData = this.cloneRecords(Array.isArray(data) ? data : [data]);
 
         let encryptedData: Record<string, any>[] = [];
+        let fullTableCiphertext: string | undefined;
 
         // Get配置，优先使用表级配置，然后是全局配置
         const config = configManager.getConfig();
         const tableMeta = await this.getTableMeta(tableName);
 
         // Decide which encryption strategy to use
-        const useFieldLevelEncryption =
-          options?.encryptFullTable !== true &&
-          (options?.encryptFullTable !== false ||
-            tableMeta?.encryptedFields?.length > 0 ||
-            (config.encryption.encryptedFields && config.encryption.encryptedFields.length > 0) ||
-            !tableMeta?.encryptedFields);
+        const shouldEncryptFullTable = tableMeta?.encryptFullTable === true || options?.encryptFullTable === true;
+        const useFieldLevelEncryption = !shouldEncryptFullTable;
 
         if (useFieldLevelEncryption) {
           // Field-level encryption mode
@@ -351,21 +684,30 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
           return storage.write(tableName, encryptedData, { ...options, mode: 'overwrite' });
         } else {
           // Full table encryption mode
-          const shouldEncryptFullTable = options?.encryptFullTable === true;
           if (shouldEncryptFullTable) {
             // Overwrite mode: Direct encrypted write
             const serializedData = JSON.stringify(finalData);
             const encrypted = await encrypt(serializedData, key);
             encryptedData = [{ __enc: encrypted }];
-
-            // Clear cache because data was overwritten
-            const cacheKey = `__enc_full_table_${tableName}`;
-            (this.cachedData as any).delete(cacheKey);
+            fullTableCiphertext = encrypted;
           }
         }
 
+        const fullTableWriteSnapshot = fullTableCiphertext
+          ? await this.prepareFullTableWriteSnapshot(tableName)
+          : undefined;
         const result = await storage.write(tableName, encryptedData, { ...options, mode: 'overwrite' });
-        return this.normalizeFullTableWriteResult(tableName, result, finalData.length, finalData.length);
+        const normalizedResult = await this.normalizeFullTableWriteResult(
+          tableName,
+          result,
+          finalData.length,
+          finalData.length,
+          fullTableWriteSnapshot
+        );
+        if (fullTableCiphertext) {
+          this.cacheFullTableData(tableName, finalData, fullTableCiphertext);
+        }
+        return normalizedResult;
       },
       cause =>
         StorageErrorHandler.createGeneralError(
@@ -383,16 +725,36 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     data: Record<string, any> | Record<string, any>[],
     options?: WriteOptions
   ): Promise<WriteResult> {
+    return this.writeWithKey(tableName, data, options, await this.key());
+  }
+
+  private async writeWithKey(
+    tableName: string,
+    data: Record<string, any> | Record<string, any>[],
+    options: WriteOptions | undefined,
+    key: string
+  ): Promise<WriteResult> {
+    return this.withTableWriteLock(tableName, () => this.writeWithKeyUnlocked(tableName, data, options, key));
+  }
+
+  private async writeWithKeyUnlocked(
+    tableName: string,
+    data: Record<string, any> | Record<string, any>[],
+    options: WriteOptions | undefined,
+    key: string
+  ): Promise<WriteResult> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
         // Clear cache for this table
         this.clearTableCache(tableName);
 
-        const finalData = Array.isArray(data) ? data : [data];
-        const key = await this.key();
+        const finalData = this.cloneRecords(Array.isArray(data) ? data : [data]);
 
         let encryptedData: Record<string, any>[] = [];
         let fullTableTotal: number | undefined;
+        let fullTableCacheData: Record<string, any>[] | undefined;
+        let fullTableCacheCiphertext: string | undefined;
+        let fullTableWriteSnapshot: FullTableWriteSnapshot | undefined;
 
         // Get配置，优先使用表级配置，然后是全局配置
         const config = configManager.getConfig();
@@ -409,14 +771,8 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         const tableEncryptFullTable = tableMeta?.encryptFullTable || false;
         const tableEncrypted = tableMeta?.encrypted || options?.encrypted || false;
 
-        const useFieldLevelEncryption =
-          options?.encryptFullTable !== true &&
-          !tableEncryptFullTable && // Only skip field-level encryption when full-table is explicitly set
-          (tableEncrypted || // If table is encrypted, default to field-level
-            options?.encryptFullTable !== false || // Or field-level encryption not explicitly disabled
-            tableMeta?.encryptedFields?.length > 0 || // Or table has encrypted fields configured
-            (config.encryption.encryptedFields && config.encryption.encryptedFields.length > 0) || // Or global encrypted fields configured
-            !tableMeta?.encryptedFields); // Or table has no encrypted fields config (default to field-level)
+        const shouldEncryptFullTable = options?.encryptFullTable === true || tableEncryptFullTable;
+        const useFieldLevelEncryption = !shouldEncryptFullTable;
 
         if (useFieldLevelEncryption) {
           // Field-level encryption mode - 性能更好，支持增量写入
@@ -442,12 +798,14 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
           // Field-level encryption supports direct append，不需要重新加密整个表
           // Removeencrypted选项，因为数据已经被加密了，避免重复加密
-          const { encrypted, requireAuthOnAccess, ...writeOptions } = options || {};
+          const writeOptions = { ...options };
+          delete writeOptions.encrypted;
+          delete writeOptions.requireAuthOnAccess;
           return storage.write(tableName, encryptedData, writeOptions);
         } else {
           // Full table encryption mode - 仅在明确要求时使用
-          const shouldEncryptFullTable = options?.encryptFullTable === true || tableMeta?.encryptFullTable || false;
           if (shouldEncryptFullTable) {
+            fullTableWriteSnapshot = await this.prepareFullTableWriteSnapshot(tableName);
             // Check写入模式
             if (options?.mode === 'append') {
               // Full-table encryption append mode optimization
@@ -455,55 +813,36 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
               // Optimization 2: Encrypt only new data, not entire table
               // Optimization 3: Use incremental encryption strategy
 
-              // Try to get decrypted data from cache
-              let cachedDecryptedData = null;
-
               // Read existing encrypted data first
-              const existingEncrypted = await storage.read(tableName, { bypassCache: true });
+              const existingEncrypted = fullTableWriteSnapshot?.records ?? (await storage.read(tableName, { bypassCache: true }));
               let combinedData = finalData;
 
               if (existingEncrypted.length > 0 && existingEncrypted[0].__enc) {
-                // Check if有有效缓存
-                const cacheKey = `__enc_full_table_${tableName}`;
-                const cacheEntry = (this.cachedData as any).get(cacheKey);
-
-                // If cache is valid (within 1 min), use cached data
-                if (cacheEntry && Date.now() - cacheEntry.timestamp < 60000) {
-                  cachedDecryptedData = cacheEntry.data;
-                  combinedData = Array.isArray(cachedDecryptedData)
-                    ? [...cachedDecryptedData, ...finalData]
-                    : [...[cachedDecryptedData], ...finalData];
-                } else {
-                  // Cache无效，解密现有数据
-                  const decrypted = await decrypt(existingEncrypted[0].__enc, key);
-                  const existingData = JSON.parse(decrypted);
-                  combinedData = Array.isArray(existingData)
-                    ? [...existingData, ...finalData]
-                    : [...[existingData], ...finalData];
-
-                  // Update缓存
-                  (this.cachedData as any).set(cacheKey, {
-                    data: combinedData,
-                    timestamp: Date.now(),
-                  });
-                }
+                const existingCiphertext = existingEncrypted[0].__enc;
+                const cachedData = this.getCachedFullTableData(tableName, existingCiphertext);
+                const existingData = cachedData ?? JSON.parse(await decrypt(existingCiphertext, key));
+                const normalizedExistingData = Array.isArray(existingData) ? existingData : [existingData];
+                combinedData = [...normalizedExistingData, ...finalData];
               }
+
+              // The cached plaintext must track every append, including a cache
+              // hit, otherwise a later append can overwrite an earlier record.
+              fullTableCacheData = combinedData;
 
               // Optimization 4: Use more efficient serialization and encryption
               const serializedData = JSON.stringify(combinedData);
               const encrypted = await encrypt(serializedData, key);
               encryptedData = [{ __enc: encrypted }];
+              fullTableCacheCiphertext = encrypted;
               fullTableTotal = combinedData.length;
             } else {
               // Overwrite mode: Direct encrypted write
               const serializedData = JSON.stringify(finalData);
               const encrypted = await encrypt(serializedData, key);
               encryptedData = [{ __enc: encrypted }];
+              fullTableCacheData = finalData;
+              fullTableCacheCiphertext = encrypted;
               fullTableTotal = finalData.length;
-
-              // Clear cache because data was overwritten
-              const cacheKey = `__enc_full_table_${tableName}`;
-              (this.cachedData as any).delete(cacheKey);
             }
           } else {
             // Not explicitly required full-table, check if table needs encryption
@@ -539,10 +878,23 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         }
 
         // Removeencrypted和requireAuthOnAccess选项，因为数据已经被加密了，避免重复加密
-        const { encrypted: encOpt, requireAuthOnAccess: reqAuth, ...finalWriteOptions } = options || {};
-        const result = await storage.write(tableName, encryptedData, { ...finalWriteOptions, mode: options?.mode });
+        const finalWriteOptions = { ...options };
+        delete finalWriteOptions.encrypted;
+        delete finalWriteOptions.requireAuthOnAccess;
+        const storageMode = fullTableTotal !== undefined ? 'overwrite' : options?.mode;
+        const result = await storage.write(tableName, encryptedData, { ...finalWriteOptions, mode: storageMode });
         if (fullTableTotal !== undefined) {
-          return this.normalizeFullTableWriteResult(tableName, result, finalData.length, fullTableTotal);
+          const normalizedResult = await this.normalizeFullTableWriteResult(
+            tableName,
+            result,
+            finalData.length,
+            fullTableTotal,
+            fullTableWriteSnapshot
+          );
+          if (fullTableCacheData && fullTableCacheCiphertext) {
+            this.cacheFullTableData(tableName, fullTableCacheData, fullTableCacheCiphertext);
+          }
+          return normalizedResult;
         }
         return result;
       },
@@ -558,6 +910,14 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   async read(tableName: string, options?: ReadOptions & { bypassCache?: boolean }): Promise<Record<string, any>[]> {
+    return this.readWithKey(tableName, options, await this.key());
+  }
+
+  private async readWithKey(
+    tableName: string,
+    options: (ReadOptions & { bypassCache?: boolean }) | undefined,
+    key: string
+  ): Promise<Record<string, any>[]> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
         // If cache timeout is 0，清除所有缓存并禁用缓存
@@ -569,16 +929,19 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         // Always read latest data from underlying adapter，忽略缓存
         // Ensures we get latest disk data，包括刚提交的事务数据
         // Only pass read-related options，不传递查询相关的选项
+        const tableMeta = await this.getTableMeta(tableName);
         const readOptions = options ? { bypassCache: options.bypassCache } : undefined;
         const raw = await storage.read(tableName, readOptions);
-        if (raw.length === 0) return [];
+        if (raw.length === 0) {
+          this.clearTableCache(tableName);
+          this.clearFullTableCache(tableName);
+          return [];
+        }
 
         const first = raw[0];
         let result: Record<string, any>[] = [];
-        const key = await this.key();
 
         // Get table的元数据，以确定是否启用了字段级加密
-        const tableMeta = await this.getTableMeta(tableName);
         const config = configManager.getConfig();
         // Prefer table metadata encrypted fields over global config
         const encryptedFields = this.resolveFieldsForRead(raw, tableMeta, config);
@@ -587,6 +950,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
           // Full data decryption
           const decryptedData = JSON.parse(await decrypt(first['__enc'], key));
           result = Array.isArray(decryptedData) ? decryptedData : [decryptedData];
+          this.cacheFullTableData(tableName, result, first['__enc']);
         } else if (first?.['__enc_bulk']) {
           // Batch data decryption
           const decryptedStrings = await decryptBulk(first['__enc_bulk'], key);
@@ -616,7 +980,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         // Only when cache timeout is greater than 0，才更新缓存
         if (this.cacheTimeout > 0) {
           this.cachedData.set(tableName, {
-            data: result,
+            data: this.cloneRecords(result),
             timestamp: Date.now(),
           });
 
@@ -639,7 +1003,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
           }
         }
 
-        return result;
+        return this.cloneRecords(result);
       },
       cause =>
         StorageErrorHandler.createGeneralError(
@@ -653,6 +1017,11 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   async count(tableName: string): Promise<number> {
+    return this.countWithKey(tableName, await this.key());
+  }
+
+  private async countWithKey(tableName: string, key: string): Promise<number> {
+    await this.getTableMeta(tableName);
     // Optimization: Get count from cache if valid, avoid reading all data
     const cached = this.cachedData.get(tableName);
     if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
@@ -660,7 +1029,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     }
 
     // For encrypted tables, read all data to get count
-    const data = await this.read(tableName);
+    const data = await this.readWithKey(tableName, undefined, key);
     return data.length;
   }
 
@@ -669,15 +1038,16 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
    * 对于加密表，计数直接从数据读取，不涉及元数据
    */
   async verifyCount(tableName: string): Promise<{ metadata: number; actual: number; match: boolean }> {
+    const key = await this.key();
     const tableMeta = await this.getTableMeta(tableName);
     if (!tableMeta?.encryptFullTable) {
       return storage.verifyCount(tableName);
     }
 
     const metadata = tableMeta.count ?? 0;
-    const actual = await this.count(tableName);
+    const actual = await this.countWithKey(tableName, key);
     const match = metadata === actual;
-    if (!match) {
+    if (!match && !this.isStorageTransactionInProgress()) {
       await storage.setLogicalRecordCount(tableName, actual);
     }
     return { metadata, actual, match };
@@ -686,6 +1056,8 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   async findOne(tableName: string, filter: Record<string, any>, options?: any): Promise<Record<string, any> | null> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
+        const key = await this.key();
+        await this.getTableMeta(tableName);
         // Optimization: Use index for fast lookup
         if (configManager.getConfig().performance.enableQueryOptimization) {
           // Get所有索引字段
@@ -706,7 +1078,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
                   // If matches found, use QueryEngine for more precise filtering
                   const filtered = QueryEngine.filter(indexedData, filter);
                   if (filtered.length > 0) {
-                    return filtered[0];
+                    return this.cloneRecords([filtered[0]])[0];
                   }
                 }
               }
@@ -715,9 +1087,9 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         }
 
         // No usable index or not found, fallback to read all data
-        const data = await this.read(tableName, options);
+        const data = await this.readWithKey(tableName, options, key);
         const filtered = QueryEngine.filter(data, filter);
-        return filtered.length > 0 ? filtered[0] : null;
+        return filtered.length > 0 ? this.cloneRecords([filtered[0]])[0] : null;
       },
       cause =>
         StorageErrorHandler.createGeneralError(
@@ -743,6 +1115,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     },
     findOptions?: any
   ): Promise<Record<string, any>[]> {
+    const key = await this.key();
     // Prefer cache
     // Only pass read-related options，不传递skip和limit等查询选项
     const readOptions = { ...findOptions };
@@ -753,7 +1126,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     delete readOptions.order;
     delete readOptions.sortAlgorithm;
 
-    let data = await this.read(tableName, readOptions);
+    let data = await this.readWithKey(tableName, readOptions, key);
 
     // Apply filtering - 使用QueryEngine处理所有复杂查询操作符
     if (filter) {
@@ -774,9 +1147,9 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     const limit = options?.limit;
 
     if (limit !== undefined) {
-      return data.slice(skip, skip + limit);
+      return this.cloneRecords(data.slice(skip, skip + limit));
     } else {
-      return data.slice(skip);
+      return this.cloneRecords(data.slice(skip));
     }
   }
 
@@ -799,111 +1172,125 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     >,
     options?: any
   ): Promise<WriteResult> {
-    // Clear cache
-    this.clearTableCache(tableName);
+    const key = await this.key();
     if (operations.length > 0 && operations.every(operation => operation.type === 'insert')) {
       const insertItems = operations.flatMap(operation =>
         Array.isArray(operation.data) ? operation.data : [operation.data]
       );
-      const result = await this.write(tableName, insertItems, options);
+      const result = await this.writeWithKey(tableName, insertItems, { ...options, mode: 'append' }, key);
       return {
         ...result,
         written: insertItems.length,
       };
     }
 
-    // 1. 读取所有数据，传递options参数确保正确处理加密数据
-    const allData = await this.read(tableName, options);
+    return this.withTableWriteLock(tableName, async () => {
+      this.clearTableCache(tableName);
+      const allData = await this.readWithKey(tableName, options, key);
+      let finalData = [...allData];
+      let writtenCount = 0;
 
-    let finalData = [...allData];
-    let writtenCount = 0;
-
-    // 2. 执行所有操作
-    for (const operation of operations) {
-      if (operation.type === 'insert') {
-        // Insert operation
-        const insertData = Array.isArray(operation.data) ? operation.data : [operation.data];
-        finalData = [...finalData, ...insertData];
-        writtenCount += insertData.length;
-      } else if (operation.type === 'update') {
-        // Update操作（operation.data现在是单个对象，不是数组）
-        if (operation.where) {
-          // Update with where condition
-          const matchedItems = QueryEngine.filter(finalData, operation.where);
-          const matchedItemRefs = new Set(matchedItems);
-          finalData = finalData.map(item =>
-            matchedItemRefs.has(item) ? QueryEngine.update(item, operation.data) : item
-          );
-          writtenCount += matchedItems.length;
-        } else {
-          // Update by id
-          const index = finalData.findIndex(item => item.id === operation.data.id);
-          if (index !== -1) {
-            finalData[index] = QueryEngine.update(finalData[index], operation.data);
-            writtenCount++;
+      for (const operation of operations) {
+        if (operation.type === 'insert') {
+          const insertData = Array.isArray(operation.data) ? operation.data : [operation.data];
+          finalData = [...finalData, ...insertData];
+          writtenCount += insertData.length;
+        } else if (operation.type === 'update') {
+          if (operation.where) {
+            const matchedItems = QueryEngine.filter(finalData, operation.where);
+            const matchedItemRefs = new Set(matchedItems);
+            finalData = finalData.map(item =>
+              matchedItemRefs.has(item) ? QueryEngine.update(item, operation.data) : item
+            );
+            writtenCount += matchedItems.length;
+          } else {
+            const index = finalData.findIndex(item => item.id === operation.data.id);
+            if (index !== -1) {
+              finalData[index] = QueryEngine.update(finalData[index], operation.data);
+              writtenCount++;
+            }
+          }
+        } else if (operation.type === 'delete') {
+          if (operation.where) {
+            const matchedItems = QueryEngine.filter(finalData, operation.where);
+            const matchedItemRefs = new Set(matchedItems);
+            finalData = finalData.filter(item => !matchedItemRefs.has(item));
+            writtenCount += matchedItems.length;
+          } else {
+            finalData = [];
+            writtenCount = allData.length;
           }
         }
-      } else if (operation.type === 'delete') {
-        // Delete操作（不再需要处理operation.data）
-        if (operation.where) {
-          // Delete with where condition
-          const matchedItems = QueryEngine.filter(finalData, operation.where);
-          const matchedItemRefs = new Set(matchedItems);
-          finalData = finalData.filter(item => !matchedItemRefs.has(item));
-          writtenCount += matchedItems.length;
-        } else {
-          // Delete所有数据
-          finalData = [];
-          writtenCount = allData.length;
-        }
       }
-    }
 
-    // 3. 使用write方法重新写入数据，确保加密逻辑正确应用
-    // Important: Must use overwrite mode, as data already merged
-    const result = await this.write(tableName, finalData, { ...options, mode: 'overwrite' });
+      const result = await this.writeWithKeyUnlocked(tableName, finalData, { ...options, mode: 'overwrite' }, key);
 
-    return { ...result, written: writtenCount };
+      return { ...result, written: writtenCount };
+    });
   }
 
   async migrateToChunked(tableName: string): Promise<void> {
-    this.clearTableCache(tableName);
-    await storage.migrateToChunked(tableName);
-    this.clearTableCache(tableName);
+    await this.ensureAccessAuthorized();
+    await this.withTableWriteLock(tableName, async () => {
+      await this.getTableMeta(tableName);
+      this.clearTableCache(tableName);
+      this.clearFullTableCache(tableName);
+      await storage.migrateToChunked(tableName);
+      this.clearTableCache(tableName);
+      this.clearFullTableCache(tableName);
+    });
   }
 
   async delete(tableName: string, where: Record<string, any>, options?: any): Promise<number> {
-    // Clear cache
-    this.clearTableCache(tableName);
+    const key = await this.key();
+    return this.withTableWriteLock(tableName, async () => {
+      this.clearTableCache(tableName);
+      const allData = await this.readWithKey(tableName, options, key);
+      const matchedItems = QueryEngine.filter(allData, where);
+      const matchedItemRefs = new Set(matchedItems);
+      const remainingData = allData.filter(item => !matchedItemRefs.has(item));
 
-    // 1. 读取所有数据
-    const allData = await this.read(tableName, options);
-
-    // 2. 使用QueryEngine处理复杂条件过滤
-    const matchedItems = QueryEngine.filter(allData, where);
-
-    const matchedItemRefs = new Set(matchedItems);
-    const remainingData = allData.filter(item => !matchedItemRefs.has(item));
-
-    // 4. 重新写入数据
-    await this.write(tableName, remainingData, { ...options, mode: 'overwrite' });
-
-    return matchedItems.length;
+      await this.writeWithKeyUnlocked(tableName, remainingData, { ...options, mode: 'overwrite' }, key);
+      return matchedItems.length;
+    });
   }
 
   async beginTransaction(options?: any): Promise<void> {
-    return storage.beginTransaction(options);
+    await this.ensureAccessAuthorized();
+    await storage.beginTransaction(options);
+    this.pendingLogicalRecordCounts.clear();
+    this.transactionLogicalRecordCountSnapshots.clear();
   }
 
   async commit(options?: any): Promise<void> {
-    // Call underlying storage commit directly
-    // Transaction managed by underlying storage, adapter only handles encryption
-    // All transaction ops handled at lower level, adapter methods auto-apply encryption
-    return storage.commit(options);
+    await this.ensureAccessAuthorized();
+    const pendingCounts = new Map(this.pendingLogicalRecordCounts);
+    try {
+      await storage.commit(options, async () => {
+        for (const [tableName, count] of pendingCounts) {
+          await storage.setLogicalRecordCount(tableName, count);
+        }
+      });
+    } catch (error) {
+      await this.restoreTransactionLogicalRecordCountsSafely();
+      throw error;
+    } finally {
+      this.clearAllCache();
+      this.pendingLogicalRecordCounts.clear();
+      this.transactionLogicalRecordCountSnapshots.clear();
+    }
   }
 
   async rollback(options?: any): Promise<void> {
-    return storage.rollback(options);
+    await this.ensureAccessAuthorized();
+    try {
+      await storage.rollback(options);
+    } finally {
+      await this.restoreTransactionLogicalRecordCountsSafely();
+      this.clearAllCache();
+      this.pendingLogicalRecordCounts.clear();
+      this.transactionLogicalRecordCountSnapshots.clear();
+    }
   }
 
   async update(
@@ -912,66 +1299,38 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     where: Record<string, any>,
     options?: any
   ): Promise<number> {
-    // Clear cache
-    this.clearTableCache(tableName);
+    const key = await this.key();
+    return this.withTableWriteLock(tableName, async () => {
+      this.clearTableCache(tableName);
+      const allData = await this.readWithKey(tableName, options, key);
+      const matchedItems = QueryEngine.filter(allData, where);
+      const matchedItemRefs = new Set(matchedItems);
+      let updatedCount = 0;
+      const updatedData = allData.map(item => {
+        if (matchedItemRefs.has(item)) {
+          updatedCount++;
+          return QueryEngine.update(item, data);
+        }
+        return item;
+      });
 
-    // Not in transaction, execute update directly
-    // Transaction handled by underlying storage, adapter only handles encryption
-    // All transaction ops handled at lower level, adapter methods auto-apply encryption
-    // 1. 读取所有数据，不传递where条件给read方法，但传递options
-    const allData = await this.read(tableName, options);
-
-    // 2. 找到匹配where条件的记录
-    let updatedCount = 0;
-
-    // Use QueryEngine for complex condition filtering
-    const matchedItems = QueryEngine.filter(allData, where);
-
-    const matchedItemRefs = new Set(matchedItems);
-
-    // Update数据
-    const updatedData = allData.map(item => {
-      if (matchedItemRefs.has(item)) {
-        updatedCount++;
-        return QueryEngine.update(item, data);
-      }
-      return item;
+      await this.writeWithKeyUnlocked(tableName, updatedData, { ...options, mode: 'overwrite' }, key);
+      return updatedCount;
     });
-
-    // 3. 使用write方法重新写入数据，确保加密逻辑正确应用
-    // Ensure correct encryption mode
-    await this.write(tableName, updatedData, { ...options, mode: 'overwrite' });
-
-    return updatedCount;
   }
 
   async remove(tableName: string, where: Record<string, any>, options?: any): Promise<number> {
-    // Clear cache
-    this.clearTableCache(tableName);
-
-    // 1. 读取所有数据
-    const allData = await this.read(tableName, options);
-
-    // 2. 使用QueryEngine处理复杂条件过滤
-    const matchedItems = QueryEngine.filter(allData, where);
-    const removedCount = matchedItems.length;
-
-    // 3. 过滤掉匹配的记录
-    const matchedItemRefs = new Set(matchedItems);
-    const remainingData = allData.filter(item => !matchedItemRefs.has(item));
-
-    // 4. 使用write方法重新写入数据，确保加密逻辑正确应用
-    await this.write(tableName, remainingData, options);
-
-    return removedCount;
+    return this.delete(tableName, where, options);
   }
 
   async clearTable(tableName: string): Promise<void> {
-    // Clear cache
-    this.clearTableCache(tableName);
-
-    // Call underlying storage adapter clearTable directly
-    await storage.clearTable(tableName);
+    await this.ensureAccessAuthorized();
+    await this.withTableWriteLock(tableName, async () => {
+      await this.getTableMeta(tableName);
+      this.clearTableCache(tableName);
+      this.clearFullTableCache(tableName);
+      await storage.clearTable(tableName);
+    });
   }
 
   async insert(

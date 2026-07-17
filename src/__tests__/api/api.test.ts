@@ -22,13 +22,17 @@ import {
   update,
   clearTable
 } from '../../expo-lite-data-store';
+import { dbManager } from '../../core/db';
+import storage from '../../core/adapter/FileSystemStorageAdapter';
+import { EncryptedStorageAdapter } from '../../core/EncryptedStorageAdapter';
 
 describe('Complete API Tests', () => {
   const TEST_TABLE_PREFIX = 'api_test_';
   let testTable: string;
+  let testTableSequence = 0;
 
   beforeEach(() => {
-    testTable = `${TEST_TABLE_PREFIX}${Date.now()}`;
+    testTable = `${TEST_TABLE_PREFIX}${Date.now()}_${++testTableSequence}`;
   });
 
   afterAll(async () => {
@@ -42,6 +46,133 @@ describe('Complete API Tests', () => {
   });
 
   describe('Table Management APIs', () => {
+    it('does not allow the default public surface to bypass a strict table', async () => {
+      const strictTable = `${TEST_TABLE_PREFIX}strict_${Date.now()}`;
+      const strictAdapter = new EncryptedStorageAdapter({ requireAuthOnAccess: true });
+      const keySpy = jest.spyOn(strictAdapter as any, 'key').mockResolvedValue('strict-test-key');
+
+      try {
+        await strictAdapter.createTable(strictTable, { encrypted: true });
+
+        await expect(overwrite(strictTable, [{ id: 1, value: 'blocked' }])).rejects.toMatchObject({
+          code: 'PERMISSION_DENIED',
+        });
+        await expect(read(strictTable, { encrypted: false })).rejects.toMatchObject({
+          code: 'PERMISSION_DENIED',
+        });
+        await expect(listTables()).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      } finally {
+        keySpy.mockRestore();
+        await storage.deleteTable(strictTable).catch(() => undefined);
+      }
+    });
+
+    it('does not route a normal encrypted table through the plain facade', async () => {
+      const encryptedTable = `${TEST_TABLE_PREFIX}encrypted_${Date.now()}`;
+      const encryptedAdapter = new EncryptedStorageAdapter();
+      const keySpy = jest.spyOn(encryptedAdapter as any, 'key').mockResolvedValue('encrypted-test-key');
+
+      try {
+        await encryptedAdapter.createTable(encryptedTable, { encrypted: true, encryptFullTable: true });
+
+        await expect(read(encryptedTable)).rejects.toMatchObject({
+          code: 'PERMISSION_DENIED',
+        });
+        await expect(overwrite(encryptedTable, [{ id: 1, value: 'blocked' }])).rejects.toMatchObject({
+          code: 'PERMISSION_DENIED',
+        });
+      } finally {
+        keySpy.mockRestore();
+        await storage.deleteTable(encryptedTable).catch(() => undefined);
+      }
+    });
+
+    it('serializes an ordinary insert behind a paused strict table creation', async () => {
+      const strictTable = `${TEST_TABLE_PREFIX}strict_policy_lock_${Date.now()}_${++testTableSequence}`;
+      let releaseStrictCreate: () => void = () => undefined;
+      const strictCreateGate = new Promise<void>(resolve => {
+        releaseStrictCreate = resolve;
+      });
+      let signalStrictCreateStarted: () => void = () => undefined;
+      const strictCreateStarted = new Promise<void>(resolve => {
+        signalStrictCreateStarted = resolve;
+      });
+      const strictAdapter = {
+        createTable: jest.fn(async (tableName: string, options: any) => {
+          signalStrictCreateStarted();
+          await strictCreateGate;
+          await storage.createTable(tableName, options);
+        }),
+      };
+      const plainAdapter = {
+        insert: jest.fn((tableName: string, data: Record<string, any>, options?: any) =>
+          storage.insert(tableName, data, options)
+        ),
+      };
+      const getDbInstanceSpy = jest
+        .spyOn(dbManager, 'getDbInstance')
+        .mockImplementation((encrypted, requireAuthOnAccess) =>
+          (encrypted && requireAuthOnAccess ? strictAdapter : plainAdapter) as any
+        );
+      let strictCreation: Promise<void> | undefined;
+      let ordinaryInsert: Promise<unknown> | undefined;
+
+      try {
+        strictCreation = createTable(strictTable, { encrypted: true, requireAuthOnAccess: true });
+        await strictCreateStarted;
+
+        ordinaryInsert = insert(strictTable, { id: 'plain-write' });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(plainAdapter.insert).not.toHaveBeenCalled();
+
+        releaseStrictCreate();
+        await strictCreation;
+
+        await expect(ordinaryInsert).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+        expect(plainAdapter.insert).not.toHaveBeenCalled();
+        expect(storage.getTableMeta(strictTable)).toMatchObject({
+          encrypted: true,
+          requireAuthOnAccess: true,
+        });
+        await expect(storage.read(strictTable, { bypassCache: true })).resolves.toEqual([]);
+      } finally {
+        releaseStrictCreate();
+        if (strictCreation) {
+          await strictCreation.catch(() => undefined);
+        }
+        if (ordinaryInsert) {
+          await ordinaryInsert.catch(() => undefined);
+        }
+        getDbInstanceSpy.mockRestore();
+        await storage.deleteTable(strictTable).catch(() => undefined);
+      }
+    });
+
+    it('revalidates a plain table list when a strict table appears after precheck', async () => {
+      const strictTable = `${TEST_TABLE_PREFIX}strict_list_race_${Date.now()}_${++testTableSequence}`;
+      const plainAdapter = {
+        listTables: jest.fn(async () => {
+          await storage.createTable(strictTable, { encrypted: true, requireAuthOnAccess: true });
+          return [strictTable];
+        }),
+      };
+      const getDbInstanceSpy = jest.spyOn(dbManager, 'getDbInstance').mockReturnValue(plainAdapter as any);
+
+      try {
+        await expect(storage.hasTable(strictTable)).resolves.toBe(false);
+        await expect(listTables()).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+        expect(plainAdapter.listTables).toHaveBeenCalledTimes(1);
+        expect(storage.getTableMeta(strictTable)).toMatchObject({
+          encrypted: true,
+          requireAuthOnAccess: true,
+        });
+      } finally {
+        getDbInstanceSpy.mockRestore();
+        await storage.deleteTable(strictTable).catch(() => undefined);
+      }
+    });
+
     it('should create, check, and delete table', async () => {
       // 创建表
       await createTable(testTable);
@@ -448,6 +579,47 @@ describe('Complete API Tests', () => {
           await rollback({});
         }
         throw error;
+      }
+    });
+
+    it('pins every public operation to the strict-auth transaction facade', async () => {
+      const strictAdapter = {
+        beginTransaction: jest.fn().mockResolvedValue(undefined),
+        commit: jest.fn().mockResolvedValue(undefined),
+        rollback: jest.fn().mockResolvedValue(undefined),
+        insert: jest.fn().mockResolvedValue({ written: 1, totalAfterWrite: 1, chunked: false }),
+      };
+      const plainAdapter = {
+        beginTransaction: jest.fn().mockResolvedValue(undefined),
+        commit: jest.fn().mockResolvedValue(undefined),
+        rollback: jest.fn().mockResolvedValue(undefined),
+        insert: jest.fn().mockResolvedValue({ written: 1, totalAfterWrite: 1, chunked: false }),
+      };
+      const getDbInstanceSpy = jest
+        .spyOn(dbManager, 'getDbInstance')
+        .mockImplementation((encrypted, requireAuthOnAccess) =>
+          (encrypted && requireAuthOnAccess ? strictAdapter : plainAdapter) as any
+        );
+
+      try {
+        await beginTransaction({ encrypted: false, requireAuthOnAccess: true });
+        await insert('strict_transaction_table', { id: 1 });
+
+        await expect(commit({ encrypted: true, requireAuthOnAccess: false })).rejects.toThrow(
+          'Transaction security options must match the active transaction'
+        );
+        await commit();
+
+        expect(getDbInstanceSpy).toHaveBeenCalledWith(true, true);
+        expect(strictAdapter.insert).toHaveBeenCalledTimes(1);
+        expect(strictAdapter.commit).toHaveBeenCalledTimes(1);
+        expect(plainAdapter.insert).not.toHaveBeenCalled();
+        expect(plainAdapter.commit).not.toHaveBeenCalled();
+      } finally {
+        if (strictAdapter.commit.mock.calls.length === 0) {
+          await rollback().catch(() => undefined);
+        }
+        getDbInstanceSpy.mockRestore();
       }
     });
   });

@@ -17,6 +17,8 @@ The package is designed around the following runtime guarantees:
 - optional native crypto acceleration in development builds and standalone apps;
 - storage-folder migration from legacy beta roots to the stable `lite-data-store` root.
 
+> **v3 migration:** `plainStorage` and package deep imports such as `expo-lite-data-store/dist/js/...` are no longer public. Import the root `db` facade or named APIs from `expo-lite-data-store` instead. Calls to a table created with `encrypted: true` must continue to pass `encrypted: true`; plain-surface access is rejected.
+
 ## Support Matrix
 
 | Surface                            | Status                                                 |
@@ -167,7 +169,7 @@ Use `mode: 'chunked'` when:
 - you expect heavy append or overwrite patterns;
 - you want the runtime to split data into chunk files after the configured threshold.
 
-The library can also switch to chunked handling automatically when the initial payload clearly exceeds the configured chunk threshold.
+When a table is created with `initialData`, the runtime automatically selects chunked mode only when its serialized-size estimate exceeds half of the configured `chunkSize` (more than 2.5 MiB with the default 5 MiB value). Later writes do not implicitly migrate a single-file table; choose `mode: 'chunked'` or use `migrateToChunked()` when that transition is required.
 
 Chunked overwrites and appends use recovery journals and cleanup of partially written chunks. Append metadata is committed before the recovery journal is removed, and reads reject incomplete chunk sets instead of silently returning partial data. Table metadata uses serialized temp-file publication, so overlapping table writes cannot lose a later metadata update.
 
@@ -347,25 +349,17 @@ const result = await db.verifyCountTable('users');
 The current runtime resolves configuration from lowest to highest priority in this order:
 
 1. built-in defaults from `defaultConfig`
-2. environment variables
-3. Expo runtime config from `app.json` / `app.config.*`
-4. `global.liteStoreConfig`
-5. programmatic overrides through `configManager.setConfig()`, `configManager.updateConfig()`, and `configManager.set()`
+2. supported `LITE_STORE_*` environment variables
+3. one Expo runtime configuration source
+4. programmatic overrides through `configManager.setConfig()`, `configManager.updateConfig()`, and `configManager.set()`
 
-Within Expo runtime config, the loader checks:
-
-1. `global.__expoConfig`
-2. `expo-constants.getConfig()`
-3. `Constants.expoConfig`
-4. `Constants.manifest`
-5. `Constants.extra.liteStore`
-6. `global.expo.extra.liteStore`
+The runtime configuration layer is not a merge of every host source. In an Expo, React Native, or test runtime, it uses the first available source in this order: `global.__expoConfig.extra.liteStore`, `expo-constants` (`getConfig()`, `expoConfig`, `manifest`, or `extra`), `global.expo.extra.liteStore`, then `global.liteStoreConfig` as a fallback.
 
 ### Common runtime config keys
 
 | Key                                    | Default           | Purpose                                                                                     |
 | -------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------- |
-| `chunkSize`                            | `5242880`         | Chunk threshold in bytes                                                                    |
+| `chunkSize`                            | `5242880`         | Target chunk size in bytes; initial-data auto-selection starts above half this value       |
 | `storageFolder`                        | `lite-data-store` | Root folder under Expo file storage                                                         |
 | `sortMethods`                          | `default`         | Default sort strategy hint                                                                  |
 | `timeout`                              | `10000`           | Timeout for selected file operations                                                        |
@@ -379,6 +373,8 @@ Within Expo runtime config, the loader checks:
 | `autoSync.interval`                    | `30000`           | Auto-sync interval in milliseconds                                                          |
 | `autoSync.minItems`                    | `1`               | Minimum queued item count before auto-sync                                                  |
 | `autoSync.batchSize`                   | `100`             | Max items processed per auto-sync batch                                                     |
+
+`storageFolder` is a single directory name, not a path: separators, encoded separators, and traversal names are rejected. Set it before the first storage operation. Changing it while an adapter is active is rejected so metadata and cached state cannot be mixed across roots.
 
 ### Environment variables currently recognized
 
@@ -448,6 +444,8 @@ Regular encrypted storage works in Expo Go.
 
 `requireAuthOnAccess: true` is strict. When the current runtime cannot enforce per-access authentication, the library throws `AUTH_ON_ACCESS_UNSUPPORTED`.
 
+Strict access is a separate key scope, not an in-place upgrade for existing regular encrypted tables. Migrate application data explicitly: read it with the regular encrypted surface while its key is still available, write and verify it in a separately created strict table, then retire the old table and key. The library never silently reuses a regular master key for strict access.
+
 That means:
 
 - Expo Go is suitable for plain storage, chunked storage, and regular encrypted storage validation;
@@ -456,12 +454,14 @@ That means:
 
 ### Existing on-device data
 
-Stable 2.x runtime logic keeps compatibility with earlier beta output formats, including:
+Stable 3.x runtime logic keeps compatibility with earlier beta output formats, including:
 
 - metadata files;
 - plain table files;
 - chunked table layouts;
 - encrypted payload variants produced by earlier beta builds.
+
+This compatibility does not convert regular encrypted data into strict-access data. Enabling `requireAuthOnAccess` for an existing regular encrypted table without an application-controlled data migration fails with `MIGRATION_FAILED`.
 
 When the stable default root `lite-data-store` does not already exist, the runtime can migrate legacy `expo-lite-data` content automatically.
 

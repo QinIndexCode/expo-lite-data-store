@@ -100,9 +100,9 @@ describe('Crypto Performance Benchmark', () => {
 
       const encrypted = await encrypt(TEST_DATA, MASTER_KEY);
 
-      // CTR payloads don't have version field
+      // CTR v2 authenticates the payload version and encryption parameters.
       const decoded = JSON.parse(atob(encrypted));
-      expect(decoded.version).toBeUndefined();
+      expect(decoded.version).toBe('ctr-v2');
       expect(decoded.hmac).toBeDefined();
     });
   });

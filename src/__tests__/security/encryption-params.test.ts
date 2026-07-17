@@ -2,38 +2,27 @@
 // 测试加密参数功能
 // 验证非加密模式不触发生物识别，加密模式可选择是否需要生物识别
 
-import { createTable, insert, read, update, findOne, remove, deleteTable } from '../../expo-lite-data-store';
+import { createTable, insert, read, update, findOne, remove } from '../../expo-lite-data-store';
+import { plainStorage } from '../../core/db';
+import { resetMasterKey } from '../../utils/crypto';
 
 describe('Encryption Parameters Test', () => {
   const TABLE_NAME = 'test_encryption_params';
   const SENSITIVE_TABLE = 'test_sensitive_data';
 
+  const cleanupTestTables = async (): Promise<void> => {
+    await plainStorage.deleteTable(TABLE_NAME).catch(() => undefined);
+    await plainStorage.deleteTable(SENSITIVE_TABLE).catch(() => undefined);
+  };
+
   beforeEach(async () => {
-    // 清理测试表
-    try {
-      await deleteTable(TABLE_NAME);
-    } catch (error) {
-      // 表不存在，忽略错误
-    }
-    try {
-      await deleteTable(SENSITIVE_TABLE);
-    } catch (error) {
-      // 表不存在，忽略错误
-    }
+    await cleanupTestTables();
+    await resetMasterKey();
   });
 
   afterEach(async () => {
-    // 清理测试表
-    try {
-      await deleteTable(TABLE_NAME);
-    } catch (error) {
-      // 表不存在，忽略错误
-    }
-    try {
-      await deleteTable(SENSITIVE_TABLE);
-    } catch (error) {
-      // 表不存在，忽略错误
-    }
+    await cleanupTestTables();
+    await resetMasterKey();
   });
 
   test('非加密模式下的操作应正常工作，不触发生物识别', async () => {

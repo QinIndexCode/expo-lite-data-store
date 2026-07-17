@@ -4,7 +4,7 @@
 
 ## Scope of this reference
 
-This document is the detailed API reference for the current `2.x` public surface. It covers:
+This document is the detailed API reference for the current `3.x` public surface. It covers:
 
 - the supported install contract;
 - the exported facade and named functions;
@@ -13,6 +13,10 @@ This document is the detailed API reference for the current `2.x` public surface
 - crypto helpers, exported error types, and common runtime failure codes.
 
 For a narrative setup guide, start with [README.en.md](../README.en.md). For maintainer release evidence and runtime verification lanes, use [EXPO_RUNTIME_QA.en.md](./EXPO_RUNTIME_QA.en.md).
+
+## v3 Migration
+
+`plainStorage` and package deep imports (`expo-lite-data-store/dist/js/...` or `dist/cjs/...`) are no longer public. Use the root `db` facade or named APIs imported from `expo-lite-data-store`. A table created with `encrypted: true` must be accessed with `encrypted: true` on every table operation; requests that select the plain surface fail closed.
 
 ## Installation Contract
 
@@ -59,11 +63,10 @@ import { db, configManager, performanceMonitor, StorageError, StorageErrorCode }
 | Named CRUD functions          | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked` |
 | Transaction functions         | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                  |
 | Config exports                | `configManager`, `ConfigManager`                                                                                                                                                                                          |
-| Monitoring exports            | `performanceMonitor`                                                                                                                                                                                                      |
-| Crypto helpers                | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`                                                                                   |
+| Monitoring exports            | `performanceMonitor`; type-only `PerformanceStats`, `HealthCheckResult`                                                                                                                                                  |
+| Crypto helpers                | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`; type-only `KeyCacheStats`                                                         |
 | Error exports                 | `StorageError`, `StorageErrorCode`, `CryptoError`                                                                                                                                                                         |
-| Type exports                  | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FilterCondition`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`                               |
-| Advanced plain adapter access | `plainStorage`                                                                                                                                                                                                            |
+| Type exports                  | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FilterCondition`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats` |
 
 ### `db` facade vs named exports
 
@@ -93,6 +96,8 @@ These flags decide which storage surface the call is routed to.
 
 - `encrypted: true` selects the encrypted adapter surface.
 - `requireAuthOnAccess: true` implies an encrypted surface and requests strict per-access authentication semantics.
+
+Strict tables are bound to that authentication key scope. A regular encrypted surface cannot access a strict table, and a strict surface cannot reinterpret an existing regular encrypted table. Move existing data through an application-controlled migration to a newly created strict table before retiring the regular table and key.
 
 ### `WriteResult`
 
@@ -250,6 +255,8 @@ const tables = await listTables();
 ```
 
 Returns every known table for the selected surface.
+
+If any table uses `requireAuthOnAccess: true`, both `listTables()` and `listTables({ encrypted: true })` fail with `PERMISSION_DENIED` to avoid exposing strict-table metadata. Call `listTables({ encrypted: true, requireAuthOnAccess: true })` instead.
 
 ### `countTable(tableName, options?)`
 
@@ -547,6 +554,8 @@ configManager.updateConfig({
 });
 ```
 
+`storageFolder` accepts one directory name only; path separators, encoded separators, and traversal names are rejected. Configure it before the first storage operation. Changing it while an adapter is active is rejected to prevent metadata or cached state from crossing storage roots.
+
 #### `configManager.resetConfig()`
 
 Drops programmatic overrides and returns to merged defaults plus non-programmatic sources.
@@ -572,11 +581,12 @@ configManager.set('monitoring.enablePerformanceTracking', true);
 
 Current precedence from lowest to highest:
 
-1. built-in defaults
-2. environment variables
-3. Expo runtime config from `app.json` / `app.config.*`
-4. `global.liteStoreConfig`
-5. programmatic config manager overrides
+1. built-in defaults;
+2. supported `LITE_STORE_*` environment variables;
+3. one Expo runtime configuration source; and
+4. programmatic config manager overrides.
+
+The runtime configuration layer is not a merge of every host source. In an Expo, React Native, or test runtime, the loader uses the first available source in this order: `global.__expoConfig.extra.liteStore`, `expo-constants` (`getConfig()`, `expoConfig`, `manifest`, or `extra`), `global.expo.extra.liteStore`, then `global.liteStoreConfig` as a fallback.
 
 ### `app.json` example
 
@@ -699,6 +709,7 @@ Current helper set:
 - the default `encryption.algorithm` is `auto`, and current runtime behavior routes new writes through the `AES-GCM` path unless the caller explicitly selects `AES-CTR`;
 - `AES-CTR` exists for explicit configuration and legacy compatibility;
 - `requireAuthOnAccess: true` is strict and throws `AUTH_ON_ACCESS_UNSUPPORTED` if the runtime cannot truly enforce per-access authentication;
+- a strict key scope is never silently derived from or substituted for a regular master key; attempting an in-place strict upgrade of existing encrypted data fails with `MIGRATION_FAILED` until the application migrates and verifies the data explicitly;
 - Expo Go supports regular encrypted storage but not strict biometric or per-access authentication guarantees.
 
 ## Errors and Failure Semantics
@@ -734,11 +745,12 @@ try {
 | ---------------------------- | -------------------------------------------------------------------------- |
 | `EXPO_MODULE_MISSING`        | Required Expo runtime package is missing                                   |
 | `AUTH_ON_ACCESS_UNSUPPORTED` | Strict per-access authentication cannot be enforced in the current runtime |
+| `PERMISSION_DENIED`          | A request selected a weaker storage surface than the table's encryption or strict-authentication policy |
 | `TABLE_NOT_FOUND`            | The requested table does not exist                                         |
 | `TABLE_NAME_INVALID`         | The table name is empty or invalid                                         |
 | `TABLE_COLUMN_INVALID`       | A declared column uses an unsupported type                                 |
 | `QUERY_FAILED`               | The query engine failed to execute the condition                           |
-| `MIGRATION_FAILED`           | Table migration failed                                                     |
+| `MIGRATION_FAILED`           | Table migration failed, or strict authentication requires an explicit key/data migration |
 | `TRANSACTION_IN_PROGRESS`    | A transaction already exists on the current surface                        |
 | `NO_TRANSACTION_IN_PROGRESS` | `commit()` or `rollback()` was called with no active transaction           |
 | `LOCK_TIMEOUT`               | Concurrent write lock acquisition exceeded the timeout budget              |
@@ -750,10 +762,6 @@ try {
 Crypto helper failures may raise `CryptoError` for crypto-specific fault paths.
 
 ## Advanced Exports
-
-### `plainStorage`
-
-`plainStorage` exposes the underlying non-encrypted adapter. This is an advanced export and should usually be reserved for debugging or low-level integration work.
 
 ### `CryptoService`
 

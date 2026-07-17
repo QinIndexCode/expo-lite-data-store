@@ -82,11 +82,20 @@ gh secret list --app actions
    node -p "require('./package.json').version"
    ```
 
-6. 创建并推送与该版本完全一致的 annotated tag。下面是示例，实际操作时应替换为上一步打印的版本：
+6. 创建并推送与该版本完全一致的 annotated tag。以下 POSIX shell 示例从 `package.json` 读取版本，避免手工填写过期 tag：
 
    ```bash
-   git tag -a v2.0.2 -m "Release v2.0.2"
-   git push origin v2.0.2
+   VERSION="$(node -p "require('./package.json').version")"
+   git tag -a "v${VERSION}" -m "Release v${VERSION}"
+   git push origin "v${VERSION}"
+   ```
+
+   在 PowerShell 中可使用等价写法：
+
+   ```powershell
+   $version = node -p "require('./package.json').version"
+   git tag -a "v$version" -m "Release v$version"
+   git push origin "v$version"
    ```
 
 7. 观察 `Release package`，成功后核对 registry：

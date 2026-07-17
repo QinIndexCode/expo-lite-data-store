@@ -2,7 +2,7 @@
  * @module PerformanceMonitor
  * @description Performance monitor collecting and reporting application metrics
  * @since 2025-11-28
- * @version 2.1.0
+ * @version 3.0.0
  */
 import { configManager } from '../config/ConfigManager';
 

@@ -83,7 +83,7 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 
 #### ChunkedFileHandler
 
-- Automatic data chunking (>5MB files)
+- At table creation, automatically selects chunked mode when the initial-data estimate exceeds half of the configured `chunkSize` (default: >2.5 MiB)
 - Atomic writes with temp file + rename
 - Overwrite and append recovery journals
 - Partial append chunk cleanup on failure
@@ -171,7 +171,7 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 
 ### 4.1 Write Flow
 
-1. Client calls `write`/`insert`/`overwrite`
+1. Client calls the public `insert`, `overwrite`, `update`, `remove`, `clearTable`, or `bulkWrite` API
 2. FileSystemStorageAdapter validates input
 3. DataWriter validates data and ensures table exists
 4. Write operation executes (single-file or chunked mode)
@@ -236,6 +236,13 @@ These are implementation characteristics, not device-independent latency guarant
 - Key cache with LRU cleanup
 - Master key reset support (logout/reset)
 
+### 6.4 Access-Bound Table Policy
+
+- A table created with `encrypted: true` must be accessed through calls that also pass `encrypted: true`; a plain-surface request fails with `PERMISSION_DENIED` rather than exposing ciphertext or appending plaintext.
+- A table created with `requireAuthOnAccess: true` is bound to a separate strict-authentication key scope. `requireAuthOnAccess: true` implicitly selects the encrypted surface; callers should normally pass both flags explicitly. A weaker access surface fails with `PERMISSION_DENIED`.
+- Strict access is not an in-place upgrade for a regular encrypted table. The application must migrate and verify data into a newly created strict table; a silent key substitution is never used.
+- To avoid revealing strict-table metadata, `listTables()` requires strict options whenever a strict table exists.
+
 ## 7. Expo Go Compatibility
 
 | Feature       | Expo Go                          | Standalone APK/IPA           |
@@ -248,16 +255,18 @@ These are implementation characteristics, not device-independent latency guarant
 
 ## 8. Configuration
 
-Configuration can be provided via:
+Configuration is merged from lowest to highest priority:
 
-1. `configManager.updateConfig()` (highest priority)
-2. `global.__expoConfig` (Expo environment)
-3. `app.json` extra field
-4. Default configuration (lowest priority)
+1. built-in defaults;
+2. supported `LITE_STORE_*` environment variables;
+3. one Expo runtime configuration source; and
+4. `configManager.setConfig()`, `updateConfig()`, or `set()` overrides.
+
+The runtime layer selects the first available source rather than merging every host source: `global.__expoConfig.extra.liteStore`, then `expo-constants` configuration (`getConfig()`, `expoConfig`, `manifest`, or `extra`), then `global.expo.extra.liteStore`, and finally `global.liteStoreConfig` as a fallback. Runtime-source lookup is active in Expo, React Native, and test environments.
 
 Key configuration options:
 
-- `chunkSize`: File chunk size (default: 5MB)
+- `chunkSize`: Target chunk size (default: 5 MiB); initial-data auto-selection begins above half this value
 - `encryption.algorithm`: 'auto' | 'AES-GCM' | 'AES-CTR'
 - `encryption.keyIterations`: PBKDF2 iterations (default: 600,000)
 - `cache.maxSize`: Maximum cache entries

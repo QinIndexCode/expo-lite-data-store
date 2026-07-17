@@ -2,7 +2,7 @@
  * @module storageErrorCode
  * @description Runtime error code constants plus the corresponding string-literal type.
  * @since 2025-11-19
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 export const StorageErrorCode = {
@@ -69,6 +69,7 @@ export const StorageErrorCode = {
   MIGRATION_FAILED: 'MIGRATION_FAILED',
   WRITTEN_COUNT_MISMATCH: 'WRITTEN_COUNT_MISMATCH',
   BULK_OPERATION_FAILED: 'BULK_OPERATION_FAILED',
+  STORAGE_ROOT_CHANGED: 'STORAGE_ROOT_CHANGED',
   // Transaction error codes
   TRANSACTION_IN_PROGRESS: 'TRANSACTION_IN_PROGRESS',
   NO_TRANSACTION_IN_PROGRESS: 'NO_TRANSACTION_IN_PROGRESS',

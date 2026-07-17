@@ -2,7 +2,7 @@
  * @module FileSystemStorageAdapter
  * @description File system storage adapter implementing IStorageAdapter interface
  * @since 2025-11-19
- * @version 2.0.1
+ * @version 3.0.0
  */
 // Created
 // Last modified
@@ -30,6 +30,7 @@ import { AutoSyncService } from '../service/AutoSyncService';
 import { ErrorHandler as StorageErrorHandler } from '../../utils/StorageErrorHandler';
 import { ensureStorageRootReady, getRootPathSync } from '../../utils/ROOTPath';
 import { getFileSystem } from '../../utils/fileSystemCompat';
+import { pathHelper } from '../../utils/PathHelper';
 import { QueryEngine } from '../query/QueryEngine';
 import { assertValidTableName } from '../../utils/tableName';
 /**
@@ -61,9 +62,24 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   private initializationPromise: Promise<void> | null = null;
   private servicesStarted = false;
   private taskQueueInitialized = false;
+  private initializedStorageFolder: string | null = null;
 
   private validateTableName(tableName: string): void {
     assertValidTableName(tableName);
+  }
+
+  private assertStorageRootIsCurrent(): void {
+    if (!this.servicesStarted || !this.initializedStorageFolder) {
+      return;
+    }
+
+    const configuredFolder = pathHelper.getStorageFolder();
+    if (configuredFolder !== this.initializedStorageFolder) {
+      throw new StorageError('storageFolder changed while storage is active', 'STORAGE_ROOT_CHANGED', {
+        details: `The adapter is initialized for "${this.initializedStorageFolder}" but configuration now selects "${configuredFolder}".`,
+        suggestion: 'Configure storageFolder before initialization. Test-only cleanup/reinitialization flows must finish cleanup before the next operation.',
+      });
+    }
   }
 
   private flattenInsertOperations(
@@ -158,7 +174,14 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    * 初始化运行时依赖
    */
   private async initializeRuntime(): Promise<void> {
+    const storageFolder = pathHelper.getStorageFolder();
     await ensureStorageRootReady();
+
+    if (pathHelper.getStorageFolder() !== storageFolder) {
+      throw new StorageError('storageFolder changed during initialization', 'STORAGE_ROOT_CHANGED', {
+        suggestion: 'Configure storageFolder before initializing storage.',
+      });
+    }
 
     const metadataManager = this.metadataManager as MetadataManager & {
       reload?: () => Promise<void>;
@@ -183,11 +206,13 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       this.autoSyncService.start(true);
     }
 
+    this.initializedStorageFolder = storageFolder;
     this.servicesStarted = true;
   }
 
   async ensureInitialized(): Promise<void> {
     if (this.servicesStarted) {
+      this.assertStorageRootIsCurrent();
       return;
     }
 
@@ -226,6 +251,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     this.initializationPromise = null;
     this.servicesStarted = false;
     this.taskQueueInitialized = false;
+    this.initializedStorageFolder = null;
   }
 
   // ==================== 表管理 ====================
@@ -598,6 +624,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    * @returns 表的元数据，或者undefined如果表不存在
    */
   getTableMeta(tableName: string): any | undefined {
+    this.assertStorageRootIsCurrent();
     this.validateTableName(tableName);
     return this.metadataManager.get(tableName);
   }
@@ -1037,6 +1064,14 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
   // ==================== 事务管理 ====================
   /**
+   * Exposes transaction state to decorators that must defer metadata updates
+   * until the underlying write has committed.
+   */
+  isInTransaction(): boolean {
+    return this.transactionService.isInTransaction();
+  }
+
+  /**
    * 开始事务
    * @returns Promise<void>
    * @throws {Error} 当事务已存在时抛出
@@ -1052,7 +1087,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
    * @returns Promise<void>
    * @throws {Error} 当事务不存在时抛出
    */
-  async commit(options?: any): Promise<void> {
+  async commit(options?: any, finalize?: () => Promise<void>): Promise<void> {
     await this.ensureInitialized();
     await this.transactionService.commit(
       // writeFn - Write handler function
@@ -1090,7 +1125,8 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
         return updatedCount;
       },
-      (tableName: string) => this.deleteTable(tableName)
+      (tableName: string) => this.deleteTable(tableName),
+      finalize
     );
   }
 
@@ -1122,130 +1158,24 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     await this.ensureInitialized();
     this.validateTableName(tableName);
 
-    // Execute migration directly，不使用任务队列，避免无限递归
-    // Read当前表数据
-    const data = await this.read(tableName);
+    // Preserve the existing metadata-recovery path before handing the actual
+    // conversion to DataWriter, which owns the per-table write lock.
+    if (!this.metadataManager.get(tableName)) {
+      const data = await this.read(tableName, { bypassCache: true });
+      if (!this.metadataManager.get(tableName)) {
+        await this.recoverTableMetaFromFiles(tableName, data.length);
+      }
+    }
 
-    // Get当前表的元数据
-    const tableMeta =
-      this.metadataManager.get(tableName) ?? (await this.recoverTableMetaFromFiles(tableName, data.length));
-    if (!tableMeta) {
+    if (!this.metadataManager.get(tableName)) {
       throw new StorageError(`Table ${tableName} not found`, 'TABLE_NOT_FOUND', {
         details: `Failed to migrate table ${tableName} to chunked mode: table not found`,
         suggestion: 'Check if the table name is correct',
       });
     }
 
-    if (tableMeta.mode === 'chunked') {
-      return;
-    }
-
-    const restoreMetadata = async (mode: 'single' | 'chunked', count: number): Promise<void> => {
-      const currentMeta = this.metadataManager.get(tableName);
-      this.metadataManager.update(tableName, {
-        ...tableMeta,
-        mode,
-        path: mode === 'chunked' ? `${tableName}/` : `${tableName}.ldb`,
-        count,
-        chunks: mode === 'chunked' ? (currentMeta?.chunks ?? 0) : 0,
-        createdAt: tableMeta.createdAt,
-        updatedAt: Date.now(),
-      });
-      if (typeof this.metadataManager.saveImmediately === 'function') {
-        await this.metadataManager.saveImmediately();
-      }
-    };
-
-    // Generate temporary table name，避免与原表冲突
-    const tempTableName = `${tableName}_temp_${Date.now()}`;
-
-    try {
-      // 1. 创建临时分片表
-      await this.createTable(tempTableName, {
-        mode: 'chunked',
-        initialData: data,
-        columns: tableMeta.columns,
-        isHighRisk: tableMeta.isHighRisk,
-        highRiskFields: tableMeta.highRiskFields,
-        encryptedFields: tableMeta.encryptedFields,
-        encrypted: tableMeta.encrypted,
-        encryptFullTable: tableMeta.encryptFullTable,
-      });
-
-      // 2. 验证临时表数据完整性
-      const tempTableData = await this.read(tempTableName);
-      if (tempTableData.length !== data.length) {
-        throw new StorageError(
-          `Data integrity check failed during migration`,
-          'DATA_INCOMPLETE', // DATA_INCOMPLETE
-          {
-            details: `Failed to migrate table ${tableName} to chunked mode: data count mismatch`,
-            suggestion: "Try migrating again or check if there's enough storage space",
-          }
-        );
-      }
-
-      // 3. 删除原表
-      await this.deleteTable(tableName);
-
-      // 4. 创建新的分片表，使用原表名
-      await this.createTable(tableName, {
-        mode: 'chunked',
-        initialData: tempTableData,
-        columns: tableMeta.columns,
-        isHighRisk: tableMeta.isHighRisk,
-        highRiskFields: tableMeta.highRiskFields,
-        encryptedFields: tableMeta.encryptedFields,
-        encrypted: tableMeta.encrypted,
-        encryptFullTable: tableMeta.encryptFullTable,
-      });
-
-      await restoreMetadata('chunked', tempTableData.length);
-
-      // 5. 验证新表数据完整性
-      const newTableData = await this.read(tableName);
-      if (newTableData.length !== data.length) {
-        throw new StorageError(
-          `Data integrity check failed after migration`,
-          'DATA_INCOMPLETE', // DATA_INCOMPLETE
-          {
-            details: `Failed to migrate table ${tableName} to chunked mode: final data count mismatch`,
-            suggestion: "Try migrating again or check if there's enough storage space",
-          }
-        );
-      }
-
-      // 6. 清理临时表
-      await this.deleteTable(tempTableName);
-    } catch (error) {
-      // If error during migration, try to restore original table
-      if (await this.hasTable(tempTableName)) {
-        // Validate临时表是否存在且数据完整
-        const tempTableData = await this.read(tempTableName);
-        if (tempTableData.length === data.length) {
-          // Restore the original storage mode and metadata from the verified temp copy.
-          if (await this.hasTable(tableName)) {
-            await this.deleteTable(tableName);
-          }
-          await this.createTable(tableName, {
-            mode: tableMeta.mode || 'single',
-            initialData: tempTableData,
-            columns: tableMeta.columns,
-            isHighRisk: tableMeta.isHighRisk,
-            highRiskFields: tableMeta.highRiskFields,
-            encryptedFields: tableMeta.encryptedFields,
-            encrypted: tableMeta.encrypted,
-            encryptFullTable: tableMeta.encryptFullTable,
-          });
-          await restoreMetadata(tableMeta.mode || 'single', tempTableData.length);
-        }
-        // Cleanup临时表
-        await this.deleteTable(tempTableName);
-      }
-
-      // Re-throw error
-      throw error;
-    }
+    await this.dataWriter.migrateToChunked(tableName);
+    this.cacheService.clearTableCache(tableName);
   }
 }
 

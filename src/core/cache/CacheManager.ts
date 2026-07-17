@@ -2,11 +2,14 @@
  * @module CacheManager
  * @description Cache manager with LRU/LFU strategies, compression, and protection mechanisms
  * @since 2025-11-28
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import { CACHE } from '../constants';
 import { configManager } from '../config/ConfigManager';
+
+const EXPIRY_HEAP_REBUILD_MULTIPLIER = 4;
+const MIN_EXPIRY_HEAP_SIZE = 64;
 
 /**
  * 缓存策略枚举
@@ -275,6 +278,22 @@ export class CacheManager {
     }
   }
 
+  private rebuildExpiryHeapIfNeeded(): void {
+    const maxHeapEntries = Math.max(MIN_EXPIRY_HEAP_SIZE, this.cache.size * EXPIRY_HEAP_REBUILD_MULTIPLIER);
+    if (this.expiryHeap.length <= maxHeapEntries) {
+      return;
+    }
+
+    this.expiryHeap = Array.from(
+      this.cache,
+      ([key, item]): [number, string] => [item.expiry, key]
+    );
+
+    for (let index = Math.floor(this.expiryHeap.length / 2) - 1; index >= 0; index--) {
+      this.heapifyDown(index);
+    }
+  }
+
   /**
    * 构造函数
    *
@@ -492,6 +511,8 @@ export class CacheManager {
       removed++;
     }
 
+    this.rebuildExpiryHeapIfNeeded();
+
     if (removed > 0) {
       this.updateStats();
     }
@@ -632,14 +653,7 @@ export class CacheManager {
 
     // Check if过期
     if (item.expiry < Date.now()) {
-      this.cache.delete(key);
-      // Remove from LRU or LFU
-      if (this.config.strategy === CacheStrategy.LRU) {
-        this.removeFromLRU(key);
-      } else if (this.config.strategy === CacheStrategy.LFU) {
-        this.updateLFU(key); // This removes old frequency
-      }
-      this.updateStats();
+      this.delete(key);
       return undefined;
     }
 
@@ -739,6 +753,8 @@ export class CacheManager {
     // Check内存使用量，如果超过阈值则清理
     this.cleanupByMemoryUsage();
 
+    this.rebuildExpiryHeapIfNeeded();
+
     this.updateStats();
   }
 
@@ -809,6 +825,7 @@ export class CacheManager {
         }
       }
       this.cache.delete(key);
+      this.rebuildExpiryHeapIfNeeded();
       this.updateStats();
     }
   }

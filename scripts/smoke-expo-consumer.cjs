@@ -110,27 +110,40 @@ const ensureBuiltArtifacts = root => {
   }
 };
 
+const removeTemporaryDirectory = directory => {
+  try {
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  } catch (error) {
+    console.warn(`Failed to clean temporary smoke directory: ${directory}`, error);
+  }
+};
+
 const packRepoTarball = root => {
   ensureBuiltArtifacts(root);
   const packDir = fs.mkdtempSync(path.join(os.tmpdir(), 'expo-lite-data-store-pack-'));
-  const packResult = runJson(npmCmd, ['pack', '--json', '--ignore-scripts', '--pack-destination', packDir], root);
-  const [packMetadata] = packResult;
-  const packagedPaths = Array.isArray(packMetadata?.files) ? packMetadata.files.map(file => file.path) : [];
+  try {
+    const packResult = runJson(npmCmd, ['pack', '--json', '--ignore-scripts', '--pack-destination', packDir], root);
+    const [packMetadata] = packResult;
+    const packagedPaths = Array.isArray(packMetadata?.files) ? packMetadata.files.map(file => file.path) : [];
 
-  if (packagedPaths.length > 0) {
-    const missingPackagedArtifacts = requiredBuiltArtifacts.filter(
-      relativePath => !packagedPaths.includes(relativePath)
-    );
+    if (packagedPaths.length > 0) {
+      const missingPackagedArtifacts = requiredBuiltArtifacts.filter(
+        relativePath => !packagedPaths.includes(relativePath)
+      );
 
-    if (missingPackagedArtifacts.length > 0) {
-      throw new Error(`Packed tarball is missing required build artifacts: ${missingPackagedArtifacts.join(', ')}`);
+      if (missingPackagedArtifacts.length > 0) {
+        throw new Error(`Packed tarball is missing required build artifacts: ${missingPackagedArtifacts.join(', ')}`);
+      }
     }
-  }
 
-  return {
-    packDir,
-    tarballPath: path.join(packDir, packMetadata.filename),
-  };
+    return {
+      packDir,
+      tarballPath: path.join(packDir, packMetadata.filename),
+    };
+  } catch (error) {
+    removeTemporaryDirectory(packDir);
+    throw error;
+  }
 };
 
 const writeConsumerFiles = consumerDir => {
@@ -189,15 +202,13 @@ const main = () => {
     run(npxCmd, ['expo-doctor'], tempDir);
     run(npxCmd, ['expo', 'export', '--platform', 'android', '--clear'], tempDir);
   } catch (error) {
-    console.error(`Expo consumer smoke test failed. Temporary app preserved at: ${tempDir}`);
+    console.error(`Expo consumer smoke test failed. Temporary app will be cleaned up: ${tempDir}`);
     throw error;
   } finally {
-    if (tarballPath && fs.existsSync(tarballPath)) {
-      fs.unlinkSync(tarballPath);
+    if (packDir) {
+      removeTemporaryDirectory(packDir);
     }
-    if (packDir && fs.existsSync(packDir)) {
-      fs.rmSync(packDir, { recursive: true, force: true });
-    }
+    removeTemporaryDirectory(tempDir);
   }
 };
 
@@ -209,6 +220,7 @@ module.exports = {
   createCommandEnv,
   ensureBuiltArtifacts,
   hasBuiltArtifacts,
+  main,
   parseJsonOutput,
   packRepoTarball,
   resolveCommandInvocation,

@@ -8,8 +8,13 @@ jest.mock('child_process', () => ({
 
 describe('smoke expo consumer helpers', () => {
   const scriptPath = path.resolve(__dirname, '../../../scripts/smoke-expo-consumer.cjs');
+  const temporaryRoots: string[] = [];
 
-  const createTempRepo = () => fs.mkdtempSync(path.join(os.tmpdir(), 'expo-lite-data-store-smoke-helper-'));
+  const createTempRepo = () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'expo-lite-data-store-smoke-helper-'));
+    temporaryRoots.push(root);
+    return root;
+  };
 
   const writeArtifacts = (root: string) => {
     const artifactPaths = ['dist/js/index.js', 'dist/cjs/index.js', 'dist/types/index.d.ts'];
@@ -31,6 +36,13 @@ describe('smoke expo consumer helpers', () => {
       stderr: '',
       error: null,
     });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    for (const root of temporaryRoots.splice(0)) {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('detects when required build artifacts are missing', () => {
@@ -146,5 +158,57 @@ describe('smoke expo consumer helpers', () => {
 
     delete process.env.npm_config_dry_run;
     delete process.env.NPM_CONFIG_DRY_RUN;
+  });
+
+  it('cleans managed temporary directories after a successful smoke run', () => {
+    const { spawnSync } = require('child_process') as { spawnSync: jest.Mock };
+    const originalMkdtempSync = fs.mkdtempSync;
+    const createdDirectories: string[] = [];
+    const packagedFiles = ['dist/js/index.js', 'dist/cjs/index.js', 'dist/types/index.d.ts'].map(file => ({ path: file }));
+
+    jest.spyOn(fs, 'mkdtempSync').mockImplementation(prefix => {
+      const directory = originalMkdtempSync(prefix);
+      createdDirectories.push(directory);
+      return directory;
+    });
+    spawnSync.mockImplementation((_command: string, args: string[]) => ({
+      status: 0,
+      stdout: args.includes('pack')
+        ? JSON.stringify([{ filename: 'expo-lite-data-store-smoke.tgz', files: packagedFiles }])
+        : '',
+      stderr: '',
+      error: null,
+    }));
+
+    const smokeModule = require(scriptPath) as { main: () => void };
+    smokeModule.main();
+
+    expect(createdDirectories).toHaveLength(2);
+    expect(createdDirectories.every(directory => !fs.existsSync(directory))).toBe(true);
+  });
+
+  it('cleans managed temporary directories when packing fails', () => {
+    const { spawnSync } = require('child_process') as { spawnSync: jest.Mock };
+    const originalMkdtempSync = fs.mkdtempSync;
+    const createdDirectories: string[] = [];
+
+    jest.spyOn(fs, 'mkdtempSync').mockImplementation(prefix => {
+      const directory = originalMkdtempSync(prefix);
+      createdDirectories.push(directory);
+      return directory;
+    });
+    spawnSync.mockImplementation((_command: string, args: string[]) => ({
+      status: 0,
+      stdout: args.includes('pack') ? 'invalid pack output' : '',
+      stderr: '',
+      error: null,
+    }));
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const smokeModule = require(scriptPath) as { main: () => void };
+
+    expect(() => smokeModule.main()).toThrow('Command output did not contain a valid JSON payload');
+    expect(createdDirectories).toHaveLength(2);
+    expect(createdDirectories.every(directory => !fs.existsSync(directory))).toBe(true);
   });
 });

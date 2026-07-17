@@ -2,6 +2,15 @@
 
 [README Entry](../README.md) | [简体中文](./updatelog.zh-CN.md) | [Consumer Guide](../README.en.md)
 
+### 📅 2026-07-18 `v3.0.0` Security Boundary, Reliability, and Release Contract
+
+> Breaking API: Removed the public `plainStorage` export and unsupported `dist` deep-import paths; consumers now use the root `db` facade or named APIs.
+> Access Control: Encrypted tables and strict `requireAuthOnAccess` tables now fail closed on weaker access surfaces, including non-strict table listing when strict metadata exists.
+> Encryption and Recovery: Added authenticated CTR payload handling, bounded key caches, cache invalidation on key reset and failed transactions, and stricter encrypted-table mutation and migration coordination.
+> Resource Hygiene: Bounded runtime QA text and JSONL artifact tails, retained only the three newest completed default artifact runs, and made temporary Expo consumer smoke directories self-cleaning.
+> Release Safety: Restricted package exports to supported root and utility surfaces, aligned the publish lifecycle with npm safeguards, and documented the v3 migration contract.
+> Verification: Passed 61 Jest suites / 588 tests, type checking, distributable builds, production dependency audit, package dry-run, public CJS export checks, and diff whitespace validation.
+
 ### 📅 2026-07-15 Storage Reliability and CI/CD Recovery
 
 > Storage Reliability: Hardened serialized atomic metadata publication, chunk-append recovery ordering, incomplete-chunk rejection, transaction rollback semantics, encrypted migration, and full-table encrypted logical counts

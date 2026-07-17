@@ -5,7 +5,7 @@
  *
  * @module crypto
  * @since 2025-11-17
- * @version 2.0.1
+ * @version 3.0.0
  * @changelog
  *   - 2025-11-17: Initial implementation for Expo SDK 54
  *   - 2025-12-09: Fixed Base64 encoding/decoding issues in Expo environment
@@ -22,12 +22,14 @@ import { configManager } from '../core/config/ConfigManager';
 import { ctr } from '@noble/ciphers/aes';
 import {
   hash as providerHash,
+  hashBytes as providerHashBytes,
   hmac as providerHmac,
   hkdfDerive,
   pbkdf2 as providerPbkdf2,
   randomBytes as providerRandomBytes,
 } from './cryptoProvider';
-import { encryptGCM, decryptGCM, encryptGCMBulk, decryptGCMBulk } from './crypto-gcm';
+import { normalizePbkdf2Iterations } from './cryptoIterations';
+import { clearGCMKeyCache, encryptGCM, decryptGCM, encryptGCMBulk, decryptGCMBulk } from './crypto-gcm';
 import { CryptoError } from './crypto-errors';
 import { loadOptionalExpoModule, loadRequiredExpoModule } from './expoModuleLoader';
 import { StorageError } from '../types/storageErrorInfc';
@@ -164,6 +166,8 @@ const base64ToJson = <T>(str: string): T => {
  * @since 2025-11-17
  */
 interface EncryptedPayload {
+  /** Payload format version for authenticated CTR payloads. Absent on legacy payloads. */
+  version?: 'ctr-v2';
   /** Base64 encoded salt value */
   salt: string;
   /** Base64 encoded initialization vector */
@@ -177,6 +181,16 @@ interface EncryptedPayload {
 /**
  * 涓诲瘑閽ュ埆鍚? */
 const MASTER_KEY_ALIAS = 'expo_litedb_master_key_v2025';
+const AUTH_MASTER_KEY_ALIAS = 'expo_litedb_master_key_auth_v2026';
+const CTR_PAYLOAD_VERSION = 'ctr-v2' as const;
+let masterKeyGeneration = 0;
+let authMasterKeyProvisioning: Promise<void> | null = null;
+
+/**
+ * Changes whenever resetMasterKey successfully removes at least one persisted
+ * master-key alias. Long-lived adapters use this to discard stale key promises.
+ */
+export const getMasterKeyGeneration = (): number => masterKeyGeneration;
 
 /**
  * 闈?Expo 鐜涓嬬殑鍐呭瓨瀛樺偍鍥為€€
@@ -207,6 +221,15 @@ const createAuthOnAccessUnsupportedError = (details: string, cause?: unknown): S
     details,
     suggestion:
       'Use encrypted storage without requireAuthOnAccess in Expo Go, or run in a development build / standalone app with biometric support.',
+  });
+
+const createAuthOnAccessMigrationRequiredError = (cause?: unknown): StorageError =>
+  new StorageError('Strict per-access authentication requires explicit key and data migration', 'MIGRATION_FAILED', {
+    cause,
+    details:
+      'An existing non-authenticated master key was found. It is never reused or silently migrated for requireAuthOnAccess.',
+    suggestion:
+      'Migrate encrypted data with an explicit application-controlled flow, then reset the legacy master key before enabling requireAuthOnAccess.',
   });
 
 const ensureAuthOnAccessSupported = async (): Promise<ExpoSecureStoreModule> => {
@@ -251,9 +274,10 @@ const ensureAuthOnAccessSupported = async (): Promise<ExpoSecureStoreModule> => 
  */
 const getIterations = (): number => {
   const configIterations = configManager.getConfig().encryption.keyIterations;
+  const boundedIterations = normalizePbkdf2Iterations(configIterations, 10000);
 
   if (isExpoGoEnvironment()) {
-    const expoGoIterations = Math.min(configIterations, 20000);
+    const expoGoIterations = Math.min(boundedIterations, 20000);
     if (configIterations > 20000) {
       logger.warn(
         `Expo Go detected. Reducing PBKDF2 iterations from ${configIterations} to ${expoGoIterations} for performance.`
@@ -262,7 +286,54 @@ const getIterations = (): number => {
     return Math.max(10000, expoGoIterations);
   }
 
-  return Math.max(10000, Math.min(configIterations, 1000000));
+  return boundedIterations;
+};
+
+/**
+ * Creates the strict key once when its SecureStore alias is empty. Each caller
+ * still performs its own authenticated read, so key material is not cached.
+ */
+const provisionAuthMasterKey = async (
+  secureStore: ExpoSecureStoreModule,
+  authOptions: { requireAuthentication: true; authenticationPrompt: string }
+): Promise<void> => {
+  if (!authMasterKeyProvisioning) {
+    const provisioning = (async () => {
+      const existingKey = await secureStore.getItemAsync(AUTH_MASTER_KEY_ALIAS, authOptions);
+      if (existingKey) {
+        return;
+      }
+
+      let legacyKey: string | null;
+      try {
+        legacyKey = await secureStore.getItemAsync(MASTER_KEY_ALIAS);
+      } catch (error) {
+        throw createAuthOnAccessMigrationRequiredError(error);
+      }
+
+      if (legacyKey) {
+        throw createAuthOnAccessMigrationRequiredError();
+      }
+
+      const key = await generateMasterKey();
+      await secureStore.setItemAsync(AUTH_MASTER_KEY_ALIAS, key, {
+        ...authOptions,
+        authenticationPrompt: 'Set encryption key',
+      });
+    })();
+
+    authMasterKeyProvisioning = provisioning;
+    try {
+      await provisioning;
+    } finally {
+      if (authMasterKeyProvisioning === provisioning) {
+        authMasterKeyProvisioning = null;
+      }
+    }
+    return;
+  }
+
+  await authMasterKeyProvisioning;
 };
 
 /**
@@ -474,6 +545,7 @@ export const getKeyCacheHitRate = (): number => {
 export const clearKeyCache = (): void => {
   keyCache.clear();
   rootKeyCache.clear();
+  clearGCMKeyCache();
 };
 
 /**
@@ -543,7 +615,32 @@ const ensureKeyCacheCleanupInitialized = (): void => {
  * This is the expensive one-time operation. Once we have the root key,
  * all subsequent per-record key derivations use fast HKDF (~3渭s vs ~2s).
  */
+const ROOT_KEY_CACHE_MAX_SIZE = 50;
 const rootKeyCache = new Map<string, Uint8Array>();
+
+const getRootKeyCacheEntry = (cacheKey: string): Uint8Array | undefined => {
+  const cached = rootKeyCache.get(cacheKey);
+  if (!cached) {
+    return undefined;
+  }
+
+  rootKeyCache.delete(cacheKey);
+  rootKeyCache.set(cacheKey, cached);
+  return cached;
+};
+
+const setRootKeyCacheEntry = (cacheKey: string, rootKey: Uint8Array): void => {
+  if (rootKeyCache.has(cacheKey)) {
+    rootKeyCache.delete(cacheKey);
+  } else if (rootKeyCache.size >= ROOT_KEY_CACHE_MAX_SIZE) {
+    const oldestCacheKey = rootKeyCache.keys().next().value as string | undefined;
+    if (oldestCacheKey) {
+      rootKeyCache.delete(oldestCacheKey);
+    }
+  }
+
+  rootKeyCache.set(cacheKey, rootKey);
+};
 
 /**
  * Derives AES and HMAC keys from master key and salt.
@@ -565,16 +662,16 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
     ensureKeyCacheCleanupInitialized();
 
     // Step 1: Get or derive root key (PBKDF2, one-time per masterKey)
-    const rootCacheKey = masterKey;
-    let rootKey = rootKeyCache.get(rootCacheKey);
+    const iterations = getIterations();
+    const rootCacheKey = `${iterations}:${bytesToBase64(providerHashBytes(masterKey, 'SHA-256'))}`;
+    let rootKey = getRootKeyCacheEntry(rootCacheKey);
 
     if (!rootKey) {
       // First time: expensive PBKDF2 operation (~2s in Expo Go with 20K iterations)
       // Use a fixed salt for root key derivation (root key is only used as HKDF input)
       const rootSalt = new Uint8Array([0x72, 0x6f, 0x6f, 0x74, 0x2d, 0x6b, 0x65, 0x79]); // "root-key"
-      const iterations = getIterations();
       rootKey = providerPbkdf2(masterKey, rootSalt, iterations, 64, 'sha256');
-      rootKeyCache.set(rootCacheKey, rootKey);
+      setRootKeyCacheEntry(rootCacheKey, rootKey);
     }
 
     // Step 2: Fast HKDF-expand for per-record keys (~3渭s)
@@ -665,6 +762,26 @@ const computeHMAC = (data: string, hmacKey: Uint8Array, algorithm?: 'SHA-256' | 
   return providerHmac(data, hmacKey, selectedAlgorithm);
 };
 
+const constantTimeEqual = (left: string, right: string): boolean => {
+  const maxLength = Math.max(left.length, right.length);
+  let difference = left.length ^ right.length;
+
+  for (let index = 0; index < maxLength; index++) {
+    difference |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
+  }
+
+  return difference === 0;
+};
+
+const getCtrHmacInput = (payload: Pick<EncryptedPayload, 'version' | 'salt' | 'iv' | 'ciphertext'>): string => {
+  if (payload.version === CTR_PAYLOAD_VERSION) {
+    return JSON.stringify([CTR_PAYLOAD_VERSION, payload.salt, payload.iv, payload.ciphertext]);
+  }
+
+  // Legacy payloads authenticated only the ciphertext. Keep reading them for compatibility.
+  return payload.ciphertext;
+};
+
 /**
  * Encrypts text using AES-CTR with HMAC authentication.
  *
@@ -710,15 +827,15 @@ const encryptCTR = async (plainText: string, masterKey: string): Promise<string>
     const ciphertextBytes = cipher.encrypt(plainTextBytes);
     const ciphertextBase64 = bytesToBase64(ciphertextBytes);
 
-    const hmacBytes = computeHMAC(ciphertextBase64, hmacKey);
-    const hmacBase64 = bytesToBase64(hmacBytes);
-
     const payload: EncryptedPayload = {
+      version: CTR_PAYLOAD_VERSION,
       salt: saltStr,
       iv: ivStr,
       ciphertext: ciphertextBase64,
-      hmac: hmacBase64,
+      hmac: '',
     };
+    const hmacBytes = computeHMAC(getCtrHmacInput(payload), hmacKey);
+    payload.hmac = bytesToBase64(hmacBytes);
 
     const result = jsonToBase64(payload);
 
@@ -801,15 +918,26 @@ const decryptCTR = async (encryptedBase64: string, masterKey: string): Promise<s
   try {
     const payload: EncryptedPayload = base64ToJson(encryptedBase64);
 
+    if (
+      !payload ||
+      typeof payload.salt !== 'string' ||
+      typeof payload.iv !== 'string' ||
+      typeof payload.ciphertext !== 'string' ||
+      typeof payload.hmac !== 'string' ||
+      (payload.version !== undefined && payload.version !== CTR_PAYLOAD_VERSION)
+    ) {
+      throw new CryptoError('Unsupported or invalid CTR payload', 'DECRYPT_FAILED');
+    }
+
     const saltUint8Array = base64ToUint8Array(payload.salt);
     const ivBytes = base64ToUint8Array(payload.iv);
 
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
 
-    const computedHmacBytes = computeHMAC(payload.ciphertext, hmacKey);
+    const computedHmacBytes = computeHMAC(getCtrHmacInput(payload), hmacKey);
     const computedHmacBase64 = bytesToBase64(computedHmacBytes);
 
-    if (computedHmacBase64 !== payload.hmac) {
+    if (!constantTimeEqual(computedHmacBase64, payload.hmac)) {
       throw new CryptoError('HMAC mismatch: data tampered or wrong key', 'HMAC_MISMATCH');
     }
 
@@ -845,17 +973,18 @@ export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promis
   try {
     if (requireAuthOnAccess) {
       const secureStore = await ensureAuthOnAccessSupported();
-      let key = await secureStore.getItemAsync(MASTER_KEY_ALIAS, {
-        requireAuthentication: true,
+      const authOptions = {
+        requireAuthentication: true as const,
         authenticationPrompt: 'Authenticate to access database',
-      });
+      };
+      let key = await secureStore.getItemAsync(AUTH_MASTER_KEY_ALIAS, authOptions);
 
       if (!key) {
-        key = await generateMasterKey();
-        await secureStore.setItemAsync(MASTER_KEY_ALIAS, key, {
-          requireAuthentication: true,
-          authenticationPrompt: 'Set encryption key',
-        });
+        await provisionAuthMasterKey(secureStore, authOptions);
+        key = await secureStore.getItemAsync(AUTH_MASTER_KEY_ALIAS, authOptions);
+        if (!key) {
+          throw new CryptoError('Strict master key was not persisted after provisioning', 'KEY_DERIVE_FAILED');
+        }
       }
 
       return key;
@@ -913,19 +1042,32 @@ export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promis
 
 // resetMasterKey for logout/reset
 export const resetMasterKey = async (): Promise<void> => {
+  let removedKeyMaterial = false;
+
   try {
     const secureStore = getOptionalSecureStore();
     if (secureStore) {
-      await secureStore.deleteItemAsync(MASTER_KEY_ALIAS);
-    } else {
-      inMemoryStore.delete(MASTER_KEY_ALIAS);
-    }
-  } catch (error) {
-    logger.warn('Failed to reset master key:', error);
-    inMemoryStore.delete(MASTER_KEY_ALIAS);
-  }
+      const deletions = await Promise.allSettled([
+        secureStore.deleteItemAsync(MASTER_KEY_ALIAS),
+        secureStore.deleteItemAsync(AUTH_MASTER_KEY_ALIAS),
+      ]);
+      removedKeyMaterial = deletions.some(result => result.status === 'fulfilled');
 
-  clearKeyCache();
+      const failedDeletion = deletions.find(result => result.status === 'rejected');
+      if (failedDeletion?.status === 'rejected') {
+        throw new CryptoError('Failed to reset all persisted master keys', 'KEY_DERIVE_FAILED', failedDeletion.reason);
+      }
+    } else {
+      const removedNormalKey = inMemoryStore.delete(MASTER_KEY_ALIAS);
+      const removedAuthKey = inMemoryStore.delete(AUTH_MASTER_KEY_ALIAS);
+      removedKeyMaterial = removedNormalKey || removedAuthKey;
+    }
+  } finally {
+    clearKeyCache();
+    if (removedKeyMaterial) {
+      masterKeyGeneration++;
+    }
+  }
 };
 
 /**
@@ -1067,19 +1209,26 @@ const encryptBulkCTR = async (plainTexts: string[], masterKey: string): Promise<
       const cipher = ctr(aesKey, ivBytes);
       const ciphertextBytes = cipher.encrypt(plainTextBytes);
       const ciphertextBase64 = bytesToBase64(ciphertextBytes);
-      const hmacBytes = computeHMAC(ciphertextBase64, hmacKey);
-      const hmacBase64 = bytesToBase64(hmacBytes);
+      const payload: EncryptedPayload = {
+        version: CTR_PAYLOAD_VERSION,
+        salt: saltStr,
+        iv: ivStr,
+        ciphertext: ciphertextBase64,
+        hmac: '',
+      };
+      payload.hmac = bytesToBase64(computeHMAC(getCtrHmacInput(payload), hmacKey));
 
       encryptedResults.push({
         encryptedData: ciphertextBase64,
         salt: saltStr,
         iv: ivStr,
-        hmac: hmacBase64,
+        hmac: payload.hmac,
       });
     }
 
     return encryptedResults.map(result => {
       const payload: EncryptedPayload = {
+        version: CTR_PAYLOAD_VERSION,
         salt: result.salt,
         iv: result.iv,
         ciphertext: result.encryptedData,
@@ -1125,15 +1274,27 @@ const decryptBulkCTR = async (encryptedTexts: string[], masterKey: string): Prom
   try {
     const decryptPromises = encryptedTexts.map(async encryptedText => {
       const payload: EncryptedPayload = base64ToJson(encryptedText);
+
+      if (
+        !payload ||
+        typeof payload.salt !== 'string' ||
+        typeof payload.iv !== 'string' ||
+        typeof payload.ciphertext !== 'string' ||
+        typeof payload.hmac !== 'string' ||
+        (payload.version !== undefined && payload.version !== CTR_PAYLOAD_VERSION)
+      ) {
+        throw new CryptoError('Unsupported or invalid CTR payload', 'DECRYPT_FAILED');
+      }
+
       const saltUint8Array = base64ToUint8Array(payload.salt);
       const ivBytes = base64ToUint8Array(payload.iv);
 
       const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
 
-      const computedHmacBytes = computeHMAC(payload.ciphertext, hmacKey);
+      const computedHmacBytes = computeHMAC(getCtrHmacInput(payload), hmacKey);
       const computedHmacBase64 = bytesToBase64(computedHmacBytes);
 
-      if (computedHmacBase64 !== payload.hmac) {
+      if (!constantTimeEqual(computedHmacBase64, payload.hmac)) {
         throw new CryptoError('HMAC mismatch: data tampered or wrong key', 'HMAC_MISMATCH');
       }
 

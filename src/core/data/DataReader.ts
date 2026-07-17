@@ -2,7 +2,7 @@
  * @module DataReader
  * @description Data reader handling file system read and data processing
  * @since 2025-11-28
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import { configManager } from '../config/ConfigManager';
@@ -120,24 +120,74 @@ export class DataReader {
   /**
    * Generate stable cache key regardless of property order
    */
-  private generateCacheKey(options?: ReadOptions & { bypassCache?: boolean }): string {
+  private isCacheKeySerializable(value: unknown, seen = new WeakSet<object>()): boolean {
+    if (value === undefined || value === null || typeof value === 'string' || typeof value === 'boolean') {
+      return true;
+    }
+
+    if (typeof value === 'number') {
+      return Number.isFinite(value);
+    }
+
+    if (typeof value !== 'object') {
+      return false;
+    }
+
+    if (seen.has(value)) {
+      return false;
+    }
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      return value.every(item => item !== undefined && this.isCacheKeySerializable(item, seen));
+    }
+
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      return false;
+    }
+
+    return Object.keys(value).every(key => {
+      const child = (value as Record<string, unknown>)[key];
+      return child === undefined || this.isCacheKeySerializable(child, seen);
+    });
+  }
+
+  private generateCacheKey(options?: ReadOptions & { bypassCache?: boolean }): string | undefined {
     if (!options) {
       return '{}';
     }
 
-    const plainOptions = options as Record<string, any>;
-
-    const sortKeys = (obj: any): any => {
-      if (obj === null || typeof obj !== 'object') return obj;
-      if (Array.isArray(obj)) return obj.map(sortKeys);
-      const sorted: Record<string, any> = {};
-      for (const key of Object.keys(obj).sort()) {
-        sorted[key] = sortKeys(obj[key]);
+    try {
+      if (!this.isCacheKeySerializable(options)) {
+        return undefined;
       }
-      return sorted;
-    };
 
-    return JSON.stringify(sortKeys(plainOptions));
+      const sortKeys = (obj: unknown): unknown => {
+        if (obj === null || typeof obj !== 'object') return obj;
+        if (Array.isArray(obj)) return obj.map(sortKeys);
+        const sorted: Record<string, unknown> = Object.create(null);
+        for (const key of Object.keys(obj).sort()) {
+          const value = (obj as Record<string, unknown>)[key];
+          if (value !== undefined) {
+            sorted[key] = sortKeys(value);
+          }
+        }
+        return sorted;
+      };
+
+      return JSON.stringify(sortKeys(options));
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Records originate from JSON-backed storage, so a JSON clone preserves the
+   * public data contract while keeping cache-owned state private.
+   */
+  private cloneRecords(records: Record<string, any>[]): Record<string, any>[] {
+    return JSON.parse(JSON.stringify(records)) as Record<string, any>[];
   }
 
   async read(tableName: string, options?: ReadOptions & { bypassCache?: boolean }): Promise<Record<string, any>[]> {
@@ -150,16 +200,16 @@ export class DataReader {
 
         const tableIsHighRisk = tableMeta.isHighRisk || false;
         const shouldBypassCache = options?.bypassCache || tableIsHighRisk;
+        const serializedOptions = shouldBypassCache ? undefined : this.generateCacheKey(options);
+        const cacheKey = serializedOptions === undefined ? undefined : `${tableName}_${serializedOptions}`;
 
         let data: Record<string, any>[] = [];
-        let useIndex = false;
-        let indexedIds: string[] | number[] = [];
+        let indexedIdSet: Set<string | number> | undefined;
 
-        if (!shouldBypassCache) {
-          const cacheKey = `${tableName}_${this.generateCacheKey(options)}`;
+        if (cacheKey !== undefined) {
           const cachedData = this.cacheManager.get(cacheKey);
           if (cachedData) {
-            return cachedData;
+            return this.cloneRecords(cachedData as Record<string, any>[]);
           }
         }
 
@@ -174,8 +224,10 @@ export class DataReader {
             for (const key of filterKeys) {
               if (this.indexManager.hasIndex(tableName, key)) {
                 const value = (options.filter as Record<string, any>)[key];
-                indexedIds = this.indexManager.queryIndex(tableName, key, value) as string[] | number[];
-                useIndex = indexedIds.length > 0;
+                const indexedIds = this.indexManager.queryIndex(tableName, key, value);
+                if (indexedIds.length > 0) {
+                  indexedIdSet = new Set<string | number>(indexedIds);
+                }
                 break;
               }
             }
@@ -190,17 +242,11 @@ export class DataReader {
           data = await withTimeout(handler.read(), 10000, `read single file table ${tableName}`);
         }
 
-        if (useIndex) {
-          data = data.filter(item => {
-            const id = item['id'];
-            if (typeof id === 'string') {
-              return (indexedIds as string[]).includes(id);
-            } else if (typeof id === 'number') {
-              return (indexedIds as number[]).includes(id);
-            }
-            return false;
-          });
-        } else if (options?.filter) {
+        if (indexedIdSet) {
+          data = data.filter(item => indexedIdSet.has(item['id']));
+        }
+
+        if (options?.filter) {
           data = QueryEngine.filter(data, options.filter);
         }
 
@@ -211,9 +257,8 @@ export class DataReader {
 
         data = QueryEngine.paginate(data, options?.skip, options?.limit);
 
-        if (!shouldBypassCache) {
-          const cacheKey = `${tableName}_${this.generateCacheKey(options)}`;
-          this.cacheManager.set(cacheKey, data);
+        if (cacheKey !== undefined) {
+          this.cacheManager.set(cacheKey, this.cloneRecords(data));
 
           const tableCacheKeysKey = `${tableName}_cache_keys`;
           const tableCacheKeys = (this.cacheManager.get(tableCacheKeysKey) as string[]) || [];

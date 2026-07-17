@@ -2,7 +2,7 @@
  * @module StorageAdapterFactory
  * @description Factory for creating different types of storage adapter instances
  * @since 2025-11-28
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import { IMetadataManager } from '../../types/metadataManagerInfc';

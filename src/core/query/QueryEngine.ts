@@ -2,7 +2,7 @@
  * @module QueryEngine
  * @description Query engine for data filtering, sorting, pagination, and aggregation
  * @since 2025-11-28
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import type { FilterCondition } from '../../types/storageTypes';
@@ -20,62 +20,46 @@ import logger from '../../utils/logger';
 const MAX_FILTER_DEPTH = 10;
 
 /**
- * Escapes special regex characters in a string
+ * Matches a SQL LIKE pattern without compiling user-controlled regular expressions.
+ * `%` matches any number of UTF-16 code units and `_` matches exactly one.
  */
-const escapeRegExp = (str: string): string => {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-};
+const matchesLike = (value: string, pattern: string): boolean => {
+  const source = value.toLowerCase();
+  const query = pattern.toLowerCase();
+  let sourceIndex = 0;
+  let queryIndex = 0;
+  let wildcardIndex = -1;
+  let wildcardMatchIndex = 0;
 
-/**
- * Converts SQL LIKE pattern to RegExp
- * Compiles once for reuse across all items
- */
-const likePatternToRegex = (pattern: string): RegExp => {
-  const escaped = escapeRegExp(pattern);
-  const regexPattern = escaped.replace(/%/g, '.*').replace(/_/g, '.');
-  return new RegExp(`^${regexPattern}$`, 'i');
-};
+  while (sourceIndex < source.length) {
+    const token = query[queryIndex];
 
-/**
- * Pre-compiles all $like patterns in a filter condition
- */
-const precompileLikePatterns = (condition: any): Map<string, RegExp> => {
-  const patterns = new Map<string, RegExp>();
-  if (!condition || typeof condition !== 'object') return patterns;
-
-  const collectPatterns = (cond: any): void => {
-    if (!cond || typeof cond !== 'object') return;
-    if ('$and' in cond && Array.isArray(cond.$and)) {
-      cond.$and.forEach(collectPatterns);
-      return;
+    if (token === '_' || token === source[sourceIndex]) {
+      sourceIndex++;
+      queryIndex++;
+    } else if (token === '%') {
+      wildcardIndex = queryIndex++;
+      wildcardMatchIndex = sourceIndex;
+    } else if (wildcardIndex !== -1) {
+      queryIndex = wildcardIndex + 1;
+      sourceIndex = ++wildcardMatchIndex;
+    } else {
+      return false;
     }
-    if ('$or' in cond && Array.isArray(cond.$or)) {
-      cond.$or.forEach(collectPatterns);
-      return;
-    }
-    for (const [, value] of Object.entries(cond)) {
-      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        for (const [op, opValue] of Object.entries(value)) {
-          if (op === '$like' && typeof opValue === 'string') {
-            if (!patterns.has(opValue)) {
-              patterns.set(opValue, likePatternToRegex(opValue));
-            }
-          }
-        }
-      }
-    }
-  };
+  }
 
-  collectPatterns(condition);
-  return patterns;
+  while (query[queryIndex] === '%') {
+    queryIndex++;
+  }
+
+  return queryIndex === query.length;
 };
 
 export class QueryEngine {
   private static filterWithDepth<T extends Record<string, any>>(
     data: T[],
     condition: any,
-    depth: number,
-    likePatterns?: Map<string, RegExp>
+    depth: number
   ): T[] {
     if (!condition) return data;
 
@@ -208,18 +192,8 @@ export class QueryEngine {
               case '$like':
                 if (typeof itemValue !== 'string' || typeof opValue !== 'string') {
                   matches = false;
-                } else {
-                  const regex = likePatterns?.get(opValue);
-                  if (regex) {
-                    if (!regex.test(itemValue)) {
-                      matches = false;
-                    }
-                  } else {
-                    const fallbackRegex = likePatternToRegex(opValue);
-                    if (!fallbackRegex.test(itemValue)) {
-                      matches = false;
-                    }
-                  }
+                } else if (!matchesLike(itemValue, opValue)) {
+                  matches = false;
                 }
                 break;
               default:
@@ -257,8 +231,7 @@ export class QueryEngine {
   }
 
   static filter<T extends Record<string, any>>(data: T[], condition?: FilterCondition): T[] {
-    const likePatterns = precompileLikePatterns(condition);
-    return this.filterWithDepth(data, condition, 0, likePatterns);
+    return this.filterWithDepth(data, condition, 0);
   }
 
   static update<T extends Record<string, any>>(originalData: T, updateData: Record<string, any>): T {
@@ -480,14 +453,14 @@ export class QueryEngine {
    * 分组查询
    */
   static groupBy<T extends Record<string, any>>(data: T[], groupBy: string | string[]): Record<string, T[]> {
-    const groups: Record<string, T[]> = {};
+    const groups: Record<string, T[]> = Object.create(null) as Record<string, T[]>;
     const groupFields = Array.isArray(groupBy) ? groupBy : [groupBy];
 
     for (const item of data) {
       // Generate grouping key
       const key = groupFields.map(field => item[field]).join('_');
 
-      if (!groups[key]) {
+      if (!Object.prototype.hasOwnProperty.call(groups, key)) {
         groups[key] = [];
       }
 

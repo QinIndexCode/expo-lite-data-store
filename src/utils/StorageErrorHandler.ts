@@ -2,7 +2,7 @@
  * @module StorageErrorHandler
  * @description Unified error handling utility for storage operations
  * @since 2025-11-19
- * @version 2.0.1
+ * @version 3.0.0
  */
 import { StorageErrorCode } from '../types/storageErrorCode';
 import { StorageError } from '../types/storageErrorInfc';

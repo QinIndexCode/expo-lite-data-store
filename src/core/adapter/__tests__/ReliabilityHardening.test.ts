@@ -1,6 +1,9 @@
 import { MetadataManager } from '../../meta/MetadataManager';
 import { FileSystemStorageAdapter } from '../FileSystemStorageAdapter';
 import { configManager } from '../../config/ConfigManager';
+import { SingleFileHandler } from '../../file/SingleFileHandler';
+import { getFileSystem } from '../../../utils/fileSystemCompat';
+import { getRootPathSync } from '../../../utils/ROOTPath';
 
 describe('FileSystemStorageAdapter reliability hardening', () => {
   let adapter: FileSystemStorageAdapter;
@@ -213,5 +216,94 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
     expect(adapter.getTableMeta('chunked_initial_chunks')?.chunks).toBe(3);
     await expect(adapter.read('chunked_initial_chunks', { bypassCache: true })).resolves.toEqual(initialData);
     await adapter.deleteTable('chunked_initial_chunks');
+  });
+
+  it('preserves the strict access policy when migrating a table to chunked storage', async () => {
+    const tableName = 'strict_policy_chunk_migration';
+
+    await adapter.createTable(tableName, {
+      mode: 'single',
+      encrypted: true,
+      requireAuthOnAccess: true,
+      initialData: [{ id: 1, value: 'strict' }],
+    });
+
+    await adapter.migrateToChunked(tableName);
+
+    expect(adapter.getTableMeta(tableName)).toMatchObject({
+      mode: 'chunked',
+      encrypted: true,
+      requireAuthOnAccess: true,
+    });
+
+    const persistedMeta = JSON.parse(
+      (global as any).__expo_file_system_mock__.mockFileSystem[`${getRootPathSync()}meta.ldb`]
+    );
+    expect(persistedMeta.tables[tableName].requireAuthOnAccess).toBe(true);
+    await adapter.deleteTable(tableName);
+  });
+
+  it('serializes migration with a concurrent write to avoid losing the new record', async () => {
+    const tableName = 'migration_write_lock_table';
+    const initialData = [{ id: 'before', value: 'original' }];
+    let resolveSourceRead!: (data: Record<string, any>[]) => void;
+    let markSourceReadStarted!: () => void;
+    const sourceRead = new Promise<Record<string, any>[]>(resolve => {
+      resolveSourceRead = resolve;
+    });
+    const sourceReadStarted = new Promise<void>(resolve => {
+      markSourceReadStarted = resolve;
+    });
+
+    await adapter.createTable(tableName, { mode: 'single', initialData });
+    const readSpy = jest.spyOn(SingleFileHandler.prototype, 'read').mockImplementation(() => {
+      markSourceReadStarted();
+      return sourceRead;
+    });
+
+    try {
+      const migration = adapter.migrateToChunked(tableName);
+      await sourceReadStarted;
+
+      let writeSettled = false;
+      const concurrentWrite = adapter.write(tableName, { id: 'during', value: 'concurrent' }).then(() => {
+        writeSettled = true;
+      });
+      await Promise.resolve();
+      expect(writeSettled).toBe(false);
+
+      resolveSourceRead(initialData);
+      await migration;
+      await concurrentWrite;
+
+      await expect(adapter.read(tableName, { bypassCache: true })).resolves.toEqual([
+        ...initialData,
+        { id: 'during', value: 'concurrent' },
+      ]);
+    } finally {
+      resolveSourceRead(initialData);
+      readSpy.mockRestore();
+      await adapter.deleteTable(tableName);
+    }
+  });
+
+  it('removes a stale single-file artifact when deleting a chunked table', async () => {
+    const tableName = 'stale_single_after_chunk_migration';
+    const rootPath = getRootPathSync();
+    const fileSystem = getFileSystem();
+
+    await adapter.createTable(tableName, {
+      mode: 'single',
+      initialData: [{ id: 1, value: 'before-migration' }],
+    });
+    await adapter.write(tableName, { id: 2, value: 'after-migration' }, { forceChunked: true });
+    await fileSystem.writeAsStringAsync(`${rootPath}${tableName}.ldb`, 'stale migration artifact');
+    await fileSystem.writeAsStringAsync(`${rootPath}${tableName}.ldb.tmp`, 'stale atomic-write artifact');
+
+    await adapter.deleteTable(tableName);
+
+    await expect(fileSystem.getInfoAsync(`${rootPath}${tableName}.ldb`)).resolves.toMatchObject({ exists: false });
+    await expect(fileSystem.getInfoAsync(`${rootPath}${tableName}.ldb.tmp`)).resolves.toMatchObject({ exists: false });
+    await expect(fileSystem.getInfoAsync(`${rootPath}${tableName}/`)).resolves.toMatchObject({ exists: false });
   });
 });

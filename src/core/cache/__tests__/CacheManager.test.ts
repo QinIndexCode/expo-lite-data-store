@@ -197,6 +197,43 @@ describe('CacheManager', () => {
       expect(cache.get('refreshed-key')).toBe('new-value');
       nowSpy.mockRestore();
     });
+
+    it('should release memory usage when an expired item is read', () => {
+      const nowSpy = jest.spyOn(Date, 'now');
+      const cache = new CacheManager({
+        defaultExpiry: 10,
+        enableAvalancheProtection: false,
+      });
+      tempCacheManagers.push(cache);
+
+      try {
+        nowSpy.mockReturnValue(1000);
+        cache.set('expired-key', { value: 'data' });
+        expect(cache.getStats().memoryUsage).toBeGreaterThan(0);
+
+        nowSpy.mockReturnValue(1015);
+        expect(cache.get('expired-key')).toBeUndefined();
+        expect(cache.getStats()).toMatchObject({ size: 0, memoryUsage: 0 });
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+
+    it('should compact stale expiry entries for frequently refreshed keys', () => {
+      const cache = new CacheManager({
+        defaultExpiry: 60000,
+        enableAvalancheProtection: false,
+      });
+      tempCacheManagers.push(cache);
+
+      for (let index = 0; index < 200; index++) {
+        cache.set('hot-key', index);
+      }
+
+      const expiryHeap = (cache as unknown as { expiryHeap: unknown[] }).expiryHeap;
+      expect(expiryHeap.length).toBeLessThanOrEqual(64);
+      expect(cache.get('hot-key')).toBe(199);
+    });
   });
 
   describe('Cache Statistics Tests', () => {

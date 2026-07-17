@@ -5,8 +5,12 @@ import path from 'path';
 describe('developer documentation contract', () => {
   const repoRoot = path.resolve(__dirname, '../../..');
   const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
+    version: string;
     scripts: Record<string, string>;
     homepage?: string;
+  };
+  const appJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'app.json'), 'utf8')) as {
+    expo: { version: string };
   };
   const githubBlobBase = 'https://github.com/QinIndexCode/expo-lite-data-store/blob/main';
   const readmeEntry = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
@@ -24,6 +28,8 @@ describe('developer documentation contract', () => {
   const qaIndex = fs.readFileSync(path.join(repoRoot, 'docs/EXPO_RUNTIME_QA.md'), 'utf8');
   const qaGuide = fs.readFileSync(path.join(repoRoot, 'docs/EXPO_RUNTIME_QA.en.md'), 'utf8');
   const qaGuideZh = fs.readFileSync(path.join(repoRoot, 'docs/EXPO_RUNTIME_QA.zh-CN.md'), 'utf8');
+  const updateLog = fs.readFileSync(path.join(repoRoot, 'docs/updatelog.en.md'), 'utf8');
+  const updateLogZh = fs.readFileSync(path.join(repoRoot, 'docs/updatelog.zh-CN.md'), 'utf8');
   const bugTemplate = fs.readFileSync(path.join(repoRoot, '.github/ISSUE_TEMPLATE/bug_report.md'), 'utf8');
   const bugTemplateZh = fs.readFileSync(path.join(repoRoot, '.github/ISSUE_TEMPLATE/bug_report.zh-CN.md'), 'utf8');
   const trackedMarkdown = childProcess
@@ -78,6 +84,20 @@ describe('developer documentation contract', () => {
         'qa:baseline:release': expect.any(String),
       })
     );
+  });
+
+  it('keeps package, Expo, and source JSDoc version metadata aligned', () => {
+    expect(packageJson.version).toMatch(/^3\.\d+\.\d+$/);
+    expect(appJson.expo.version).toBe(packageJson.version);
+
+    const sourceFilesWithVersionHeaders = trackedMarkdown
+      .filter(file => file.startsWith('src/') && file.endsWith('.ts') && !file.includes('/__tests__/'))
+      .filter(file => fs.readFileSync(path.join(repoRoot, file), 'utf8').includes('@version'));
+
+    expect(sourceFilesWithVersionHeaders).not.toHaveLength(0);
+    for (const file of sourceFilesWithVersionHeaders) {
+      expect(fs.readFileSync(path.join(repoRoot, file), 'utf8')).toContain(`@version ${packageJson.version}`);
+    }
   });
 
   it('keeps formal user-facing docs on explicit .en.md and .zh-CN.md filenames', () => {
@@ -189,6 +209,18 @@ describe('developer documentation contract', () => {
     expect(apiGuideZh).toContain('[English](./API.en.md)');
   });
 
+  it('documents the v3 strict table-listing boundary and public type exports', () => {
+    const strictListCall = /listTables\s*\(\{\s*encrypted:\s*true,\s*requireAuthOnAccess:\s*true\s*\}\)/;
+
+    for (const guide of [apiGuide, apiGuideZh]) {
+      expect(guide).toContain('PERMISSION_DENIED');
+      expect(guide).toMatch(strictListCall);
+      expect(guide).toContain('PerformanceStats');
+      expect(guide).toContain('HealthCheckResult');
+      expect(guide).toContain('KeyCacheStats');
+    }
+  });
+
   it('documents request-aware verdict semantics in both QA guides', () => {
     expect(qaGuide).toContain('not-requested');
     expect(qaGuide).toContain('summary.json');
@@ -198,6 +230,17 @@ describe('developer documentation contract', () => {
     expect(qaGuideZh).toContain('summary.json');
     expect(qaGuideZh).toContain('qa:baseline:release');
     expect(qaGuideZh).toContain('[English](./EXPO_RUNTIME_QA.en.md)');
+  });
+
+  it('documents bounded QA artifact retention in both guides', () => {
+    expect(qaGuide).toMatch(/512\s*KiB/);
+    expect(qaGuide).toContain('three newest completed timestamped runs');
+    expect(qaGuide).toContain('--artifacts-dir');
+    expect(qaGuide).toContain('never automatically pruned');
+    expect(qaGuideZh).toMatch(/512\s*KiB/);
+    expect(qaGuideZh).toContain('最新 3 个已完成运行');
+    expect(qaGuideZh).toContain('--artifacts-dir');
+    expect(qaGuideZh).toContain('不会自动清理');
   });
 
   it('keeps contributing and security policies bilingual and repository-specific', () => {
@@ -215,6 +258,17 @@ describe('developer documentation contract', () => {
     expect(securityZh).toContain('qinindexcode@gmail.com');
     expect(securityZh).toContain('AUTH_ON_ACCESS_UNSUPPORTED');
     expect(securityZh).toContain('[English](./SECURITY.en.md)');
+
+    for (const policy of [securityIndex, security, securityZh]) {
+      expect(policy).toContain('`3.0.x`');
+      expect(policy).toContain('`< 3.0.0`');
+    }
+  });
+
+  it('records the current v3 release in both update logs', () => {
+    for (const updateLogContent of [updateLog, updateLogZh]) {
+      expect(updateLogContent).toMatch(/2026-07-18[^\r\n]*v3\.0\.0/);
+    }
   });
 
   it('keeps bug report templates aligned with Expo runtime triage needs', () => {

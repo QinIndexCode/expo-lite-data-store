@@ -738,9 +738,9 @@ import {
   findOne,
   hasTable,
   insert,
+  listTables,
   migrateToChunked,
   performanceMonitor,
-  plainStorage,
   read,
   remove,
   rollback,
@@ -786,11 +786,6 @@ const createPayloadRecords = (label, totalBytes, recordCount = 1) => {
   });
 };
 
-const getActiveRootPath = () => {
-  const documentDirectory = FileSystem.documentDirectory ?? '';
-  return \`\${documentDirectory}\${configManager.getConfig().storageFolder}/\`;
-};
-
 const getStateFilePath = fileName => \`\${FileSystem.documentDirectory}\${fileName}\`;
 
 const readJsonFile = async fileName => {
@@ -814,11 +809,6 @@ const deleteJsonFile = async fileName => {
   try {
     await FileSystem.deleteAsync(filePath, { idempotent: true });
   } catch {}
-};
-
-const resetPlainStorageRuntime = async () => {
-  configManager.resetConfig();
-  await plainStorage.cleanup();
 };
 
 const ensureDeleted = async (uri, options = {}) => {
@@ -845,8 +835,8 @@ const configureRuntimePerformanceMonitor = () => {
   performanceMonitor.configure({
     enabled: true,
     sampleRate: 1,
-    maxRecords: 50000,
-    metricsRetention: 24 * 60 * 60 * 1000,
+    maxRecords: 2000,
+    metricsRetention: 60 * 60 * 1000,
     thresholds: {
       minSuccessRate: 100,
       maxAverageDuration: qaConfig.profile === 'native-quick-crypto' ? 2000 : 4000,
@@ -883,53 +873,6 @@ const assertRuntimeProfileContract = runtimeInfo => {
     code: 'EXPO_GO_NATIVE_CRYPTO_UNEXPECTED',
     details: JSON.stringify(runtimeInfo),
   });
-};
-
-const runInitBenchmark = async label => {
-  const sample = await measureScenario({
-    label,
-    run: async ({ warmup }) => {
-      await plainStorage.cleanup();
-      configManager.resetConfig();
-      const startedAt = Date.now();
-      await db.init();
-      const durationMs = Date.now() - startedAt;
-
-      if (!warmup) {
-        const rootInfo = await FileSystem.getInfoAsync(getActiveRootPath());
-        assertQa(rootInfo.exists, 'db.init() did not materialize the storage root');
-      }
-
-      return {
-        durationMs,
-      };
-    },
-  });
-
-  const thresholds = getProfileThresholds().initMs;
-  if (label === 'cold-init') {
-    assertAtMost(sample.p95Ms, thresholds.coldP95, 'Cold init threshold failed', {
-      code: 'INIT_THRESHOLD_FAILED',
-      details: JSON.stringify({
-        label,
-        p95Ms: sample.p95Ms,
-        threshold: thresholds.coldP95,
-        profile: qaConfig.profile,
-      }),
-    });
-  } else if (label === 'warm-init') {
-    assertAtMost(sample.p95Ms, thresholds.warmP95, 'Warm init threshold failed', {
-      code: 'INIT_THRESHOLD_FAILED',
-      details: JSON.stringify({
-        label,
-        p95Ms: sample.p95Ms,
-        threshold: thresholds.warmP95,
-        profile: qaConfig.profile,
-      }),
-    });
-  }
-
-  return sample;
 };
 
 const runProbeMode = async setStatus => {
@@ -985,7 +928,37 @@ const runFunctionalCases = async (runCase, setStatus) => {
   );
 
   await runCase('functional_init_latency_profile', 'functional', async () => {
-    const coldInit = await runInitBenchmark('cold-init');
+    const initialStartedAt = Date.now();
+    await db.init();
+    const initialInitDurationMs = Date.now() - initialStartedAt;
+    const initialInit = {
+      label: 'process-start-init',
+      warmupRuns: 0,
+      measuredRuns: 1,
+      runs: [
+        {
+          durationMs: initialInitDurationMs,
+          totalOperations: 1,
+          throughputOpsPerSec: initialInitDurationMs > 0 ? Number((1000 / initialInitDurationMs).toFixed(2)) : 0,
+        },
+      ],
+      durationMs: initialInitDurationMs,
+      p50Ms: initialInitDurationMs,
+      p95Ms: initialInitDurationMs,
+      p99Ms: initialInitDurationMs,
+      throughputOpsPerSec: initialInitDurationMs > 0 ? Number((1000 / initialInitDurationMs).toFixed(2)) : 0,
+    };
+
+    const thresholds = getProfileThresholds().initMs;
+    assertAtMost(initialInit.p95Ms, thresholds.coldP95, 'Process-start init threshold failed', {
+      code: 'INIT_THRESHOLD_FAILED',
+      details: JSON.stringify({
+        label: initialInit.label,
+        p95Ms: initialInit.p95Ms,
+        threshold: thresholds.coldP95,
+        profile: qaConfig.profile,
+      }),
+    });
 
     const warmInit = await measureScenario({
       label: 'warm-init',
@@ -998,7 +971,6 @@ const runFunctionalCases = async (runCase, setStatus) => {
       },
     });
 
-    const thresholds = getProfileThresholds().initMs;
     assertAtMost(warmInit.p95Ms, thresholds.warmP95, 'Warm init threshold failed', {
       code: 'INIT_THRESHOLD_FAILED',
       details: JSON.stringify({
@@ -1011,15 +983,14 @@ const runFunctionalCases = async (runCase, setStatus) => {
 
     return {
       metrics: {
-        samples: [coldInit, warmInit],
+        samples: [initialInit, warmInit],
       },
     };
   });
 
-  await runCase('functional_auto_init_crud', 'functional', async () => {
-    const tableName = 'qa_functional_auto_init';
+  await runCase('functional_public_api_crud_roundtrip', 'functional', async () => {
+    const tableName = 'qa_functional_public_api_crud';
     await cleanupTable(tableName);
-    await resetPlainStorageRuntime();
 
     await createTable(tableName, {
       columns: {
@@ -1040,7 +1011,7 @@ const runFunctionalCases = async (runCase, setStatus) => {
     });
 
     assertQa(writeResult.written === 1, 'Expected one record to be written');
-    assertQa(record?.name === 'Alice', 'Expected record to roundtrip without explicit init');
+    assertQa(record?.name === 'Alice', 'Expected record to roundtrip through the public API');
     await cleanupTable(tableName);
 
     return {
@@ -1055,12 +1026,12 @@ const runFunctionalCases = async (runCase, setStatus) => {
     await db.init();
     await db.init();
 
-    const rootPath = getActiveRootPath();
-    assertQa(rootPath.includes('lite-data-store'), 'Expected default root path after repeated init');
+    const tables = await listTables();
+    assertQa(Array.isArray(tables), 'Repeated init did not leave the public table API available');
 
     return {
       metrics: {
-        rootPath,
+        tableCount: tables.length,
       },
     };
   });
@@ -1147,145 +1118,8 @@ const runFunctionalCases = async (runCase, setStatus) => {
     };
   });
 
-  await runCase('functional_runtime_storage_folder_override', 'functional', async () => {
-    const tableName = 'qa_runtime_storage_override';
-    const customFolder = 'qa-runtime-storage-folder';
-    configManager.updateConfig({
-      storageFolder: customFolder,
-    });
-    await plainStorage.cleanup();
-
-    const customRoot = getActiveRootPath();
-    await ensureDeleted(customRoot, { idempotent: true });
-    await db.init();
-    await createTable(tableName);
-    await insert(tableName, {
-      id: 'runtime-folder-1',
-      label: 'custom-root',
-    });
-    const info = await FileSystem.getInfoAsync(customRoot);
-    const record = await findOne(tableName, {
-      where: {
-        id: 'runtime-folder-1',
-      },
-    });
-
-    assertQa(customRoot.includes(customFolder), 'Root path did not switch to runtime-configured storage folder');
-    assertQa(info.exists, 'Custom storage folder was not created');
-    assertQa(record?.label === 'custom-root', 'Custom-folder data did not roundtrip');
-
-    await cleanupTable(tableName);
-    await ensureDeleted(customRoot, { idempotent: true });
-    configManager.resetConfig();
-    await plainStorage.cleanup();
-    await db.init();
-
-    return {
-      metrics: {
-        customRoot,
-      },
-    };
-  });
-
-  await runCase('functional_legacy_folder_migration', 'functional', async () => {
-    const tableName = 'qa_legacy_folder_migration';
-    const defaultRoot = getActiveRootPath();
-    const documentDirectory = FileSystem.documentDirectory ?? '';
-    const legacyRoot = \`\${documentDirectory}expo-lite-data/\`;
-
-    await cleanupTable(tableName);
-    await ensureDeleted(defaultRoot, { idempotent: true });
-    await ensureDeleted(legacyRoot, { idempotent: true });
-
-    configManager.updateConfig({
-      storageFolder: 'expo-lite-data',
-    });
-    await plainStorage.cleanup();
-    await db.init();
-    await createTable(tableName);
-    await insert(tableName, {
-      id: 'legacy-1',
-      label: 'legacy-data',
-    });
-    const legacyInfo = await FileSystem.getInfoAsync(legacyRoot);
-    assertQa(legacyInfo.exists, 'Legacy storage folder was not created during setup');
-
-    configManager.resetConfig();
-    await plainStorage.cleanup();
-    await db.init();
-
-      const migratedRecord = await findOne(tableName, {
-        where: {
-          id: 'legacy-1',
-        },
-      });
-      const migratedRecords = await read(tableName);
-      const newRoot = getActiveRootPath();
-      const newRootInfo = await FileSystem.getInfoAsync(newRoot);
-      const movedLegacyInfo = await FileSystem.getInfoAsync(legacyRoot);
-      const migratedTableInfo = await FileSystem.getInfoAsync(newRoot + tableName + '.ldb');
-      const migratedMetaInfo = await FileSystem.getInfoAsync(newRoot + 'meta.ldb');
-      const newRootEntries = newRootInfo.exists ? await FileSystem.readDirectoryAsync(newRoot) : [];
-      const metadataSnapshot = plainStorage.metadataManager.get(tableName);
-      let migratedTableRawPreview = null;
-      let migratedMetaRawPreview = null;
-      try {
-        migratedTableRawPreview = (await FileSystem.readAsStringAsync(newRoot + tableName + '.ldb')).slice(0, 400);
-      } catch (error) {
-        migratedTableRawPreview = String(error);
-      }
-      try {
-        migratedMetaRawPreview = (await FileSystem.readAsStringAsync(newRoot + 'meta.ldb')).slice(0, 400);
-      } catch (error) {
-        migratedMetaRawPreview = String(error);
-      }
-
-      assertQa(migratedRecord?.label === 'legacy-data', 'Legacy data was not readable after migration', {
-        code: 'LEGACY_MIGRATION_FAILED',
-        details: JSON.stringify({
-          newRoot,
-          newRootExists: newRootInfo?.exists ?? false,
-          newRootEntries,
-          legacyRoot,
-          legacyRootExistsAfterMigration: movedLegacyInfo?.exists ?? false,
-          migratedMetaExists: migratedMetaInfo?.exists ?? false,
-          migratedTableExists: migratedTableInfo?.exists ?? false,
-          migratedRecords,
-          migratedRecord: migratedRecord ?? null,
-          metadataSnapshot: metadataSnapshot ?? null,
-          migratedTableRawPreview,
-          migratedMetaRawPreview,
-        }),
-      });
-      assertQa(newRootInfo.exists, 'New storage root was not created after migration', {
-        code: 'LEGACY_ROOT_MISSING_AFTER_MIGRATION',
-        details: JSON.stringify({
-          newRoot,
-          newRootExists: newRootInfo?.exists ?? false,
-          legacyRoot,
-          legacyRootExistsAfterMigration: movedLegacyInfo?.exists ?? false,
-        }),
-      });
-      assertQa(!movedLegacyInfo.exists, 'Legacy storage folder still exists after migration', {
-        code: 'LEGACY_ROOT_STILL_PRESENT_AFTER_MIGRATION',
-        details: JSON.stringify({
-          newRoot,
-          newRootExists: newRootInfo?.exists ?? false,
-          legacyRoot,
-          legacyRootExistsAfterMigration: movedLegacyInfo?.exists ?? false,
-        }),
-      });
-
-    await cleanupTable(tableName);
-    return {
-      metrics: {
-        newRoot,
-      },
-    };
-  });
-
-  await runCase('functional_verify_count_repair', 'functional', async () => {
-    const tableName = 'qa_verify_count_repair';
+  await runCase('functional_verify_count_integrity', 'functional', async () => {
+    const tableName = 'qa_verify_count_integrity';
     await cleanupTable(tableName);
     await createTable(tableName);
     await insert(tableName, [
@@ -1299,21 +1133,20 @@ const runFunctionalCases = async (runCase, setStatus) => {
       },
     ]);
 
-    plainStorage.metadataManager.update(tableName, {
-      count: 99,
-    });
-
     const result = await verifyCountTable(tableName);
-    const repairedCount = plainStorage.metadataManager.count(tableName);
+    const count = await countTable(tableName);
 
-    assertQa(result.metadata === 99, \`Expected metadata count 99, got \${result.metadata}\`);
+    assertQa(result.metadata === 2, \`Expected metadata count 2, got \${result.metadata}\`);
     assertQa(result.actual === 2, \`Expected actual count 2, got \${result.actual}\`);
-    assertQa(result.match === false, 'Expected verifyCountTable to detect metadata drift');
-    assertQa(repairedCount === 2, \`Expected metadata count to repair to 2, got \${repairedCount}\`);
+    assertQa(result.match === true, 'Expected verifyCountTable to confirm matching counts');
+    assertQa(count === 2, \`Expected countTable to report 2, got \${count}\`);
 
     await cleanupTable(tableName);
     return {
-      metrics: result,
+      metrics: {
+        ...result,
+        count,
+      },
     };
   });
 
@@ -1334,16 +1167,24 @@ const runFunctionalCases = async (runCase, setStatus) => {
 
     await migrateToChunked(tableName);
 
+    const postMigrationWrite = await insert(tableName, {
+      id: 'chunk-post-migration',
+      label: 'post-migration',
+      value: initialData.length,
+    });
     const records = await read(tableName);
-    const meta = plainStorage.metadataManager.get(tableName);
 
-    assertQa(records.length === initialData.length, 'Record count changed after chunk migration');
-    assertQa(meta?.mode === 'chunked', \`Expected table mode chunked, got \${meta?.mode ?? 'unknown'}\`);
+    assertQa(records.length === initialData.length + 1, 'Record count changed after chunk migration');
+    assertQa(postMigrationWrite.chunked === true, 'Post-migration writes did not use chunked storage');
+    assertQa(
+      records.some(record => record.id === 'chunk-post-migration'),
+      'Post-migration record was not readable through the public API'
+    );
 
     await cleanupTable(tableName);
     return {
       metrics: {
-        mode: meta?.mode ?? 'unknown',
+        chunked: postMigrationWrite.chunked,
         count: records.length,
       },
     };
@@ -1568,7 +1409,6 @@ const runLargeFileCases = async runCase => {
         recordCount: 1,
         migrateToChunked: true,
         expectChunked: true,
-        minChunks: 1,
       },
       {
         label: '6MB',
@@ -1576,7 +1416,6 @@ const runLargeFileCases = async runCase => {
         recordCount: 2,
         migrateToChunked: true,
         expectChunked: true,
-        minChunks: 2,
       },
       {
         label: '25MB',
@@ -1584,7 +1423,6 @@ const runLargeFileCases = async runCase => {
         recordCount: 5,
         migrateToChunked: true,
         expectChunked: true,
-        minChunks: 5,
       },
       {
         label: '50MB',
@@ -1592,7 +1430,6 @@ const runLargeFileCases = async runCase => {
         recordCount: 10,
         migrateToChunked: true,
         expectChunked: true,
-        minChunks: 10,
       },
     ];
 
@@ -1635,7 +1472,6 @@ const runLargeFileCases = async runCase => {
               })
             : null;
           const totalCount = await countTable(tableName);
-          const meta = plainStorage.metadataManager.get(tableName);
 
           assertQa(result.written === recordsToInsert.length, \`Expected \${recordsToInsert.length} records to be written for \${sample.label}\`);
           assertQa(
@@ -1661,26 +1497,14 @@ const runLargeFileCases = async runCase => {
               \`Expected chunked=\${sample.expectChunked} for \${sample.label}, got \${result.chunked}\`
             );
           }
-          if (sample.expectChunked) {
-            assertQa(meta?.mode === 'chunked', \`Expected metadata mode=chunked for \${sample.label}, got \${meta?.mode ?? 'unknown'}\`);
-            if (typeof sample.minChunks === 'number') {
-              assertQa(
-                (meta?.chunks ?? 0) >= sample.minChunks,
-                \`Expected at least \${sample.minChunks} chunks for \${sample.label}, got \${meta?.chunks ?? 0}\`
-              );
-            }
-          } else {
-            assertQa(meta?.mode === 'single', \`Expected metadata mode=single for \${sample.label}, got \${meta?.mode ?? 'unknown'}\`);
-          }
-
           const metrics = {
             writtenBytes: result.written,
             totalAfterWrite: result.totalAfterWrite,
             recordCount: recordsToInsert.length,
-            mode: meta?.mode ?? 'unknown',
+            mode: result.chunked ? 'chunked' : 'single',
             migrated: Boolean(sample.migrateToChunked),
             chunked: result.chunked,
-            chunks: result.chunks ?? meta?.chunks ?? null,
+            chunks: result.chunks ?? null,
             throughputMiBPerSec: Number((((sample.bytes / mb) / (durationMs / 1000 || 1))).toFixed(2)),
           };
 
@@ -2307,33 +2131,13 @@ const runRecoveryMode = async setStatus => {
           id: state.recordId,
         },
       });
-      const tableRoot = getActiveRootPath();
-      const tableFileInfo = await FileSystem.getInfoAsync(tableRoot + state.tableName + '.ldb');
-      const metaFileInfo = await FileSystem.getInfoAsync(tableRoot + 'meta.ldb');
-      let tableFilePreview = null;
-      let metaFilePreview = null;
-      try {
-        tableFilePreview = (await FileSystem.readAsStringAsync(tableRoot + state.tableName + '.ldb')).slice(0, 400);
-      } catch (error) {
-        tableFilePreview = String(error);
-      }
-      try {
-        metaFilePreview = (await FileSystem.readAsStringAsync(tableRoot + 'meta.ldb')).slice(0, 400);
-      } catch (error) {
-        metaFilePreview = String(error);
-      }
 
       assertQa(record?.payload === state.expectedPayload, 'Recovery verification failed after Expo Go relaunch', {
         code: 'RECOVERY_VERIFICATION_FAILED',
         details: JSON.stringify({
           runId: qaConfig.runId,
-          tableRoot,
-          tableFileExists: tableFileInfo?.exists ?? false,
-          metaFileExists: metaFileInfo?.exists ?? false,
           record: record ?? null,
           state,
-          tableFilePreview,
-          metaFilePreview,
         }),
       });
       await deleteJsonFile(RECOVERY_STATE_FILE_NAME);

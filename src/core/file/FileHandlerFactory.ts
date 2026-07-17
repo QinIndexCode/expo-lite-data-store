@@ -2,10 +2,11 @@
  * @module FileHandlerFactory
  * @description Factory class for creating different types of file handlers
  * @since 2025-11-28
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import { IMetadataManager } from '../../types/metadataManagerInfc';
+import { assertValidTableName } from '../../utils/tableName';
 import { getRootPathSync } from '../../utils/ROOTPath';
 import { ChunkedFileHandler } from './ChunkedFileHandler';
 import { SingleFileHandler } from './SingleFileHandler';
@@ -40,6 +41,7 @@ export class FileHandlerFactory {
    * @returns 单文件处理器实例
    */
   getSingleFileHandler(tableName: string): SingleFileHandler {
+    assertValidTableName(tableName);
     const filePath = `${getRootPathSync()}${tableName}.ldb`;
     return new SingleFileHandler(filePath);
   }
@@ -50,6 +52,7 @@ export class FileHandlerFactory {
    * @returns 分片文件处理器实例
    */
   getChunkedFileHandler(tableName: string): ChunkedFileHandler {
+    assertValidTableName(tableName);
     return new ChunkedFileHandler(tableName, this.metadataManager);
   }
 

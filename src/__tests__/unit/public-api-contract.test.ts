@@ -14,6 +14,12 @@ describe('public API contract', () => {
     expect(StorageErrorCode.AUTH_ON_ACCESS_UNSUPPORTED).toBe('AUTH_ON_ACCESS_UNSUPPORTED');
   });
 
+  it('does not expose the raw plain storage adapter from the public entrypoint', () => {
+    const publicApi = require('../../expo-lite-data-store');
+
+    expect(publicApi).not.toHaveProperty('plainStorage');
+  });
+
   it('does not require expo-modules-core when fileSystemCompat is imported', () => {
     jest.resetModules();
     jest.doMock('expo-modules-core', () => {

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 [README Entry](../README.md) | [简体中文](./CHANGELOG.zh-CN.md) | [API Reference](./API.en.md)
 
+## [3.0.0] - 2026-07-18
+
+### Breaking Changes
+
+- Removed the public `plainStorage` export and unsupported package deep imports. Use the root `db` facade or named APIs instead.
+- Table operations for data created with `encrypted: true` must explicitly pass `encrypted: true`. Requests that would route an encrypted table through the plain surface now fail closed.
+- A transaction is pinned to one security surface. An operation that explicitly switches between encrypted and plain surfaces is rejected and must be run in a separate transaction.
+
 ## [2.0.2] - 2026-06-28
 
 ### Changed

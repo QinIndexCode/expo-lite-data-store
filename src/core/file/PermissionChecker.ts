@@ -2,7 +2,7 @@
  * @module PermissionChecker
  * @description Permission checker for file system access validation
  * @since 2025-11-28
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import { StorageError } from '../../types/storageErrorInfc';

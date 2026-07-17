@@ -15,8 +15,8 @@ Only the current stable major line receives security fixes.
 
 | Version   | Supported |
 | --------- | --------- |
-| `2.0.x`   | Yes       |
-| `< 2.0.0` | No        |
+| `3.0.x`   | Yes       |
+| `< 3.0.0` | No        |
 
 ## Reporting a Vulnerability
 
