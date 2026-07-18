@@ -1,4 +1,4 @@
-# expo-lite-data-store
+# 🍃 expo-lite-data-store
 
 [![npm version](https://img.shields.io/npm/v/expo-lite-data-store?logo=npm)](https://www.npmjs.com/package/expo-lite-data-store)
 [![npm downloads](https://img.shields.io/npm/dm/expo-lite-data-store?logo=npm)](https://www.npmjs.com/package/expo-lite-data-store)
