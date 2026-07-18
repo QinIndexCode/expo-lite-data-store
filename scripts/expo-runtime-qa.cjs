@@ -273,9 +273,7 @@ const isSafeCompletedArtifactRun = ({ artifactsRoot, entry }) => {
     return false;
   }
 
-  return (
-    isRegularFile(path.join(artifactDir, '.complete')) && !fs.existsSync(path.join(artifactDir, '.in-progress'))
-  );
+  return isRegularFile(path.join(artifactDir, '.complete')) && !fs.existsSync(path.join(artifactDir, '.in-progress'));
 };
 
 const pruneCompletedArtifactRuns = ({

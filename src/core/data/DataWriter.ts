@@ -1,13 +1,15 @@
-/**
- * @module DataWriter
- * @description Data writer handling insert, overwrite, update, and delete operations
- * @since 2025-11-19
- * @version 3.0.0
- */
 import { configManager } from '../config/ConfigManager';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
 import { StorageError } from '../../types/storageErrorInfc';
-import type { CreateTableOptions, WriteOptions, WriteResult } from '../../types/storageTypes';
+import type {
+  ColumnDefinition,
+  CreateTableOptions,
+  FilterCondition,
+  InternalWriteOptions,
+  StorageInput,
+  StorageRecord,
+  WriteResult,
+} from '../../types/storageTypes';
 import { ErrorHandler as StorageErrorHandler } from '../../utils/StorageErrorHandler';
 import { getFileSystem } from '../../utils/fileSystemCompat';
 import { getRootPathSync } from '../../utils/ROOTPath';
@@ -19,7 +21,7 @@ import { SingleFileHandler } from '../file/SingleFileHandler';
 import { assertValidTableName } from '../../utils/tableName';
 import { FileOperationManager } from '../FileOperationManager';
 import { IndexManager } from '../index/IndexManager';
-import type { ColumnSchema } from '../meta/MetadataManager';
+import type { ColumnSchema, TableSchema } from '../meta/MetadataManager';
 import { QueryEngine } from '../query/QueryEngine';
 export class DataWriter {
   private chunkSize: number;
@@ -48,17 +50,13 @@ export class DataWriter {
     this.maxConcurrentOperations = configManager.getConfig().performance.maxConcurrentOperations || 5;
   }
 
-  private static readonly supportedColumnTypes: ColumnSchema[string][] = [
-    'string',
-    'number',
-    'boolean',
-    'date',
-    'blob',
-  ];
+  private static readonly supportedColumnTypes = ['string', 'number', 'boolean', 'date', 'blob'] as const;
 
-  private normalizeColumnSchema(
-    columns?: Record<string, string | { type: string; isHighRisk?: boolean }>
-  ): ColumnSchema {
+  private static isSupportedColumnType(value: string): value is (typeof DataWriter.supportedColumnTypes)[number] {
+    return (DataWriter.supportedColumnTypes as readonly string[]).includes(value);
+  }
+
+  private normalizeColumnSchema(columns?: Record<string, ColumnDefinition>): ColumnSchema {
     const schema: ColumnSchema = {};
     if (!columns) return schema;
 
@@ -73,7 +71,7 @@ export class DataWriter {
         isHighRisk = definition.isHighRisk || false;
       }
 
-      if (!DataWriter.supportedColumnTypes.includes(type as any)) {
+      if (!DataWriter.isSupportedColumnType(type)) {
         throw StorageErrorHandler.createGeneralError(
           `Unsupported column type: ${column}: ${type}`,
           'TABLE_COLUMN_INVALID',
@@ -85,11 +83,11 @@ export class DataWriter {
 
       if (isHighRisk) {
         schema[column] = {
-          type: type as 'string' | 'number' | 'boolean' | 'date' | 'blob',
+          type,
           isHighRisk,
         };
       } else {
-        schema[column] = type as ColumnSchema[string];
+        schema[column] = type;
       }
     }
     return schema;
@@ -156,7 +154,7 @@ export class DataWriter {
     }
   }
 
-  private shouldUseChunkedMode(data: Record<string, any>[]): boolean {
+  private shouldUseChunkedMode(data: StorageRecord[]): boolean {
     const estimatedSize = data.reduce((acc, item) => acc + JSON.stringify(item).length, 0);
     return estimatedSize > (this.chunkSize || 1024 * 1024) / 2;
   }
@@ -244,9 +242,9 @@ export class DataWriter {
 
   async createTable(
     tableName: string,
-    options: CreateTableOptions & {
-      columns?: Record<string, string | { type: string; isHighRisk?: boolean }>;
-      initialData?: Record<string, any>[];
+    options: CreateTableOptions<StorageRecord> & {
+      columns?: Record<string, ColumnDefinition>;
+      initialData?: StorageRecord[];
       mode?: 'single' | 'chunked';
       isHighRisk?: boolean;
       highRiskFields?: string[];
@@ -370,8 +368,8 @@ export class DataWriter {
 
   async write(
     tableName: string,
-    data: Record<string, any> | Record<string, any>[],
-    options?: WriteOptions & { directWrite?: boolean }
+    data: StorageInput<StorageRecord>,
+    options?: InternalWriteOptions
   ): Promise<WriteResult> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
@@ -429,9 +427,9 @@ export class DataWriter {
 
   private async executeWriteOperation(
     tableName: string,
-    items: Record<string, any>[],
-    options?: WriteOptions & { directWrite?: boolean },
-    tableMeta?: any
+    items: StorageRecord[],
+    options?: InternalWriteOptions,
+    tableMeta?: TableSchema
   ): Promise<{ finalCount: number; isChunked: boolean }> {
     let finalCount: number;
     let isChunked = false;
@@ -451,8 +449,8 @@ export class DataWriter {
 
   private async writeToChunkedTable(
     tableName: string,
-    items: Record<string, any>[],
-    options?: WriteOptions & { directWrite?: boolean }
+    items: StorageRecord[],
+    options?: InternalWriteOptions
   ): Promise<number> {
     const handler = this.getChunkedHandler(tableName);
 
@@ -467,8 +465,8 @@ export class DataWriter {
 
   private async writeToSingleFileTable(
     tableName: string,
-    items: Record<string, any>[],
-    options?: WriteOptions & { directWrite?: boolean }
+    items: StorageRecord[],
+    options?: InternalWriteOptions
   ): Promise<number> {
     const handler = this.getSingleFile(tableName);
 
@@ -490,8 +488,8 @@ export class DataWriter {
    */
   private async writeToForcedChunkedTable(
     tableName: string,
-    items: Record<string, any>[],
-    options?: WriteOptions & { directWrite?: boolean }
+    items: StorageRecord[],
+    options?: InternalWriteOptions
   ): Promise<number> {
     const originalMetadata = this.metadataManager.get(tableName);
     const singleFile = this.getSingleFile(tableName);
@@ -521,7 +519,7 @@ export class DataWriter {
     return finalData.length;
   }
 
-  private async updateIndexes(tableName: string, items: Record<string, any>[], isOverwrite: boolean): Promise<void> {
+  private async updateIndexes(tableName: string, items: StorageRecord[], isOverwrite: boolean): Promise<void> {
     try {
       if (isOverwrite) {
         this.indexManager.clearTableIndexes(tableName);
@@ -559,7 +557,7 @@ export class DataWriter {
     await this.persistMetadataIfSupported();
   }
 
-  private validateWriteData(data: Record<string, any>[]): void {
+  private validateWriteData(data: StorageRecord[]): void {
     StorageErrorHandler.handleSyncError(
       () => {
         if (!Array.isArray(data)) {
@@ -618,7 +616,10 @@ export class DataWriter {
           }
         }
       },
-      error => error as StorageError
+      error =>
+        error instanceof StorageError
+          ? error
+          : StorageErrorHandler.createGeneralError('Invalid write data', 'FILE_CONTENT_INVALID', error)
     );
   }
 
@@ -741,7 +742,7 @@ export class DataWriter {
     if (!tableMeta) return 0;
 
     try {
-      let data: Record<string, any>[];
+      let data: StorageRecord[];
       if (tableMeta.mode === 'chunked') {
         const handler = this.getChunkedHandler(tableName);
         data = await withTimeout(handler.readAll(), 10000, `read chunked table ${tableName}`);
@@ -750,7 +751,7 @@ export class DataWriter {
         data = await withTimeout(handler.read(), 10000, `read single file table ${tableName}`);
       }
       return data.length;
-    } catch (error) {
+    } catch {
       return this.metadataManager.count(tableName);
     }
   }
@@ -771,7 +772,7 @@ export class DataWriter {
     return { metadata: metadataCount, actual: actualCount, match };
   }
 
-  async delete(tableName: string, where: Record<string, any>): Promise<number> {
+  async delete(tableName: string, where: FilterCondition<StorageRecord>): Promise<number> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
         await this.fileOperationManager.checkPermissions();
@@ -784,7 +785,7 @@ export class DataWriter {
         const releaseLock = await this.acquireLock(tableName);
 
         try {
-          let data: Record<string, any>[];
+          let data: StorageRecord[];
           if (tableMeta.mode === 'chunked') {
             const handler = this.getChunkedHandler(tableName);
             data = await withTimeout(handler.readAll(), 10000, `read chunked table ${tableName}`);

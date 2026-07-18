@@ -1,23 +1,24 @@
-/**
- * @module ApiWrapper
- * @description API wrapper using facade pattern to coordinate components
- * @since 2025-11-28
- * @version 3.0.0
- */
-
-import { ApiResponse } from '../../types/apiResponse';
-import { IStorageAdapter } from '../../types/storageAdapterInfc';
-import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from '../../types/storageTypes';
+import type { ApiResponse } from '../../types/apiResponse';
+import type { IStorageAdapter } from '../../types/storageAdapterInfc';
+import type {
+  BulkOperation,
+  CreateTableOptions,
+  FilterCondition,
+  FindOptions,
+  NonInfer,
+  ReadOptions,
+  StorageInput,
+  StorageRecord,
+  WriteOptions,
+  WriteResult,
+} from '../../types/storageTypes';
 import { ApiRouter } from './ApiRouter';
 import { ErrorHandler as ApiErrorHandler } from './ApiErrorHandler';
 import { RateLimitWrapper } from './RateLimitWrapper';
 import type { RateLimitStatus } from './RateLimiter';
 import { ValidationWrapper } from './ValidationWrapper';
 
-/**
- * API包装器类 - 外观模式
- * 协调各个组件提供统一的API接口
- */
+/** Coordinates validation, throttling, storage, and response formatting. */
 export class ApiWrapper {
   private apiRouter: ApiRouter;
   private rateLimitWrapper: RateLimitWrapper;
@@ -25,11 +26,6 @@ export class ApiWrapper {
   private errorHandler: ApiErrorHandler;
   private storageAdapter: IStorageAdapter;
 
-  /**
-   * 构造函数
-   * @param storageAdapter 存储适配器实例
-   * @param options API配置选项
-   */
   constructor(
     storageAdapter: IStorageAdapter,
     options: {
@@ -44,7 +40,6 @@ export class ApiWrapper {
   ) {
     this.storageAdapter = storageAdapter;
 
-    // Initialize各个组件
     this.apiRouter = new ApiRouter({
       defaultVersion: options.defaultVersion,
       supportedVersions: options.supportedVersions,
@@ -80,7 +75,7 @@ export class ApiWrapper {
     };
   }
 
-  private getWriteTokenCost(data: Record<string, any> | Record<string, any>[]): number {
+  private getWriteTokenCost<T extends object>(data: StorageInput<T>): number {
     return Array.isArray(data) ? Math.min(data.length, 10) : 3;
   }
 
@@ -88,21 +83,9 @@ export class ApiWrapper {
     return Math.min(totalRecords * 2, 20);
   }
 
-  /**
-   * 创建表
-   * @param tableName 表名
-   * @param options 创建表选项
-   * @param version API版本
-   * @param clientId 客户端ID，用于限流
-   * @returns 统一格式的API响应
-   */
-  async createTable(
+  async createTable<T extends object = StorageRecord>(
     tableName: string,
-    options?: CreateTableOptions & {
-      columns?: Record<string, string>;
-      initialData?: Record<string, any>[];
-      mode?: 'single' | 'chunked';
-    },
+    options?: CreateTableOptions<NonInfer<T>>,
     version?: string,
     clientId: string = 'default'
   ): Promise<ApiResponse<void>> {
@@ -116,13 +99,12 @@ export class ApiWrapper {
         this.validationWrapper.validateInitialData(options.initialData);
       }
 
-      // Check限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 5); // Create表消耗5个令牌
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 5);
       if (!rateLimitStatus.allowed) {
         return this.createRateLimitExceededResponse<void>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
-      await this.storageAdapter.createTable(tableName, options);
+      await this.storageAdapter.createTable<T>(tableName, options);
 
       return {
         success: true,
@@ -137,30 +119,21 @@ export class ApiWrapper {
         status: 'success',
       };
     } catch (error) {
-      return this.errorHandler.handleError(error, requestId, startTime, apiVersion);
+      return this.errorHandler.handleError<void>(error, requestId, startTime, apiVersion);
     }
   }
 
-  /**
-   * 删除表
-   * @param tableName 表名
-   * @param version API版本
-   * @param clientId 客户端ID，用于限流
-   * @returns 统一格式的API响应
-   */
   async deleteTable(tableName: string, version?: string, clientId: string = 'default'): Promise<ApiResponse<void>> {
     const startTime = Date.now();
     const requestId = this.errorHandler.generateRequestId();
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // Check限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 3); // Delete表消耗3个令牌
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 3);
       if (!rateLimitStatus.allowed) {
         return this.createRateLimitExceededResponse<void>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
-      // Request validation
       this.validationWrapper.validateTableName(tableName);
 
       await this.storageAdapter.deleteTable(tableName);
@@ -178,30 +151,21 @@ export class ApiWrapper {
         status: 'success',
       };
     } catch (error) {
-      return this.errorHandler.handleError(error, requestId, startTime, apiVersion);
+      return this.errorHandler.handleError<void>(error, requestId, startTime, apiVersion);
     }
   }
 
-  /**
-   * 判断表是否存在
-   * @param tableName 表名
-   * @param version API版本
-   * @param clientId 客户端ID，用于限流
-   * @returns 统一格式的API响应
-   */
   async hasTable(tableName: string, version?: string, clientId: string = 'default'): Promise<ApiResponse<boolean>> {
     const startTime = Date.now();
     const requestId = this.errorHandler.generateRequestId();
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // Check限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1); // Check表存在性消耗1个令牌
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1);
       if (!rateLimitStatus.allowed) {
         return this.createRateLimitExceededResponse<boolean>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
-      // Request validation
       this.validationWrapper.validateTableName(tableName);
 
       const result = await this.storageAdapter.hasTable(tableName);
@@ -219,24 +183,17 @@ export class ApiWrapper {
         status: 'success',
       };
     } catch (error) {
-      return this.errorHandler.handleError(error, requestId, startTime, apiVersion);
+      return this.errorHandler.handleError<boolean>(error, requestId, startTime, apiVersion);
     }
   }
 
-  /**
-   * 列出所有表名
-   * @param version API版本
-   * @param clientId 客户端ID，用于限流
-   * @returns 统一格式的API响应
-   */
   async listTables(version?: string, clientId: string = 'default'): Promise<ApiResponse<string[]>> {
     const startTime = Date.now();
     const requestId = this.errorHandler.generateRequestId();
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // Check限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2); // List tables costs 2 tokens
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2);
       if (!rateLimitStatus.allowed) {
         return this.createRateLimitExceededResponse<string[]>(rateLimitStatus, requestId, startTime, apiVersion);
       }
@@ -256,22 +213,13 @@ export class ApiWrapper {
         status: 'success',
       };
     } catch (error) {
-      return this.errorHandler.handleError(error, requestId, startTime, apiVersion);
+      return this.errorHandler.handleError<string[]>(error, requestId, startTime, apiVersion);
     }
   }
 
-  /**
-   * 覆盖数据（总是使用覆盖模式）
-   * @param tableName 表名
-   * @param data 要覆盖的数据
-   * @param options 写入选项（mode将被强制设为overwrite）
-   * @param version API版本
-   * @param clientId 客户端ID，用于限流
-   * @returns 统一格式的API响应
-   */
-  async overwrite(
+  async overwrite<T extends object = StorageRecord>(
     tableName: string,
-    data: Record<string, any> | Record<string, any>[],
+    data: StorageInput<NonInfer<T>>,
     options?: Omit<WriteOptions, 'mode'>,
     version?: string,
     clientId: string = 'default'
@@ -290,7 +238,7 @@ export class ApiWrapper {
         return this.createRateLimitExceededResponse<WriteResult>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
-      const result = await this.storageAdapter.overwrite(tableName, data, options);
+      const result = await this.storageAdapter.overwrite<T>(tableName, data, options);
 
       return {
         success: true,
@@ -305,23 +253,14 @@ export class ApiWrapper {
         status: 'success',
       };
     } catch (error) {
-      return this.errorHandler.handleError(error, requestId, startTime, apiVersion);
+      return this.errorHandler.handleError<WriteResult>(error, requestId, startTime, apiVersion);
     }
   }
 
-  /**
-   * 写入数据（支持追加或覆盖模式，用于向后兼容）
-   * @deprecated 请使用 insert（追加模式）或 overwrite（覆盖模式）
-   * @param tableName 表名
-   * @param data 要写入的数据
-   * @param options 写入选项，包括模式（'append' | 'overwrite'）
-   * @param version API版本
-   * @param clientId 客户端ID，用于限流
-   * @returns 统一格式的API响应
-   */
-  async write(
+  /** @deprecated Use insert or overwrite to make write semantics explicit. */
+  async write<T extends object = StorageRecord>(
     tableName: string,
-    data: Record<string, any> | Record<string, any>[],
+    data: StorageInput<NonInfer<T>>,
     options?: WriteOptions,
     version?: string,
     clientId: string = 'default'
@@ -334,14 +273,13 @@ export class ApiWrapper {
       this.validationWrapper.validateTableName(tableName);
       this.validationWrapper.validateWriteData(data);
 
-      // Check限流
-      const tokens = this.getWriteTokenCost(data); // Write操作消耗3-10个令牌
+      const tokens = this.getWriteTokenCost(data);
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, tokens);
       if (!rateLimitStatus.allowed) {
         return this.createRateLimitExceededResponse<WriteResult>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
-      const result = await this.storageAdapter.write(tableName, data, options);
+      const result = await this.storageAdapter.write<T>(tableName, data, options);
 
       return {
         success: true,
@@ -356,39 +294,29 @@ export class ApiWrapper {
         status: 'success',
       };
     } catch (error) {
-      return this.errorHandler.handleError(error, requestId, startTime, apiVersion);
+      return this.errorHandler.handleError<WriteResult>(error, requestId, startTime, apiVersion);
     }
   }
 
-  /**
-   * 读取数据
-   * @param tableName 表名
-   * @param options 读取选项
-   * @param version API版本
-   * @param clientId 客户端ID，用于限流
-   * @returns 统一格式的API响应
-   */
-  async read(
+  async read<T extends object = StorageRecord>(
     tableName: string,
-    options?: ReadOptions,
+    options?: ReadOptions<NonInfer<T>>,
     version?: string,
     clientId: string = 'default'
-  ): Promise<ApiResponse<Record<string, any>[]>> {
+  ): Promise<ApiResponse<T[]>> {
     const startTime = Date.now();
     const requestId = this.errorHandler.generateRequestId();
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // Check限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2); // Read操作消耗2个令牌
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2);
       if (!rateLimitStatus.allowed) {
-        return this.createRateLimitExceededResponse<Record<string, any>[]>(rateLimitStatus, requestId, startTime, apiVersion);
+        return this.createRateLimitExceededResponse<T[]>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
-      // Request validation
       this.validationWrapper.validateTableName(tableName);
 
-      const result = await this.storageAdapter.read(tableName, options);
+      const result = await this.storageAdapter.read<T>(tableName, options);
 
       return {
         success: true,
@@ -403,30 +331,21 @@ export class ApiWrapper {
         status: 'success',
       };
     } catch (error) {
-      return this.errorHandler.handleError(error, requestId, startTime, apiVersion);
+      return this.errorHandler.handleError<T[]>(error, requestId, startTime, apiVersion);
     }
   }
 
-  /**
-   * 获取表记录数
-   * @param tableName 表名
-   * @param version API版本
-   * @param clientId 客户端ID，用于限流
-   * @returns 统一格式的API响应
-   */
   async count(tableName: string, version?: string, clientId: string = 'default'): Promise<ApiResponse<number>> {
     const startTime = Date.now();
     const requestId = this.errorHandler.generateRequestId();
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // Check限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1); // Count operation costs 1 token
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1);
       if (!rateLimitStatus.allowed) {
         return this.createRateLimitExceededResponse<number>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
-      // Request validation
       this.validationWrapper.validateTableName(tableName);
 
       const result = await this.storageAdapter.count(tableName);
@@ -444,45 +363,30 @@ export class ApiWrapper {
         status: 'success',
       };
     } catch (error) {
-      return this.errorHandler.handleError(error, requestId, startTime, apiVersion);
+      return this.errorHandler.handleError<number>(error, requestId, startTime, apiVersion);
     }
   }
 
-  /**
-   * 查找单条记录
-   * @param tableName 表名
-   * @param filter 过滤条件
-   * @param version API版本
-   * @param clientId 客户端ID，用于限流
-   * @returns 统一格式的API响应
-   */
-  async findOne(
+  async findOne<T extends object = StorageRecord>(
     tableName: string,
-    filter: Record<string, any>,
+    filter: FilterCondition<NonInfer<T>>,
     version?: string,
     clientId: string = 'default'
-  ): Promise<ApiResponse<Record<string, any> | null>> {
+  ): Promise<ApiResponse<T | null>> {
     const startTime = Date.now();
     const requestId = this.errorHandler.generateRequestId();
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // Check限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1); // Find单条记录消耗1个令牌
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1);
       if (!rateLimitStatus.allowed) {
-        return this.createRateLimitExceededResponse<Record<string, any> | null>(
-          rateLimitStatus,
-          requestId,
-          startTime,
-          apiVersion
-        );
+        return this.createRateLimitExceededResponse<T | null>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
-      // Request validation
       this.validationWrapper.validateTableName(tableName);
       this.validationWrapper.validateFilter(filter);
 
-      const result = await this.storageAdapter.findOne(tableName, filter);
+      const result = await this.storageAdapter.findOne<T>(tableName, filter);
 
       return {
         success: true,
@@ -497,44 +401,33 @@ export class ApiWrapper {
         status: 'success',
       };
     } catch (error) {
-      return this.errorHandler.handleError(error, requestId, startTime, apiVersion);
+      return this.errorHandler.handleError<T | null>(error, requestId, startTime, apiVersion);
     }
   }
 
-  /**
-   * 查找多条记录
-   * @param tableName 表名
-   * @param filter 过滤条件
-   * @param options 选项
-   * @param version API版本
-   * @param clientId 客户端ID，用于限流
-   * @returns 统一格式的API响应
-   */
-  async findMany(
+  async findMany<T extends object = StorageRecord>(
     tableName: string,
-    filter?: Record<string, any>,
-    options?: { skip?: number; limit?: number },
+    filter?: FilterCondition<NonInfer<T>>,
+    options?: FindOptions<NonInfer<T>>,
     version?: string,
     clientId: string = 'default'
-  ): Promise<ApiResponse<Record<string, any>[]>> {
+  ): Promise<ApiResponse<T[]>> {
     const startTime = Date.now();
     const requestId = this.errorHandler.generateRequestId();
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // Check限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2); // Find多条记录消耗2个令牌
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2);
       if (!rateLimitStatus.allowed) {
-        return this.createRateLimitExceededResponse<Record<string, any>[]>(rateLimitStatus, requestId, startTime, apiVersion);
+        return this.createRateLimitExceededResponse<T[]>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
-      // Request validation
       this.validationWrapper.validateTableName(tableName);
       if (filter) {
         this.validationWrapper.validateFilter(filter);
       }
 
-      const result = await this.storageAdapter.findMany(tableName, filter, options);
+      const result = await this.storageAdapter.findMany<T>(tableName, filter, options);
 
       return {
         success: true,
@@ -549,35 +442,13 @@ export class ApiWrapper {
         status: 'success',
       };
     } catch (error) {
-      return this.errorHandler.handleError(error, requestId, startTime, apiVersion);
+      return this.errorHandler.handleError<T[]>(error, requestId, startTime, apiVersion);
     }
   }
 
-  /**
-   * 批量操作
-   * @param tableName 表名
-   * @param operations 操作数组
-   * @param version API版本
-   * @param clientId 客户端ID，用于限流
-   * @returns 统一格式的API响应
-   */
-  async bulkWrite(
+  async bulkWrite<T extends object = StorageRecord>(
     tableName: string,
-    operations: Array<
-      | {
-          type: 'insert';
-          data: Record<string, any> | Record<string, any>[];
-        }
-      | {
-          type: 'update';
-          data: Record<string, any>;
-          where: Record<string, any>;
-        }
-      | {
-          type: 'delete';
-          where: Record<string, any>;
-        }
-    >,
+    operations: BulkOperation<NonInfer<T>>[],
     version?: string,
     clientId: string = 'default'
   ): Promise<ApiResponse<WriteResult>> {
@@ -589,14 +460,13 @@ export class ApiWrapper {
       this.validationWrapper.validateTableName(tableName);
       const totalRecords = this.validationWrapper.validateBulkOperations(operations);
 
-      // Check限流
-      const tokens = this.getBulkWriteTokenCost(totalRecords); // Batch operation costs 2-20 tokens
+      const tokens = this.getBulkWriteTokenCost(totalRecords);
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, tokens);
       if (!rateLimitStatus.allowed) {
         return this.createRateLimitExceededResponse<WriteResult>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
-      const result = await this.storageAdapter.bulkWrite(tableName, operations);
+      const result = await this.storageAdapter.bulkWrite<T>(tableName, operations);
 
       return {
         success: true,
@@ -611,17 +481,10 @@ export class ApiWrapper {
         status: 'success',
       };
     } catch (error) {
-      return this.errorHandler.handleError(error, requestId, startTime, apiVersion);
+      return this.errorHandler.handleError<WriteResult>(error, requestId, startTime, apiVersion);
     }
   }
 
-  /**
-   * 迁移到分片模式
-   * @param tableName 表名
-   * @param version API版本
-   * @param clientId 客户端ID，用于限流
-   * @returns 统一格式的API响应
-   */
   async migrateToChunked(
     tableName: string,
     version?: string,
@@ -632,13 +495,11 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // Check限流
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 10); // Migration operation costs 10 tokens
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 10);
       if (!rateLimitStatus.allowed) {
         return this.createRateLimitExceededResponse<void>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
-      // Request validation
       this.validationWrapper.validateTableName(tableName);
 
       await this.storageAdapter.migrateToChunked(tableName);
@@ -656,7 +517,7 @@ export class ApiWrapper {
         status: 'success',
       };
     } catch (error) {
-      return this.errorHandler.handleError(error, requestId, startTime, apiVersion);
+      return this.errorHandler.handleError<void>(error, requestId, startTime, apiVersion);
     }
   }
 }

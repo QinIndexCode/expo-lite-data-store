@@ -1,12 +1,6 @@
-/**
- * @module ChunkedFileHandler
- * @description Chunked file handler for large data storage with automatic splitting
- * @since 2025-11-28
- * @version 3.0.0
- */
-
 import { configManager } from '../config/ConfigManager';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
+import { isStorageRecord, type StorageRecord } from '../../types/storageTypes';
 import { getEncodingType, getFileSystem } from '../../utils/fileSystemCompat';
 import { getRootPathSync } from '../../utils/ROOTPath';
 import withTimeout from '../../utils/withTimeout';
@@ -22,7 +16,7 @@ const APPEND_JOURNAL_EXT = '.append-journal';
 interface OverwriteJournal {
   version: 1;
   tableName: string;
-  previousData: Record<string, any>[];
+  previousData: StorageRecord[];
   previousHash: string;
   targetHash: string;
   targetCount: number;
@@ -47,7 +41,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
   private tableName: string;
   private tableDirPath: string;
   private metadataManager: IMetadataManager;
-  private chunkCache = new Map<number, Record<string, any>[]>();
+  private chunkCache = new Map<number, StorageRecord[]>();
   private readonly maxCacheSize = 10;
 
   constructor(tableName: string, metadataManager: IMetadataManager) {
@@ -70,7 +64,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     return `${getRootPathSync()}${this.tableName}${APPEND_JOURNAL_EXT}`;
   }
 
-  async write(data: Record<string, any>[]): Promise<void> {
+  async write(data: StorageRecord[]): Promise<void> {
     this.validateArrayData(data);
     const previousData = await this.readAll();
 
@@ -104,10 +98,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     }
   }
 
-  private async writeOverwriteJournal(
-    previousData: Record<string, any>[],
-    targetData: Record<string, any>[]
-  ): Promise<void> {
+  private async writeOverwriteJournal(previousData: StorageRecord[], targetData: StorageRecord[]): Promise<void> {
     const journalPath = this.getOverwriteJournalPath();
     const tempJournalPath = `${journalPath}.tmp`;
     const journal: OverwriteJournal = {
@@ -205,7 +196,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     previousCount: number,
     previousChunks: number,
     targetChunkIndices: number[],
-    targetData: Record<string, any>[]
+    targetData: StorageRecord[]
   ): Promise<void> {
     const journalPath = this.getAppendJournalPath();
     const tempJournalPath = `${journalPath}.tmp`;
@@ -365,7 +356,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       );
     }
 
-    let currentData: Record<string, any>[] | null = null;
+    let currentData: StorageRecord[] | null = null;
     try {
       currentData = await this.readAllChunks();
       const currentHash = await this.computeHash(currentData);
@@ -385,7 +376,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     await this.deleteOverwriteJournal();
   }
 
-  async read(): Promise<Record<string, any>[]> {
+  async read(): Promise<StorageRecord[]> {
     return this.readAll();
   }
 
@@ -393,7 +384,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     await this.clear();
   }
 
-  async append(data: Record<string, any>[]) {
+  async append(data: StorageRecord[]): Promise<void> {
     const writtenChunkIndices: number[] = [];
     try {
       this.validateArrayData(data);
@@ -469,14 +460,14 @@ export class ChunkedFileHandler extends FileHandlerBase {
     }
   }
 
-  private async preprocessData(data: Record<string, any>[], chunkSize: number): Promise<Record<string, any>[][]> {
-    const chunks: Record<string, any>[][] = [];
-    let currentChunk: Record<string, any>[] = [];
+  private async preprocessData(data: StorageRecord[], chunkSize: number): Promise<StorageRecord[][]> {
+    const chunks: StorageRecord[][] = [];
+    let currentChunk: StorageRecord[] = [];
     let currentSize = 0;
     const encoder = new TextEncoder();
     const overhead = 200;
     const itemSizes: number[] = [];
-    const validItems: Record<string, any>[] = [];
+    const validItems: StorageRecord[] = [];
 
     for (let index = 0; index < data.length; index++) {
       const item = data[index];
@@ -536,7 +527,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
         currentSize = 0;
       }
 
-      currentChunk.push(item as Record<string, any>);
+      currentChunk.push(item);
       currentSize += itemSize;
     }
 
@@ -547,7 +538,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     return chunks;
   }
 
-  private async writeChunk(index: number, data: Record<string, any>[]) {
+  private async writeChunk(index: number, data: StorageRecord[]): Promise<void> {
     const filePath = this.getChunkFilePath(index);
     try {
       this.validateArrayData(data);
@@ -558,7 +549,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       logger.debug(`Writing chunk ${index} to ${filePath}, data length: ${data.length}`);
 
       let retries = 3;
-      let lastError: any;
+      let lastError: unknown;
 
       while (retries > 0) {
         try {
@@ -588,12 +579,13 @@ export class ChunkedFileHandler extends FileHandlerBase {
           this.clearFileInfoCache(filePath);
           this.chunkCache.delete(index);
           return;
-        } catch (error: any) {
-          logger.debug(`Error writing chunk ${index}: ${error?.message}`);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.debug(`Error writing chunk ${index}: ${message}`);
           lastError = error;
           retries--;
 
-          if (error?.message && (error.message.includes('locked') || error.message.includes('busy'))) {
+          if (message.includes('locked') || message.includes('busy')) {
             await new Promise(resolve => setTimeout(resolve, 100));
           } else {
             throw error;
@@ -601,7 +593,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
         }
       }
 
-      throw lastError;
+      throw lastError ?? new Error(`Unable to write chunk ${index}`);
     } catch (error) {
       throw this.formatWriteError(`write chunk ${index} failed`, error);
     }
@@ -653,7 +645,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     }
   }
 
-  private async readChunkFile(filePath: string): Promise<Record<string, any>[]> {
+  private async readChunkFile(filePath: string): Promise<StorageRecord[]> {
     try {
       const text = await withTimeout(
         getFileSystem().readAsStringAsync(filePath, { encoding: getEncodingType().UTF8 }),
@@ -663,24 +655,25 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
       logger.debug(`Read chunk file ${filePath}, contentLength=${text.length}`);
 
-      const parsed = JSON.parse(text);
+      const parsed: unknown = JSON.parse(text);
 
-      if (!parsed || typeof parsed !== 'object') {
+      if (!isStorageRecord(parsed)) {
         throw new StorageError(`CHUNK ${filePath} FORMAT_ERROR: not valid JSON object`, 'CORRUPTED_DATA');
       }
 
-      if (!Array.isArray(parsed.data) || parsed.hash === undefined) {
+      const { data, hash } = parsed;
+      if (!Array.isArray(data) || !data.every(isStorageRecord) || typeof hash !== 'string') {
         throw new StorageError(`CHUNK ${filePath} FORMAT_ERROR: missing data array or hash field`, 'CORRUPTED_DATA');
       }
 
-      const isValid = await this.verifyHash(parsed.data, parsed.hash);
+      const isValid = await this.verifyHash(data, hash);
       if (!isValid) {
         logger.warn(`CHUNK ${filePath} CORRUPTED: hash mismatch`);
-        logger.debug(`Expected hash: ${parsed.hash}, Actual hash: ${await this.computeHash(parsed.data)}`);
+        logger.debug(`Expected hash: ${hash}, Actual hash: ${await this.computeHash(data)}`);
         throw new StorageError(`CHUNK ${filePath} CORRUPTED: hash mismatch`, 'CORRUPTED_DATA');
       }
 
-      return parsed.data;
+      return data;
     } catch (error) {
       logger.error(`ERROR reading chunk file ${filePath}:`, error);
       if (error instanceof StorageError) {
@@ -699,13 +692,13 @@ export class ChunkedFileHandler extends FileHandlerBase {
     this.chunkCache.clear();
   }
 
-  async readAll(): Promise<Record<string, any>[]> {
+  async readAll(): Promise<StorageRecord[]> {
     await this.recoverPendingOverwriteJournal();
     await this.recoverPendingAppendJournal();
     return this.readAllChunks();
   }
 
-  private async readAllChunks(): Promise<Record<string, any>[]> {
+  private async readAllChunks(): Promise<StorageRecord[]> {
     const chunkFiles = await this.getChunkFiles();
 
     if (chunkFiles.length === 0) {
@@ -736,7 +729,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       );
     }
 
-    const allChunkData = new Map<number, Record<string, any>[]>();
+    const allChunkData = new Map<number, StorageRecord[]>();
     const filesToRead: string[] = [];
     const cachedIndices: number[] = [];
 
@@ -831,7 +824,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     }
   }
 
-  async readRange(startIndex: number, endIndex: number): Promise<Record<string, any>[]> {
+  async readRange(startIndex: number, endIndex: number): Promise<StorageRecord[]> {
     await this.recoverPendingOverwriteJournal();
     await this.recoverPendingAppendJournal();
     const allChunkFiles = await this.getChunkFiles();

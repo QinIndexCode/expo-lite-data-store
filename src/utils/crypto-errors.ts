@@ -1,11 +1,4 @@
 /**
- * @module crypto-errors
- * @description Shared error definitions for encryption modules
- * @since 2026-04-02
- * @version 3.0.0
- */
-
-/**
  * Encryption error class for handling crypto-related errors
  */
 export class CryptoError extends Error {

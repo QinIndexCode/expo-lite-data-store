@@ -1,10 +1,3 @@
-/**
- * @module storageErrorCode
- * @description Runtime error code constants plus the corresponding string-literal type.
- * @since 2025-11-19
- * @version 3.0.0
- */
-
 export const StorageErrorCode = {
   // Table error codes
   TABLE_NOT_FOUND: 'TABLE_NOT_FOUND',

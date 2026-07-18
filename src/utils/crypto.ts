@@ -1,18 +1,3 @@
-﻿/**
- * Encryption utility module
- * Expo SDK 56 compliant version (AES-256-CTR + HMAC-SHA512 emulates GCM)
- * Dependencies: expo-crypto (randomness) + @noble/ciphers (encryption) + crypto-js/native helpers (HMAC & hashing)
- *
- * @module crypto
- * @since 2025-11-17
- * @version 3.0.0
- * @changelog
- *   - 2025-11-17: Initial implementation for Expo SDK 54
- *   - 2025-12-09: Fixed Base64 encoding/decoding issues in Expo environment
- *   - 2026-01-20: Migrated from crypto-es to @noble/ciphers and @noble/hashes
- *   - 2026-04-26: Replaced @noble/hashes runtime usage with crypto-js/native helpers to avoid Metro export warnings
- *   - 2026-06-12: Updated the supported dependency contract for Expo SDK 56
- */
 import bcrypt from 'bcryptjs';
 import logger from './logger';
 import { performanceMonitor } from '../core/monitor/PerformanceMonitor';
@@ -31,11 +16,20 @@ import {
 import { normalizePbkdf2Iterations } from './cryptoIterations';
 import { clearGCMKeyCache, encryptGCM, decryptGCM, encryptGCMBulk, decryptGCMBulk } from './crypto-gcm';
 import { CryptoError } from './crypto-errors';
+import type {
+  BulkEncryptionResult,
+  CachedKeyEntry,
+  EncryptedPayload,
+  FieldEncryptionConfig,
+  KeyCacheStats,
+} from './crypto-types';
 import { loadOptionalExpoModule, loadRequiredExpoModule } from './expoModuleLoader';
 import { StorageError } from '../types/storageErrorInfc';
+import type { StorageRecord } from '../types/storageTypes';
 
 // Re-export for backward compatibility
 export { CryptoError };
+export type { KeyCacheStats } from './crypto-types';
 
 type ExpoCryptoModule = typeof import('expo-crypto');
 type ExpoSecureStoreModule = typeof import('expo-secure-store');
@@ -159,27 +153,6 @@ const base64ToJson = <T>(str: string): T => {
   return JSON.parse(jsonStr) as T;
 };
 
-/**
- * Interface representing an encrypted payload structure
- *
- * @interface EncryptedPayload
- * @since 2025-11-17
- */
-interface EncryptedPayload {
-  /** Payload format version for authenticated CTR payloads. Absent on legacy payloads. */
-  version?: 'ctr-v2';
-  /** Base64 encoded salt value */
-  salt: string;
-  /** Base64 encoded initialization vector */
-  iv: string;
-  /** Base64 encoded ciphertext */
-  ciphertext: string;
-  /** HMAC-SHA512 signature (Base64, simulates GCM tag) */
-  hmac: string;
-}
-
-/**
- * 涓诲瘑閽ュ埆鍚? */
 const MASTER_KEY_ALIAS = 'expo_litedb_master_key_v2025';
 const AUTH_MASTER_KEY_ALIAS = 'expo_litedb_master_key_auth_v2026';
 const CTR_PAYLOAD_VERSION = 'ctr-v2' as const;
@@ -192,9 +165,6 @@ let authMasterKeyProvisioning: Promise<void> | null = null;
  */
 export const getMasterKeyGeneration = (): number => masterKeyGeneration;
 
-/**
- * 闈?Expo 鐜涓嬬殑鍐呭瓨瀛樺偍鍥為€€
- */
 let inMemoryStore: Map<string, string> = new Map();
 
 /**
@@ -336,48 +306,7 @@ const provisionAuthMasterKey = async (
   await authMasterKeyProvisioning;
 };
 
-/**
- * Interface representing a cached key entry with LRU tracking
- *
- * @interface CachedKeyEntry
- * @since 2025-11-17
- */
-export interface CachedKeyEntry {
-  /** AES encryption key */
-  aesKey: Uint8Array;
-  /** HMAC verification key */
-  hmacKey: Uint8Array;
-  /** Number of times this key has been accessed */
-  accessCount: number;
-  /** Timestamp of last access */
-  lastAccessTime: number;
-  /** Timestamp of creation */
-  createdAt: number;
-}
-
-/**
- * Interface representing key cache statistics
- *
- * @interface KeyCacheStats
- * @since 2025-11-17
- */
-export interface KeyCacheStats {
-  /** Number of cache hits */
-  hits: number;
-  /** Number of cache misses */
-  misses: number;
-  /** Number of cache evictions */
-  evictions: number;
-  /** Current cache size */
-  size: number;
-}
-
-/**
- * Smart key cache with LRU eviction policy to avoid memory overflow
- *
- * @class SmartKeyCache
- * @since 2025-11-17
- */
+/** Bounded LRU cache for derived keys. */
 class SmartKeyCache {
   /** Internal cache storage */
   private cache = new Map<string, CachedKeyEntry>();
@@ -527,50 +456,32 @@ class SmartKeyCache {
 
 const keyCache = new SmartKeyCache(50, 30 * 60 * 1000);
 
-/**
- * 鑾峰彇瀵嗛挜缂撳瓨缁熻淇℃伅
- */
 export const getKeyCacheStats = (): KeyCacheStats => {
   return keyCache.getStats();
 };
 
-/**
- * 鑾峰彇瀵嗛挜缂撳瓨鍛戒腑鐜? */
 export const getKeyCacheHitRate = (): number => {
   return keyCache.getHitRate();
 };
 
-/**
- * 娓呴櫎瀵嗛挜缂撳瓨锛堢敤浜庣櫥鍑烘垨閲嶇疆锛? */
+/** Clears all derived-key caches, including dependent GCM entries. */
 export const clearKeyCache = (): void => {
   keyCache.clear();
   rootKeyCache.clear();
   clearGCMKeyCache();
 };
 
-/**
- * 瀵嗛挜缂撳瓨鑷姩娓呯悊闂撮殧锛?0鍒嗛挓锛? */
 const KEY_CACHE_CLEANUP_INTERVAL = 10 * 60 * 1000;
 
-// Save瀹氭椂鍣?ID - 鍏煎 Node.js 鍜屾祻瑙堝櫒鐜
-// Node.js 涓?setInterval 杩斿洖 number锛屾祻瑙堝櫒涓繑鍥?Timeout 瀵硅薄
 let keyCacheCleanupTimer: number | NodeJS.Timeout | undefined;
 let keyCacheCleanupInitialized = false;
 
-/**
- * 鍒濆鍖栧瘑閽ョ紦瀛樿嚜鍔ㄦ竻鐞? */
 const initializeKeyCacheCleanup = (): void => {
-  // Periodically clean expired key cache (every 10 minutes)
   keyCacheCleanupTimer = setInterval(() => {
     keyCache.cleanup();
   }, KEY_CACHE_CLEANUP_INTERVAL);
 
-  // Clear cache on page unload
-  // Explicitly check if window.addEventListener exists锛岄槻姝eact Native鐜鎶ラ敊
-  // Use complex check to prevent compiler optimization
   if (typeof window !== 'undefined') {
-    // In React Native, window exists but addEventListener does not
-    // Use typeof check to ensure method exists
     const addEventListener = window['addEventListener'];
     if (typeof addEventListener === 'function') {
       addEventListener.call(window, 'beforeunload', clearKeyCache);
@@ -578,18 +489,12 @@ const initializeKeyCacheCleanup = (): void => {
   }
 };
 
-/**
- * 鍋滄瀵嗛挜缂撳瓨娓呯悊瀹氭椂鍣? */
 export const stopKeyCacheCleanup = (): void => {
-  // Clear timer
   if (keyCacheCleanupTimer) {
     clearInterval(keyCacheCleanupTimer);
     keyCacheCleanupTimer = undefined;
   }
 
-  // Clear page unload event listener
-  // Explicitly check if window.removeEventListener exists锛岄槻姝eact Native鐜鎶ラ敊
-  // Use bracket syntax to prevent compiler optimization
   if (typeof window !== 'undefined' && typeof window['removeEventListener'] === 'function') {
     window['removeEventListener']('beforeunload', clearKeyCache);
   }
@@ -597,8 +502,6 @@ export const stopKeyCacheCleanup = (): void => {
   keyCacheCleanupInitialized = false;
 };
 
-// Initialize鏃跺惎鍔ㄨ嚜鍔ㄦ竻鐞?// But not auto-start in test to avoid Jest open handle detection
-// Ensure correct detection in all environments including browser
 const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
 
 const ensureKeyCacheCleanupInitialized = (): void => {
@@ -610,11 +513,7 @@ const ensureKeyCacheCleanupInitialized = (): void => {
   keyCacheCleanupInitialized = true;
 };
 
-/**
- * Root key cache: stores PBKDF2-derived root keys per masterKey.
- * This is the expensive one-time operation. Once we have the root key,
- * all subsequent per-record key derivations use fast HKDF (~3渭s vs ~2s).
- */
+/** Bounds expensive PBKDF2 root-key derivations per master key. */
 const ROOT_KEY_CACHE_MAX_SIZE = 50;
 const rootKeyCache = new Map<string, Uint8Array>();
 
@@ -642,48 +541,28 @@ const setRootKeyCacheEntry = (cacheKey: string, rootKey: Uint8Array): void => {
   rootKeyCache.set(cacheKey, rootKey);
 };
 
-/**
- * Derives AES and HMAC keys from master key and salt.
- *
- * Two-tier architecture for performance:
- * 1. PBKDF2 (one-time, slow ~2s): masterKey + fixed_salt 鈫?rootKey (64 bytes)
- * 2. HKDF (per-record, fast ~3渭s): rootKey + salt 鈫?AES+HMAC keys (64 bytes)
- *
- * This eliminates the ~2s stall on every unique salt in Expo Go.
- *
- * @param masterKey Master key for derivation
- * @param salt Salt for key derivation
- * @returns Promise<{ aesKey: Uint8Array; hmacKey: Uint8Array }> Derived AES and HMAC keys
- *
- * @throws CryptoError If key derivation fails
- */
+/** Derives per-record AES and HMAC keys from a cached PBKDF2 root key. */
 const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey: Uint8Array; hmacKey: Uint8Array }> => {
   try {
     ensureKeyCacheCleanupInitialized();
 
-    // Step 1: Get or derive root key (PBKDF2, one-time per masterKey)
     const iterations = getIterations();
     const rootCacheKey = `${iterations}:${bytesToBase64(providerHashBytes(masterKey, 'SHA-256'))}`;
     let rootKey = getRootKeyCacheEntry(rootCacheKey);
 
     if (!rootKey) {
-      // First time: expensive PBKDF2 operation (~2s in Expo Go with 20K iterations)
-      // Use a fixed salt for root key derivation (root key is only used as HKDF input)
       const rootSalt = new Uint8Array([0x72, 0x6f, 0x6f, 0x74, 0x2d, 0x6b, 0x65, 0x79]); // "root-key"
       rootKey = providerPbkdf2(masterKey, rootSalt, iterations, 64, 'sha256');
       setRootKeyCacheEntry(rootCacheKey, rootKey);
     }
 
-    // Step 2: Fast HKDF-expand for per-record keys (~3渭s)
     const derivedBytes = hkdfDerive(rootKey, salt, 64);
 
-    // Split derived key: first 32 bytes for AES, last 32 bytes for HMAC
     const aesKey = derivedBytes.slice(0, 32);
     const hmacKey = derivedBytes.slice(32, 64);
 
     const result = { aesKey, hmacKey };
 
-    // Also cache in the LRU keyCache for stats tracking
     const saltStr = bytesToBase64(salt);
     const cacheKey = `${masterKey.slice(0, 16)}_${saltStr}`;
     const cachedEntry = keyCache.get(cacheKey);
@@ -707,24 +586,17 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
 };
 
 /**
- * Generates secure random bytes using the most secure available method.
- * Falls back to less secure methods if secure options are unavailable.
+ * Generates secure random bytes through expo-crypto, browser crypto, or the
+ * development-only fallback selected by the crypto provider.
  *
- * @param length Number of random bytes to generate
- * @returns Uint8Array of secure random bytes
- *
- * @description
- * - Uses expo-crypto if available
- * - Falls back to crypto.getRandomValues in browser environments
- * - Uses Math.random as last resort (insecure, only for development)
+ * @param length Number of random bytes to generate.
+ * @returns Secure random bytes.
  */
 const getSecureRandomBytes = (length: number): Uint8Array => {
   return providerRandomBytes(length);
 };
 
-/**
- * 鏍规嵁鏁版嵁澶у皬鍜岄厤缃€夋嫨HMAC绠楁硶
- * 灏忔暟鎹娇鐢⊿HA-256锛堟洿蹇級锛屽ぇ鏁版嵁浣跨敤SHA-512锛堟洿瀹夊叏锛? */
+/** Selects the configured HMAC algorithm or an input-size-based default. */
 const selectHMACAlgorithm = (dataSize: number): 'SHA-256' | 'SHA-512' => {
   const config = configManager.getConfig();
 
@@ -954,17 +826,12 @@ const decryptCTR = async (encryptedBase64: string, masterKey: string): Promise<s
 };
 
 /**
- * Gets the master key for encryption operations.
+ * Gets the encryption master key from secure storage, or from the test-only
+ * in-memory fallback when no secure store is available.
  *
- * @param requireAuthOnAccess Whether biometric authentication is required for each access (defaults to false)
- * @returns Promise<string> Master encryption key
- *
- * @throws CryptoError If master key retrieval or generation fails
- *
- * @description
- * - Uses expo-secure-store if available
- * - Uses an in-memory fallback only in tests
- * - Supports biometric authentication when required
+ * @param requireAuthOnAccess Whether biometric authentication is required for each access.
+ * @returns The master encryption key.
+ * @throws CryptoError when key retrieval or generation fails.
  */
 export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promise<string> => {
   const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
@@ -1003,12 +870,22 @@ export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promis
         return key;
       } catch (secureStoreError) {
         if (!isTestEnvironment) {
-          throw new CryptoError('SecureStore unavailable; refusing non-persistent master key fallback', 'KEY_DERIVE_FAILED', secureStoreError);
+          throw new CryptoError(
+            'SecureStore unavailable; refusing non-persistent master key fallback',
+            'KEY_DERIVE_FAILED',
+            secureStoreError
+          );
         }
-        logger.warn('SecureStore unavailable in test environment, using in-memory key storage fallback:', secureStoreError);
+        logger.warn(
+          'SecureStore unavailable in test environment, using in-memory key storage fallback:',
+          secureStoreError
+        );
       }
     } else if (!isTestEnvironment) {
-      throw new CryptoError('SecureStore not available; refusing non-persistent master key fallback', 'KEY_DERIVE_FAILED');
+      throw new CryptoError(
+        'SecureStore not available; refusing non-persistent master key fallback',
+        'KEY_DERIVE_FAILED'
+      );
     }
 
     let key = inMemoryStore.get(MASTER_KEY_ALIAS);
@@ -1070,11 +947,7 @@ export const resetMasterKey = async (): Promise<void> => {
   }
 };
 
-/**
- * 棰勮绠楀父鐢ㄥ瘑閽ワ紝鍑忓皯棣栨鍔犲瘑鏃剁殑瀵嗛挜娲剧敓鏃堕棿
- *
- * @returns Promise<void>
- */
+/** Warms a small set of derived keys for the next encryption operations. */
 export const precomputeCommonKeys = async (): Promise<void> => {
   try {
     const masterKey = await getMasterKey();
@@ -1083,12 +956,11 @@ export const precomputeCommonKeys = async (): Promise<void> => {
       return;
     }
 
-    // Pre-compute 3 common keys
     const commonSalts = [getSecureRandomBytes(16), getSecureRandomBytes(16), getSecureRandomBytes(16)];
 
     logger.info(`Precomputing ${commonSalts.length} common keys for better performance`);
 
-    // Parallel棰勮绠楁墍鏈夊瘑閽?    await Promise.all(commonSalts.map(salt => deriveKey(masterKey, salt)));
+    await Promise.all(commonSalts.map(salt => deriveKey(masterKey, salt)));
 
     logger.info('Key precomputation completed');
   } catch (error) {
@@ -1096,8 +968,7 @@ export const precomputeCommonKeys = async (): Promise<void> => {
   }
 };
 
-/**
- * 鐢熸垚涓诲瘑閽ワ紙32 瀛楄妭闅忔満锛? * @returns 涓诲瘑閽? */
+/** Generates a new 256-bit master key. */
 export const generateMasterKey = async (): Promise<string> => {
   try {
     const bytes = getSecureRandomBytes(32);
@@ -1116,14 +987,7 @@ export const generateMasterKey = async (): Promise<string> => {
   }
 };
 
-// ==================== bcrypt 瀵嗙爜鍝堝笇鍔熻兘 ====================
-
-/**
- * 鐢熸垚瀵嗙爜鍝堝笇
- * @param password 鍘熷瀵嗙爜
- * @param saltRounds 鐩愬€艰疆鏁帮紙榛樿12杞級
- * @returns 瀵嗙爜鍝堝笇
- */
+/** Hashes a password with bcrypt. */
 export const hashPassword = async (password: string, saltRounds: number = 12): Promise<string> => {
   try {
     return await bcrypt.hash(password, saltRounds);
@@ -1132,12 +996,7 @@ export const hashPassword = async (password: string, saltRounds: number = 12): P
   }
 };
 
-/**
- * 楠岃瘉瀵嗙爜鍝堝笇
- * @param password 鍘熷瀵嗙爜
- * @param hash 瀵嗙爜鍝堝笇
- * @returns 鏄惁鍖归厤
- */
+/** Verifies a password against a bcrypt hash. */
 export const verifyPassword = async (password: string, hash: string): Promise<boolean> => {
   try {
     return await bcrypt.compare(password, hash);
@@ -1146,8 +1005,6 @@ export const verifyPassword = async (password: string, hash: string): Promise<bo
   }
 };
 
-/**
- * 鐢熸垚闅忔満鐩愬€? * @param rounds 鐩愬€艰疆鏁? * @returns 闅忔満鐩愬€? */
 export const generateSalt = async (rounds: number = 12): Promise<string> => {
   try {
     return await bcrypt.genSalt(rounds);
@@ -1156,28 +1013,7 @@ export const generateSalt = async (rounds: number = 12): Promise<string> => {
   }
 };
 
-/**
- * Interface representing a single bulk encryption result
- *
- * @interface BulkEncryptionResult
- * @since 2025-11-17
- */
-interface BulkEncryptionResult {
-  /** Encrypted data in Base64 format */
-  encryptedData: string;
-  /** Salt used for key derivation in Base64 format */
-  salt: string;
-  /** Initialization vector in Base64 format */
-  iv: string;
-  /** HMAC signature in Base64 format */
-  hmac: string;
-}
-
-/**
- * 鎵归噺鍔犲瘑澶氫釜鏂囨湰锛堥噸鐢ㄥ瘑閽ユ淳鐢燂級
- * @param plainTexts 瑕佸姞瀵嗙殑鏄庢枃鏁扮粍
- * @param masterKey 涓诲瘑閽? * @returns Promise<string[]> 鍔犲瘑鍚庣殑鏂囨湰鏁扮粍
- */
+/** Encrypts a batch of plaintext values using the configured algorithm. */
 export const encryptBulk = async (plainTexts: string[], masterKey: string): Promise<string[]> => {
   if (plainTexts.length === 0) return [];
 
@@ -1241,15 +1077,11 @@ const encryptBulkCTR = async (plainTexts: string[], masterKey: string): Promise<
   }
 };
 
-/**
- * 鎵归噺瑙ｅ瘑澶氫釜鏂囨湰
- * @param encryptedTexts 瑕佽В瀵嗙殑瀵嗘枃鏁扮粍
- * @param masterKey 涓诲瘑閽? * @returns Promise<string[]> 瑙ｅ瘑鍚庣殑鏄庢枃鏁扮粍
- */
+/** Decrypts a batch of ciphertext values and detects GCM payloads. */
 export const decryptBulk = async (encryptedTexts: string[], masterKey: string): Promise<string[]> => {
   if (encryptedTexts.length === 0) return [];
 
-  // Auto-detect: check first item to determine algorithm
+  // GCM payloads are self-identifying; legacy payloads use CTR.
   try {
     const jsonBytes = base64ToBytes(encryptedTexts[0]);
     const jsonStr = new TextDecoder().decode(jsonBytes);
@@ -1258,9 +1090,7 @@ export const decryptBulk = async (encryptedTexts: string[], masterKey: string): 
     if (firstPayload && firstPayload.version === 'gcm-v1') {
       return decryptGCMBulk(encryptedTexts, masterKey);
     }
-  } catch {
-    // If parsing fails, fall through to CTR decryption
-  }
+  } catch {}
 
   return decryptBulkCTR(encryptedTexts, masterKey);
 };
@@ -1310,12 +1140,7 @@ const decryptBulkCTR = async (encryptedTexts: string[], masterKey: string): Prom
   }
 };
 
-// ==================== 閫氱敤鍝堝笇鍔熻兘 ====================
-
-/**
- * 鐢熸垚鏁版嵁鍝堝笇
- * @param data 瑕佸搱甯岀殑鏁版嵁
- * @param algorithm 鍝堝笇绠楁硶锛堥粯璁HA-512锛? * @returns Promise<string> 鍝堝笇鍊硷紙鍗佸叚杩涘埗锛? */
+/** Generates a SHA-256 or SHA-512 digest. */
 export const generateHash = async (data: string, algorithm: 'SHA-256' | 'SHA-512' = 'SHA-512'): Promise<string> => {
   try {
     ensureKeyCacheCleanupInitialized();
@@ -1339,45 +1164,52 @@ export const generateHash = async (data: string, algorithm: 'SHA-256' | 'SHA-512
   }
 };
 
-/**
- * Interface representing field-level encryption configuration
- *
- * @interface FieldEncryptionConfig
- * @since 2025-11-17
- */
-interface FieldEncryptionConfig {
-  /** List of fields to encrypt */
-  fields: string[];
-  /** Master key for encryption (32 bytes) */
-  masterKey: string;
-  /** Encryption configuration options */
-  encryption?: {
-    /** HMAC algorithm to use (default: auto-select based on data size) */
-    hmacAlgorithm?: 'SHA-256' | 'SHA-512';
-    /** Encryption algorithm to use (default: auto, which routes new writes through the GCM path) */
-    encryptionAlgorithm?: 'AES-CTR' | 'AES-GCM' | 'auto';
-    /** Key size in bits (default: 256) */
-    keySize?: 256;
-  };
-}
+const FIELD_VALUE_PREFIX = '__expo_lite_data_store_field_v1__:';
+const UNSAFE_FIELD_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
 
-/**
- * 瀛楁绾у姞瀵? * @param data 瑕佸姞瀵嗙殑瀵硅薄
- * @param config 鍔犲瘑閰嶇疆
- * @returns Promise<Record<string, any>> 瀛楁绾у姞瀵嗗悗鐨勫璞? */
+const assertSafeFieldNames = (fields: string[], code: 'ENCRYPT_FAILED' | 'DECRYPT_FAILED'): void => {
+  for (const field of fields) {
+    if (UNSAFE_FIELD_NAMES.has(field)) {
+      throw new CryptoError(`Unsafe field name for field encryption: ${field}`, code);
+    }
+  }
+};
+
+const serializeFieldValue = (value: unknown): string => {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new CryptoError('Field values must be JSON-serializable', 'ENCRYPT_FAILED');
+  }
+
+  return `${FIELD_VALUE_PREFIX}${serialized}`;
+};
+
+const deserializeFieldValue = (value: string): unknown => {
+  if (value.startsWith(FIELD_VALUE_PREFIX)) {
+    try {
+      return JSON.parse(value.slice(FIELD_VALUE_PREFIX.length));
+    } catch (error) {
+      throw new CryptoError('Field encryption payload is invalid', 'DECRYPT_FAILED', error);
+    }
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+};
+
+/** Encrypts configured record fields while preserving their serialized types. */
 export const encryptFields = async (
-  data: Record<string, unknown>,
+  data: StorageRecord,
   fieldConfig: FieldEncryptionConfig
-): Promise<Record<string, unknown>> => {
+): Promise<StorageRecord> => {
+  assertSafeFieldNames(fieldConfig.fields, 'ENCRYPT_FAILED');
   const result = { ...data };
 
-  // Only encrypt fields requiring encryption
   const fieldsToEncrypt = fieldConfig.fields.filter(field => result[field] !== undefined && result[field] !== null);
-
-  const valuesToEncrypt = fieldsToEncrypt.map(field => {
-    const value = typeof result[field] === 'string' ? result[field] : JSON.stringify(result[field]);
-    return value as string;
-  });
+  const valuesToEncrypt = fieldsToEncrypt.map(field => serializeFieldValue(result[field]));
   if (valuesToEncrypt.length > 0) {
     const encryptedValues = await encryptBulk(valuesToEncrypt, fieldConfig.masterKey);
     encryptedValues.forEach((enc, idx) => {
@@ -1387,14 +1219,12 @@ export const encryptFields = async (
   }
   return result;
 };
-/**
- * 瀛楁绾цВ瀵? * @param data 瑕佽В瀵嗙殑瀵硅薄
- * @param config 瑙ｅ瘑閰嶇疆
- * @returns Promise<Record<string, any>> 瀛楁绾цВ瀵嗗悗鐨勫璞? */
+/** Decrypts configured record fields and restores their serialized types. */
 export const decryptFields = async (
-  data: Record<string, unknown>,
+  data: StorageRecord,
   fieldConfig: FieldEncryptionConfig
-): Promise<Record<string, unknown>> => {
+): Promise<StorageRecord> => {
+  assertSafeFieldNames(fieldConfig.fields, 'DECRYPT_FAILED');
   const result = { ...data };
   const fieldsToDecrypt = fieldConfig.fields.filter(
     field => result[field] !== undefined && result[field] !== null && typeof result[field] === 'string'
@@ -1402,59 +1232,34 @@ export const decryptFields = async (
 
   if (fieldsToDecrypt.length === 0) return result;
 
-  // 1. Batch process all encrypted fields
   const decryptPromises = fieldsToDecrypt.map(async field => {
     const encryptedValue = result[field] as string;
-
-    // 2. Reuse the existing decrypt function so key caches still apply
     const decryptedStr = await decrypt(encryptedValue, fieldConfig.masterKey);
-
-    // 3. 绫诲瀷鎭㈠閫昏緫淇濇寔涓嶅彉
-    if (/^[\{\[]/.test(decryptedStr.trim())) {
-      result[field] = JSON.parse(decryptedStr);
-    } else {
-      const trimmed = decryptedStr.trim();
-      if (/^true$/i.test(trimmed)) result[field] = true;
-      else if (/^false$/i.test(trimmed)) result[field] = false;
-      else if (/^null$/i.test(trimmed)) result[field] = null;
-      else if (/^[-+]?\d*\.?\d+([eE][-+]?\d+)?$/.test(trimmed) && !trimmed.startsWith('+0')) {
-        if (decryptedStr.includes('+') && !decryptedStr.startsWith('+0')) {
-          result[field] = decryptedStr;
-        } else {
-          result[field] = Number(decryptedStr);
-        }
-      } else {
-        result[field] = decryptedStr;
-      }
-    }
+    result[field] = deserializeFieldValue(decryptedStr);
   });
 
   await Promise.all(decryptPromises);
   return result;
 };
-/**
- * 鎵归噺瀛楁绾у姞瀵? * @param dataArray 瑕佸姞瀵嗙殑瀵硅薄鏁扮粍
- * @param fieldConfig 鍔犲瘑閰嶇疆
- * @returns Promise<Record<string, any>[]> 鎵归噺瀛楁绾у姞瀵嗗悗鐨勫璞℃暟缁? */
+/** Encrypts configured fields across records with one bulk operation per field. */
 export const encryptFieldsBulk = async (
-  dataArray: Record<string, unknown>[],
+  dataArray: StorageRecord[],
   fieldConfig: FieldEncryptionConfig
-): Promise<Record<string, unknown>[]> => {
+): Promise<StorageRecord[]> => {
+  assertSafeFieldNames(fieldConfig.fields, 'ENCRYPT_FAILED');
   if (dataArray.length === 0) return dataArray;
 
-  // Collect values for all fields requiring encryption
-  const fieldValues: { [field: string]: string[] } = {};
+  const fieldValues: Record<string, string[]> = {};
 
   fieldConfig.fields.forEach(field => {
     fieldValues[field] = dataArray
       .map(item => item[field])
       .filter(value => value !== undefined && value !== null)
-      .map(value => JSON.stringify(value));
+      .map(serializeFieldValue);
   });
 
-  // Batch encrypt each field value
   const encryptionPromises: Promise<void>[] = [];
-  const encryptedValues: { [field: string]: string[] } = {};
+  const encryptedValues: Record<string, string[]> = {};
 
   for (const [field, values] of Object.entries(fieldValues)) {
     encryptionPromises.push(
@@ -1464,18 +1269,18 @@ export const encryptFieldsBulk = async (
     );
   }
 
-  // Encryption must be all-or-nothing. Returning partially encrypted records
-  // would persist plaintext when any field encryption fails.
   await Promise.all(encryptionPromises);
 
-  // Rebuild result array
-  return dataArray.map((item, index) => {
+  const fieldOffsets: Record<string, number> = {};
+  return dataArray.map(item => {
     const result = { ...item };
     fieldConfig.fields.forEach(field => {
       if (item[field] !== undefined && item[field] !== null) {
-        const fieldIndex = dataArray.slice(0, index).filter(i => i[field] !== undefined && i[field] !== null).length;
-        if (encryptedValues[field] && encryptedValues[field][fieldIndex]) {
-          result[field] = encryptedValues[field][fieldIndex];
+        const fieldIndex = fieldOffsets[field] ?? 0;
+        fieldOffsets[field] = fieldIndex + 1;
+        const encryptedValue = encryptedValues[field]?.[fieldIndex];
+        if (encryptedValue !== undefined) {
+          result[field] = encryptedValue;
         }
       }
     });
@@ -1483,18 +1288,15 @@ export const encryptFieldsBulk = async (
   });
 };
 
-/**
- * 鎵归噺瀛楁绾цВ瀵? * @param dataArray 瑕佽В瀵嗙殑瀵硅薄鏁扮粍
- * @param config 瑙ｅ瘑閰嶇疆
- * @returns Promise<Record<string, any>[]> 鎵归噺瀛楁绾цВ瀵嗗悗鐨勫璞℃暟缁? */
+/** Decrypts configured fields across records with one bulk operation per field. */
 export const decryptFieldsBulk = async (
-  dataArray: Record<string, unknown>[],
+  dataArray: StorageRecord[],
   fieldConfig: FieldEncryptionConfig
-): Promise<Record<string, unknown>[]> => {
+): Promise<StorageRecord[]> => {
+  assertSafeFieldNames(fieldConfig.fields, 'DECRYPT_FAILED');
   if (dataArray.length === 0) return dataArray;
 
-  // Collect values for all fields requiring decryption
-  const fieldValues: { [field: string]: string[] } = {};
+  const fieldValues: Record<string, string[]> = {};
 
   fieldConfig.fields.forEach(field => {
     fieldValues[field] = dataArray
@@ -1502,40 +1304,30 @@ export const decryptFieldsBulk = async (
       .filter(value => value !== undefined && value !== null && typeof value === 'string');
   });
 
-  // Batch decrypt each field value
   const decryptionPromises: Promise<void>[] = [];
   const decryptedValues: Record<string, unknown[]> = {};
 
   for (const [field, values] of Object.entries(fieldValues)) {
     decryptionPromises.push(
       decryptBulk(values, fieldConfig.masterKey).then(decrypted => {
-        decryptedValues[field] = decrypted.map(val => {
-          try {
-            // Try to parse JSON
-            return JSON.parse(val);
-          } catch {
-            return val; // If not JSON, keep original value
-          }
-        });
+        decryptedValues[field] = decrypted.map(deserializeFieldValue);
       })
     );
   }
 
   await Promise.all(decryptionPromises);
 
-  // Rebuild result array
-  return dataArray.map((item, index) => {
+  const fieldOffsets: Record<string, number> = {};
+  return dataArray.map(item => {
     const result = { ...item };
 
     fieldConfig.fields.forEach(field => {
       if (item[field] !== undefined && item[field] !== null && typeof item[field] === 'string') {
-        const fieldIndex =
-          dataArray
-            .slice(0, index + 1)
-            .filter(i => i[field] !== undefined && i[field] !== null && typeof i[field] === 'string').length - 1;
-
-        if (decryptedValues[field] && decryptedValues[field][fieldIndex] !== undefined) {
-          result[field] = decryptedValues[field][fieldIndex];
+        const fieldIndex = fieldOffsets[field] ?? 0;
+        fieldOffsets[field] = fieldIndex + 1;
+        const decryptedValue = decryptedValues[field]?.[fieldIndex];
+        if (decryptedValue !== undefined) {
+          result[field] = decryptedValue;
         }
       }
     });

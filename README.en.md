@@ -359,7 +359,7 @@ The runtime configuration layer is not a merge of every host source. In an Expo,
 
 | Key                                    | Default           | Purpose                                                                                     |
 | -------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------- |
-| `chunkSize`                            | `5242880`         | Target chunk size in bytes; initial-data auto-selection starts above half this value       |
+| `chunkSize`                            | `5242880`         | Target chunk size in bytes; initial-data auto-selection starts above half this value        |
 | `storageFolder`                        | `lite-data-store` | Root folder under Expo file storage                                                         |
 | `sortMethods`                          | `default`         | Default sort strategy hint                                                                  |
 | `timeout`                              | `10000`           | Timeout for selected file operations                                                        |
@@ -372,7 +372,7 @@ The runtime configuration layer is not a merge of every host source. In an Expo,
 | `autoSync.enabled`                     | `false`           | Auto-sync service toggle; opt in explicitly when background dirty-cache syncing is required |
 | `autoSync.interval`                    | `30000`           | Auto-sync interval in milliseconds                                                          |
 | `autoSync.minItems`                    | `1`               | Minimum queued item count before auto-sync                                                  |
-| `autoSync.batchSize`                   | `100`             | Max items processed per auto-sync batch                                                     |
+| `autoSync.batchSize`                   | `100`             | Max dirty cache entries processed per table in one auto-sync run                            |
 
 `storageFolder` is a single directory name, not a path: separators, encoded separators, and traversal names are rejected. Set it before the first storage operation. Changing it while an adapter is active is rejected so metadata and cached state cannot be mixed across roots.
 

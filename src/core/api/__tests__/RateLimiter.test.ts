@@ -1,6 +1,3 @@
-// src/core/api/__tests__/RateLimiter.test.ts
-// RateLimiter 单元测试
-
 import { GlobalRateLimiter, RateLimiter } from '../RateLimiter';
 import type { ClientRateLimitInfo } from '../RateLimiter';
 
@@ -8,32 +5,33 @@ describe('RateLimiter', () => {
   let rateLimiter: RateLimiter;
 
   beforeEach(() => {
-    // 创建新的RateLimiter实例用于每个测试
     rateLimiter = new RateLimiter({
-      rate: 10, // 每秒10个请求
-      capacity: 20, // 令牌桶容量20
+      rate: 10,
+      capacity: 20,
       enabled: true,
     });
   });
 
-  describe('Basic Functionality Tests', () => {
-    it('should be able to check if request is allowed', () => {
-      // Initial state, should allow request
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  describe('token consumption', () => {
+    it('allows the first request and consumes one token', () => {
       const result = rateLimiter.check('test-client');
-      expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(19); // Consumed 1 token
+
+      expect(result).toMatchObject({ allowed: true, remaining: 19 });
     });
 
-    it('should be able to consume specified number of tokens', () => {
-      // Consume 5 tokens
+    it('consumes a requested number of tokens', () => {
       const result = rateLimiter.consume('test-client', 5);
-      expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(15); // Consumed 5 tokens
+
+      expect(result).toMatchObject({ allowed: true, remaining: 15 });
     });
 
-    it('should reject requests that exceed limits', () => {
-      // Consume more tokens than capacity
+    it('rejects a request that exceeds the available capacity', () => {
       const result = rateLimiter.consume('test-client', 30);
+
       expect(result.allowed).toBe(false);
       expect(result.retryAfter).toBeDefined();
     });
@@ -41,47 +39,53 @@ describe('RateLimiter', () => {
     it('uses the configured refill rate for check retry delays', () => {
       jest.useFakeTimers();
       jest.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+      const limiter = new RateLimiter({ rate: 10, capacity: 1, enabled: true });
 
-      try {
-        const limiter = new RateLimiter({ rate: 10, capacity: 1, enabled: true });
-        expect(limiter.check('client').allowed).toBe(true);
+      expect(limiter.check('client').allowed).toBe(true);
 
-        jest.advanceTimersByTime(50);
-        expect(limiter.check('client')).toMatchObject({
-          allowed: false,
-          retryAfter: 50,
-        });
-      } finally {
-        jest.useRealTimers();
-      }
+      jest.advanceTimersByTime(50);
+
+      expect(limiter.check('client')).toMatchObject({
+        allowed: false,
+        retryAfter: 50,
+      });
     });
 
-    it('should be able to reset client rate limiting info', () => {
-      // Consume some tokens
-      rateLimiter.consume('test-client', 5);
-      expect(rateLimiter.getClientInfo('test-client')?.tokens).toBe(15);
+    it('preserves fractional refill time between requests', () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+      const limiter = new RateLimiter({ rate: 3, capacity: 3, enabled: true });
 
-      // Reset client rate limiting info
+      expect(limiter.consume('client', 3).allowed).toBe(true);
+
+      jest.advanceTimersByTime(334);
+      expect(limiter.consume('client', 1).allowed).toBe(true);
+
+      jest.advanceTimersByTime(333);
+      expect(limiter.consume('client', 1)).toMatchObject({ allowed: true, remaining: 0 });
+    });
+
+    it('resets client rate-limit state', () => {
+      rateLimiter.consume('test-client', 5);
+
       rateLimiter.reset('test-client');
+
       expect(rateLimiter.getClientInfo('test-client')).toBeUndefined();
     });
 
-    it('should be able to clear all client rate limiting info', () => {
-      // Consume tokens for multiple clients
-      rateLimiter.consume('client1', 5);
-      rateLimiter.consume('client2', 3);
-      rateLimiter.consume('client3', 7);
+    it('clears state for every client', () => {
+      rateLimiter.consume('client-1', 5);
+      rateLimiter.consume('client-2', 3);
+      rateLimiter.consume('client-3', 7);
 
-      // Clear all client rate limiting info
       rateLimiter.clear();
 
-      // Check results
-      expect(rateLimiter.getClientInfo('client1')).toBeUndefined();
-      expect(rateLimiter.getClientInfo('client2')).toBeUndefined();
-      expect(rateLimiter.getClientInfo('client3')).toBeUndefined();
+      expect(rateLimiter.getClientInfo('client-1')).toBeUndefined();
+      expect(rateLimiter.getClientInfo('client-2')).toBeUndefined();
+      expect(rateLimiter.getClientInfo('client-3')).toBeUndefined();
     });
 
-    it('bounds untrusted client identity state and does not expose mutable entries', () => {
+    it('bounds untrusted client identity state and returns snapshots', () => {
       const oversizedClientId = 'x'.repeat(129);
       expect(rateLimiter.consume(oversizedClientId, 1).allowed).toBe(true);
       expect(rateLimiter.getClientInfo(oversizedClientId)).toBeUndefined();
@@ -90,7 +94,8 @@ describe('RateLimiter', () => {
         rateLimiter.consume(`client-${index}`, 1);
       }
 
-      const trackedClients = (rateLimiter as unknown as { clientLimits: Map<string, ClientRateLimitInfo> }).clientLimits;
+      const trackedClients = (rateLimiter as unknown as { clientLimits: Map<string, ClientRateLimitInfo> })
+        .clientLimits;
       expect(trackedClients.size).toBeLessThanOrEqual(1024);
 
       const snapshot = rateLimiter.getClientInfo('client-0');
@@ -99,7 +104,7 @@ describe('RateLimiter', () => {
       expect(rateLimiter.getClientInfo('client-0')?.tokens).not.toBe(999);
     });
 
-    it('rejects non-positive and non-finite token costs without changing bucket state', () => {
+    it('rejects invalid token costs without changing bucket state', () => {
       const before = rateLimiter.getClientInfo('test-client');
 
       for (const tokens of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
@@ -112,58 +117,34 @@ describe('RateLimiter', () => {
     });
   });
 
-  describe('Rate Limiting Configuration Tests', () => {
-    it('should be able to update rate limiting configuration', () => {
-      // Update configuration
-      rateLimiter.updateConfig({
-        rate: 20,
-        capacity: 40,
-      });
+  describe('configuration', () => {
+    it('updates rate-limit configuration', () => {
+      rateLimiter.updateConfig({ rate: 20, capacity: 40 });
 
-      // Check updated configuration
-      const config = rateLimiter.getConfig();
-      expect(config.rate).toBe(20);
-      expect(config.capacity).toBe(40);
+      expect(rateLimiter.getConfig()).toMatchObject({ rate: 20, capacity: 40 });
     });
 
-    it('should be able to disable rate limiting', () => {
-      // Disable rate limiting
+    it('caps existing client buckets when capacity is reduced', () => {
+      rateLimiter.consume('test-client', 1);
+
+      rateLimiter.updateConfig({ capacity: 5 });
+
+      expect(rateLimiter.getClientInfo('test-client')?.tokens).toBe(5);
+    });
+
+    it('disables rate limiting when configured', () => {
       rateLimiter.updateConfig({ enabled: false });
 
-      // Check result
-      const result = rateLimiter.consume('test-client', 100);
-      expect(result.allowed).toBe(true);
+      expect(rateLimiter.consume('test-client', 100).allowed).toBe(true);
     });
 
-    it('should be able to enable rate limiting', () => {
-      // First disable rate limiting
+    it('re-enables rate limiting after a disabled period', () => {
       rateLimiter.updateConfig({ enabled: false });
       expect(rateLimiter.consume('test-client', 100).allowed).toBe(true);
 
-      // Enable rate limiting
       rateLimiter.updateConfig({ enabled: true });
+
       expect(rateLimiter.consume('test-client', 100).allowed).toBe(false);
-    });
-  });
-
-  describe('Token Generation Tests', () => {
-    it('should be able to generate new tokens over time', () => {
-      // Consume all tokens
-      rateLimiter.consume('test-client', 20);
-      expect(rateLimiter.consume('test-client', 1).allowed).toBe(false);
-
-      // Simulate time passing, generating new tokens
-      jest.useFakeTimers();
-
-      // Wait 1 second, should generate 10 new tokens
-      jest.advanceTimersByTime(1000);
-
-      // Check result
-      const result = rateLimiter.consume('test-client', 5);
-      expect(result.allowed).toBe(true);
-      expect(result.remaining).toBe(5); // 10 new tokens - 5 consumed = 5 remaining
-
-      jest.useRealTimers();
     });
   });
 });
@@ -175,58 +156,37 @@ describe('GlobalRateLimiter', () => {
     globalRateLimiter = new GlobalRateLimiter();
   });
 
-  it('应该能够获取或创建限流实例', () => {
-    // 获取限流实例
-    const limiter1 = globalRateLimiter.getLimiter('test-limiter');
-    const limiter2 = globalRateLimiter.getLimiter('test-limiter');
+  it('returns the same limiter for a repeated key', () => {
+    const first = globalRateLimiter.getLimiter('test-limiter');
+    const second = globalRateLimiter.getLimiter('test-limiter');
 
-    // 应该返回同一个实例
-    expect(limiter1).toBe(limiter2);
+    expect(first).toBe(second);
   });
 
-  it('应该能够更新默认限流配置', () => {
-    // 更新默认配置
-    globalRateLimiter.updateDefaultConfig({
-      rate: 50,
-      capacity: 100,
-    });
+  it('uses updated normalized defaults for new limiters', () => {
+    globalRateLimiter.updateDefaultConfig({ rate: 50, capacity: 100 });
 
-    // 获取新的限流实例，应该使用更新后的默认配置
-    const limiter = globalRateLimiter.getLimiter('new-limiter');
-    const config = limiter.getConfig();
-    expect(config.rate).toBe(50);
-    expect(config.capacity).toBe(100);
+    expect(globalRateLimiter.getLimiter('new-limiter').getConfig()).toMatchObject({ rate: 50, capacity: 100 });
   });
 
-  it('应该能够删除限流实例', () => {
-    // 创建限流实例
-    globalRateLimiter.getLimiter('test-limiter');
+  it('creates a replacement after a limiter is deleted', () => {
+    const first = globalRateLimiter.getLimiter('test-limiter');
 
-    // 删除限流实例
     globalRateLimiter.deleteLimiter('test-limiter');
 
-    // 再次获取，应该返回新的实例
-    const limiter1 = globalRateLimiter.getLimiter('test-limiter');
-    const limiter2 = globalRateLimiter.getLimiter('test-limiter');
-    expect(limiter1).toBe(limiter2);
+    expect(globalRateLimiter.getLimiter('test-limiter')).not.toBe(first);
   });
 
-  it('应该能够清空所有限流实例', () => {
-    // 创建多个限流实例
-    globalRateLimiter.getLimiter('limiter1');
-    globalRateLimiter.getLimiter('limiter2');
-    globalRateLimiter.getLimiter('limiter3');
+  it('removes every named limiter when cleared', () => {
+    const first = globalRateLimiter.getLimiter('limiter-1');
+    globalRateLimiter.getLimiter('limiter-2');
 
-    // 清空所有限流实例
     globalRateLimiter.clear();
 
-    // 再次获取，应该返回新的实例
-    const limiter1 = globalRateLimiter.getLimiter('limiter1');
-    const limiter2 = globalRateLimiter.getLimiter('limiter1');
-    expect(limiter1).toBe(limiter2);
+    expect(globalRateLimiter.getLimiter('limiter-1')).not.toBe(first);
   });
 
-  it('bounds global limiter state for arbitrary keys', () => {
+  it('bounds state for arbitrary limiter keys', () => {
     globalRateLimiter.getLimiter('x'.repeat(129));
 
     for (let index = 0; index < 300; index++) {

@@ -1,72 +1,22 @@
-/**
- * @module RateLimiter
- * @description API rate limiter using token bucket algorithm
- * @since 2025-11-28
- * @version 3.0.0
- */
-
 import { RATE_LIMIT } from '../constants';
 
-/**
- * 限流配置接口
- */
 export interface RateLimitConfig {
-  /**
-   * 每秒生成的令牌数（速率）
-   */
   rate: number;
-
-  /**
-   * 令牌桶容量
-   */
   capacity: number;
-
-  /**
-   * 是否启用限流
-   */
   enabled: boolean;
 }
 
-/**
- * 限流状态接口
- */
 export interface RateLimitStatus {
-  /**
-   * 是否允许请求
-   */
   allowed: boolean;
-
-  /**
-   * 剩余令牌数
-   */
   remaining: number;
-
-  /**
-   * 重置时间（毫秒）
-   */
   resetTime: number;
-
-  /**
-   * 重试时间（毫秒），如果请求被拒绝
-   */
   retryAfter?: number;
 }
 
-/**
- * 客户端限流信息接口
- */
 export interface ClientRateLimitInfo {
-  /**
-   * 最后一次请求时间
-   */
   lastRequestTime: number;
-
-  /**
-   * 剩余令牌数
-   */
   tokens: number;
-
-  /** Last observed request time, used only for bounded idle cleanup. */
+  /** Used only to remove idle client buckets. */
   lastSeenAt?: number;
 }
 
@@ -78,30 +28,21 @@ const MAX_TRACKED_LIMITERS = 256;
 const MAX_LIMITER_KEY_LENGTH = 128;
 const OVERFLOW_LIMITER_KEY = '\u0000global-rate-limit-overflow';
 
-/**
- * API限流类，基于令牌桶算法
- */
+/** Token-bucket limiter with bounded state for untrusted client identifiers. */
 export class RateLimiter {
-  /**
-   * 限流配置
-   */
   private config: RateLimitConfig;
-
-  /**
-   * 客户端限流信息映射
-   */
   private clientLimits = new Map<string, ClientRateLimitInfo>();
 
   private static normalizeConfig(config: Partial<RateLimitConfig>): RateLimitConfig {
-    const defaultRate = RateLimiter.getDefaultRate();
-    const defaultCapacity = RateLimiter.getDefaultCapacity();
+    const rate = config.rate;
+    const capacity = config.capacity;
 
     return {
-      rate: Number.isFinite(config.rate) && (config.rate as number) > 0 ? (config.rate as number) : defaultRate,
+      rate: typeof rate === 'number' && Number.isFinite(rate) && rate > 0 ? rate : RateLimiter.getDefaultRate(),
       capacity:
-        Number.isSafeInteger(config.capacity) && (config.capacity as number) > 0
-          ? (config.capacity as number)
-          : defaultCapacity,
+        typeof capacity === 'number' && Number.isSafeInteger(capacity) && capacity > 0
+          ? capacity
+          : RateLimiter.getDefaultCapacity(),
       enabled: config.enabled !== false && RateLimiter.isEnabledByDefault(),
     };
   }
@@ -152,19 +93,30 @@ export class RateLimiter {
     return this.clientLimits.size >= MAX_TRACKED_CLIENTS - 1 ? OVERFLOW_CLIENT_ID : normalizedClientId;
   }
 
-  /**
-   * 构造函数
-   * @param config 限流配置
-   */
+  private refill(clientInfo: ClientRateLimitInfo, now: number): void {
+    const elapsed = now - clientInfo.lastRequestTime;
+    const tokensToAdd = Math.floor((elapsed / 1000) * this.config.rate);
+
+    if (tokensToAdd > 0) {
+      clientInfo.tokens = Math.min(clientInfo.tokens + tokensToAdd, this.config.capacity);
+      // Preserve fractional elapsed time so low refill rates do not lose credit.
+      clientInfo.lastRequestTime += (tokensToAdd / this.config.rate) * 1000;
+    }
+
+    clientInfo.lastSeenAt = now;
+  }
+
+  private getRetryAfter(clientInfo: ClientRateLimitInfo, now: number, missingTokens: number): number {
+    const elapsed = now - clientInfo.lastRequestTime;
+    const waitTime = (missingTokens / this.config.rate) * 1000 - elapsed;
+    return Math.max(1, Math.ceil(waitTime));
+  }
+
   constructor(config: Partial<RateLimitConfig> = {}) {
     this.config = RateLimiter.normalizeConfig(config);
   }
 
-  /**
-   * 检查请求是否允许
-   * @param clientId 客户端ID
-   * @returns 限流状态
-   */
+  /** Consumes one token for a client. */
   check(clientId: string): RateLimitStatus {
     if (!this.config.enabled) {
       return {
@@ -179,10 +131,9 @@ export class RateLimiter {
     let clientInfo = this.clientLimits.get(resolvedClientId);
 
     if (!clientInfo) {
-      // New client, initialize token bucket
       clientInfo = {
         lastRequestTime: now,
-        tokens: this.config.capacity - 1, // Consume one token
+        tokens: this.config.capacity - 1,
         lastSeenAt: now,
       };
       this.clientLimits.set(resolvedClientId, clientInfo);
@@ -194,19 +145,9 @@ export class RateLimiter {
       };
     }
 
-    // Calculate时间差，生成新令牌
-    const timeElapsed = now - clientInfo.lastRequestTime;
-    clientInfo.lastSeenAt = now;
-    const newTokens = Math.floor((timeElapsed / 1000) * this.config.rate);
-
-    if (newTokens > 0) {
-      // Update令牌数，不超过容量
-      clientInfo.tokens = Math.min(clientInfo.tokens + newTokens, this.config.capacity);
-      clientInfo.lastRequestTime = now;
-    }
+    this.refill(clientInfo, now);
 
     if (clientInfo.tokens > 0) {
-      // Has tokens, allow request
       clientInfo.tokens--;
       this.clientLimits.set(resolvedClientId, clientInfo);
 
@@ -215,27 +156,17 @@ export class RateLimiter {
         remaining: clientInfo.tokens,
         resetTime: now + 1000,
       };
-    } else {
-      // No tokens, reject request
-      // Wait only for the next token at the configured refill rate. `timeElapsed`
-      // is safe to use here because no whole token was added in this branch.
-      const retryAfter = Math.ceil(1000 / this.config.rate - timeElapsed);
-
-      return {
-        allowed: false,
-        remaining: 0,
-        resetTime: now + 1000,
-        retryAfter: retryAfter > 0 ? retryAfter : 1000,
-      };
     }
+
+    const retryAfter = this.getRetryAfter(clientInfo, now, 1);
+    return {
+      allowed: false,
+      remaining: 0,
+      resetTime: now + retryAfter,
+      retryAfter,
+    };
   }
 
-  /**
-   * 消耗令牌
-   * @param clientId 客户端ID
-   * @param tokens 消耗的令牌数
-   * @returns 限流状态
-   */
   consume(clientId: string, tokens: number = 1): RateLimitStatus {
     if (!Number.isSafeInteger(tokens) || tokens < 1) {
       return this.invalidTokenCostStatus();
@@ -254,7 +185,6 @@ export class RateLimiter {
     let clientInfo = this.clientLimits.get(resolvedClientId);
 
     if (!clientInfo) {
-      // New client, initialize token bucket
       clientInfo = {
         lastRequestTime: now,
         tokens: this.config.capacity,
@@ -262,19 +192,9 @@ export class RateLimiter {
       };
     }
 
-    // Calculate时间差，生成新令牌
-    const timeElapsed = now - clientInfo.lastRequestTime;
-    clientInfo.lastSeenAt = now;
-    const newTokens = Math.floor((timeElapsed / 1000) * this.config.rate);
-
-    if (newTokens > 0) {
-      // Update令牌数，不超过容量
-      clientInfo.tokens = Math.min(clientInfo.tokens + newTokens, this.config.capacity);
-      clientInfo.lastRequestTime = now;
-    }
+    this.refill(clientInfo, now);
 
     if (clientInfo.tokens >= tokens) {
-      // Sufficient tokens, allow request
       clientInfo.tokens -= tokens;
       this.clientLimits.set(resolvedClientId, clientInfo);
 
@@ -283,25 +203,17 @@ export class RateLimiter {
         remaining: clientInfo.tokens,
         resetTime: now + 1000,
       };
-    } else {
-      // Insufficient tokens, reject request
-      // Calculate需要等待的时间
-      const tokensNeeded = tokens - clientInfo.tokens;
-      const retryAfter = Math.ceil((tokensNeeded / this.config.rate) * 1000);
-
-      return {
-        allowed: false,
-        remaining: clientInfo.tokens,
-        resetTime: now + 1000,
-        retryAfter,
-      };
     }
+
+    const retryAfter = this.getRetryAfter(clientInfo, now, tokens - clientInfo.tokens);
+    return {
+      allowed: false,
+      remaining: clientInfo.tokens,
+      resetTime: now + retryAfter,
+      retryAfter,
+    };
   }
 
-  /**
-   * 重置客户端限流信息
-   * @param clientId 客户端ID
-   */
   reset(clientId: string): void {
     const normalizedClientId = this.normalizeClientId(clientId);
     if (normalizedClientId) {
@@ -309,93 +221,51 @@ export class RateLimiter {
     }
   }
 
-  /**
-   * 获取客户端限流信息
-   * @param clientId 客户端ID
-   * @returns 客户端限流信息，如果不存在则返回undefined
-   */
   getClientInfo(clientId: string): ClientRateLimitInfo | undefined {
     const normalizedClientId = this.normalizeClientId(clientId);
     const clientInfo = normalizedClientId ? this.clientLimits.get(normalizedClientId) : undefined;
     return clientInfo ? { ...clientInfo } : undefined;
   }
 
-  /**
-   * 清除所有客户端限流信息
-   */
   clear(): void {
     this.clientLimits.clear();
   }
 
-  /**
-   * 更新限流配置
-   * @param config 新的限流配置
-   */
   updateConfig(config: Partial<RateLimitConfig>): void {
     this.config = RateLimiter.normalizeConfig({ ...this.config, ...config });
+    for (const clientInfo of this.clientLimits.values()) {
+      clientInfo.tokens = Math.min(clientInfo.tokens, this.config.capacity);
+    }
   }
 
-  /**
-   * 获取当前限流配置
-   * @returns 当前限流配置
-   */
   getConfig(): RateLimitConfig {
     return { ...this.config };
   }
 
-  /**
-   * 从配置文件获取默认限流速率
-   * @returns 默认限流速率（每秒令牌数）
-   */
   static getDefaultRate(): number {
     return RATE_LIMIT.DEFAULT_RATE;
   }
 
-  /**
-   * 从配置文件获取默认令牌桶容量
-   * @returns 默认令牌桶容量
-   */
   static getDefaultCapacity(): number {
     return RATE_LIMIT.DEFAULT_CAPACITY;
   }
 
-  /**
-   * 从配置文件获取默认是否启用限流
-   * @returns 默认是否启用限流
-   */
   static isEnabledByDefault(): boolean {
     return true;
   }
 
-  /**
-   * 从配置文件获取默认重试次数
-   * @returns 默认重试次数
-   */
   static getDefaultMaxAttempts(): number {
     return 3;
   }
 
-  /**
-   * 从配置文件获取默认重试退避乘数
-   * @returns 默认重试退避乘数
-   */
   static getDefaultBackoffMultiplier(): number {
     return 2;
   }
 }
 
-/**
- * 全局限流管理器类，用于管理多个限流实例
- */
+/** Stores bounded, named rate limiters. */
 export class GlobalRateLimiter {
-  /**
-   * 限流实例映射
-   */
   private limiters = new Map<string, RateLimiter>();
-
-  /**
-   * 默认限流配置
-   */
   private defaultConfig: RateLimitConfig = {
     rate: RateLimiter.getDefaultRate(),
     capacity: RateLimiter.getDefaultCapacity(),
@@ -428,12 +298,6 @@ export class GlobalRateLimiter {
     return this.limiters.size >= MAX_TRACKED_LIMITERS - 1 ? OVERFLOW_LIMITER_KEY : normalizedKey;
   }
 
-  /**
-   * 获取或创建限流实例
-   * @param key 限流实例键
-   * @param config 限流配置
-   * @returns 限流实例
-   */
   getLimiter(key: string, config?: Partial<RateLimitConfig>): RateLimiter {
     const limiterKey = this.resolveLimiterKey(key);
 
@@ -450,29 +314,14 @@ export class GlobalRateLimiter {
     return this.limiters.get(limiterKey)!;
   }
 
-  /**
-   * 更新默认限流配置
-   * @param config 新的默认限流配置
-   */
   updateDefaultConfig(config: Partial<RateLimitConfig>): void {
-    this.defaultConfig = {
-      ...this.defaultConfig,
-      ...config,
-    };
+    this.defaultConfig = new RateLimiter({ ...this.defaultConfig, ...config }).getConfig();
   }
 
-  /**
-   * 获取默认限流配置
-   * @returns 默认限流配置
-   */
   getDefaultConfig(): RateLimitConfig {
     return { ...this.defaultConfig };
   }
 
-  /**
-   * 删除限流实例
-   * @param key 限流实例键
-   */
   deleteLimiter(key: string): void {
     const normalizedKey = this.normalizeLimiterKey(key);
     if (normalizedKey) {
@@ -480,13 +329,9 @@ export class GlobalRateLimiter {
     }
   }
 
-  /**
-   * 清除所有限流实例
-   */
   clear(): void {
     this.limiters.clear();
   }
 }
 
-// Global限流管理器实例
 export const globalRateLimiter = new GlobalRateLimiter();

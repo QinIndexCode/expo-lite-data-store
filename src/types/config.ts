@@ -1,11 +1,4 @@
 /**
- * @module config
- * @description Configuration type definitions for LiteStore
- * @since 2025-11-19
- * @version 3.0.0
- */
-
-/**
  * Deep partial type that makes all nested properties optional
  */
 export type DeepPartial<T> = {

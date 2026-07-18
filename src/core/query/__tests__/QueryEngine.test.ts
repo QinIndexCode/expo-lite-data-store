@@ -1,10 +1,7 @@
-// src/core/query/__tests__/QueryEngine.test.ts
-
 import { QueryEngine } from '../QueryEngine';
 import { isQueryOperator, isUpdateOperator } from '../../../utils/specialOperators';
 
 describe('QueryEngine', () => {
-  // 测试数据
   const testData = [
     { id: 1, name: 'test1', age: 20, score: 85, active: true, tags: ['a', 'b'] },
     { id: 2, name: 'test2', age: 25, score: 90, active: false, tags: ['b', 'c'] },
@@ -14,42 +11,42 @@ describe('QueryEngine', () => {
   ];
 
   describe('Filtering Functionality Tests', () => {
-    it('should handle equality operator', () => {
+    it('matches equality conditions', () => {
       const result = QueryEngine.filter(testData, { id: 1 });
       expect(result).toEqual([testData[0]]);
     });
 
-    it('should handle not equal operator', () => {
+    it('matches inequality conditions', () => {
       const result = QueryEngine.filter(testData, { id: { $ne: 1 } });
       expect(result.length).toBe(4);
       expect(result).not.toContain(testData[0]);
     });
 
-    it('should handle greater than operator', () => {
+    it('matches greater-than conditions', () => {
       const result = QueryEngine.filter(testData, { age: { $gt: 25 } });
       expect(result.length).toBe(3);
       result.forEach(item => expect(item.age).toBeGreaterThan(25));
     });
 
-    it('should handle greater than or equal operator', () => {
+    it('matches greater-than-or-equal conditions', () => {
       const result = QueryEngine.filter(testData, { age: { $gte: 25 } });
       expect(result.length).toBe(4);
       result.forEach(item => expect(item.age).toBeGreaterThanOrEqual(25));
     });
 
-    it('should handle less than operator', () => {
+    it('matches less-than conditions', () => {
       const result = QueryEngine.filter(testData, { age: { $lt: 25 } });
       expect(result.length).toBe(1);
       result.forEach(item => expect(item.age).toBeLessThan(25));
     });
 
-    it('should handle less than or equal operator', () => {
+    it('matches less-than-or-equal conditions', () => {
       const result = QueryEngine.filter(testData, { age: { $lte: 25 } });
       expect(result.length).toBe(2);
       result.forEach(item => expect(item.age).toBeLessThanOrEqual(25));
     });
 
-    it('should handle IN operator', () => {
+    it('matches IN conditions', () => {
       const result = QueryEngine.filter(testData, { id: { $in: [1, 3, 5] } });
       expect(result.length).toBe(3);
       expect(result).toContain(testData[0]);
@@ -57,14 +54,14 @@ describe('QueryEngine', () => {
       expect(result).toContain(testData[4]);
     });
 
-    it('should handle NIN operator', () => {
+    it('matches NIN conditions', () => {
       const result = QueryEngine.filter(testData, { id: { $nin: [1, 3, 5] } });
       expect(result.length).toBe(2);
       expect(result).toContain(testData[1]);
       expect(result).toContain(testData[3]);
     });
 
-    it('should handle LIKE operator', () => {
+    it('matches LIKE conditions', () => {
       const result = QueryEngine.filter(testData, { name: { $like: 'test%' } });
       expect(result.length).toBe(5);
 
@@ -79,13 +76,13 @@ describe('QueryEngine', () => {
       expect(result).toEqual([]);
     });
 
-    it('should handle boolean filtering', () => {
+    it('filters boolean values', () => {
       const result = QueryEngine.filter(testData, { active: true });
       expect(result.length).toBe(3);
       result.forEach(item => expect(item.active).toBe(true));
     });
 
-    it('should handle array inclusion filtering', () => {
+    it('matches array inclusion conditions', () => {
       const result = QueryEngine.filter(testData, { tags: { $in: ['a'] } });
       expect(result.length).toBe(3);
       result.forEach(item => expect(item.tags).toContain('a'));
@@ -93,7 +90,7 @@ describe('QueryEngine', () => {
   });
 
   describe('Compound Query Tests', () => {
-    it('should handle AND queries', () => {
+    it('matches AND conditions', () => {
       const result = QueryEngine.filter(testData, { $and: [{ active: true }, { age: { $gt: 25 } }] });
       expect(result.length).toBe(2);
       result.forEach(item => {
@@ -102,14 +99,14 @@ describe('QueryEngine', () => {
       });
     });
 
-    it('should handle OR queries', () => {
+    it('matches OR conditions', () => {
       const result = QueryEngine.filter(testData, { $or: [{ id: 1 }, { id: 5 }] });
       expect(result.length).toBe(2);
       expect(result).toContain(testData[0]);
       expect(result).toContain(testData[4]);
     });
 
-    it('should handle complex compound queries', () => {
+    it('evaluates complex compound conditions', () => {
       const result = QueryEngine.filter(testData, {
         $and: [{ active: true }, { $or: [{ age: { $lt: 25 } }, { score: { $gt: 90 } }] }],
       });
@@ -118,7 +115,7 @@ describe('QueryEngine', () => {
       expect(result).toContain(testData[3]);
     });
 
-    it('should handle nested compound queries', () => {
+    it('evaluates nested compound conditions', () => {
       const result = QueryEngine.filter(testData, {
         $and: [
           { active: true },
@@ -132,28 +129,28 @@ describe('QueryEngine', () => {
   });
 
   describe('Pagination Functionality Tests', () => {
-    it('should handle basic pagination', () => {
+    it('paginates data with an offset and limit', () => {
       const result = QueryEngine.paginate(testData, 1, 2);
       expect(result).toEqual([testData[1], testData[2]]);
     });
 
-    it('should handle skipping all data', () => {
+    it('returns no records when the offset skips all data', () => {
       const result = QueryEngine.paginate(testData, 10);
       expect(result).toEqual([]);
     });
 
-    it('should handle no limit specified', () => {
+    it('returns remaining records when no limit is set', () => {
       const result = QueryEngine.paginate(testData, 2);
       expect(result.length).toBe(3);
       expect(result).toEqual([testData[2], testData[3], testData[4]]);
     });
 
-    it('should handle skipping 0 data', () => {
+    it('returns initial records when the offset is zero', () => {
       const result = QueryEngine.paginate(testData, 0, 3);
       expect(result).toEqual([testData[0], testData[1], testData[2]]);
     });
 
-    it('should handle pagination with large limit', () => {
+    it('returns all records for a large limit', () => {
       const result = QueryEngine.paginate(testData, 0, 100);
       expect(result.length).toBe(5);
       expect(result).toEqual(testData);
@@ -161,66 +158,65 @@ describe('QueryEngine', () => {
   });
 
   describe('Sorting Functionality Tests', () => {
-    it('should handle ascending sorting', () => {
+    it('sorts data in ascending order', () => {
       const result = QueryEngine.sort(testData, 'age', 'asc');
       expect(result[0].age).toBe(20);
       expect(result[result.length - 1].age).toBe(40);
     });
 
-    it('should handle descending sorting', () => {
+    it('sorts data in descending order', () => {
       const result = QueryEngine.sort(testData, 'score', 'desc');
       expect(result[0].score).toBe(95);
       expect(result[result.length - 1].score).toBe(75);
     });
 
-    it('should handle multi-field sorting', () => {
+    it('sorts data by multiple fields', () => {
       const result = QueryEngine.sort(testData, ['active', 'age'], ['desc', 'asc']);
-      // First sort by active descending, then by age ascending
       expect(result[0].active).toBe(true);
       expect(result[0].age).toBe(20);
     });
 
-    it('should handle sorting with invalid field', () => {
+    it('preserves order when the sort field is missing', () => {
       const result = QueryEngine.sort(testData, 'nonExistentField', 'asc');
       expect(result).toEqual(testData);
     });
 
-    it('should handle sorting with empty data', () => {
+    it('returns an empty array when sorting empty data', () => {
       const result = QueryEngine.sort([], 'age', 'asc');
       expect(result).toEqual([]);
     });
   });
 
   describe('Aggregation Functionality Tests', () => {
-    it('should calculate sum', () => {
+    it('calculates a sum', () => {
       const result = QueryEngine.sum(testData, 'age');
       expect(result).toBe(20 + 25 + 30 + 35 + 40);
     });
 
-    it('should calculate average', () => {
+    it('calculates an average', () => {
       const result = QueryEngine.avg(testData, 'score');
       const expectedAvg = (85 + 90 + 75 + 95 + 80) / 5;
       expect(result).toBe(expectedAvg);
     });
 
-    it('should calculate maximum', () => {
+    it('calculates a maximum', () => {
       const result = QueryEngine.max(testData, 'age');
       expect(result).toBe(40);
     });
 
-    it('should calculate minimum', () => {
+    it('calculates a minimum', () => {
       const result = QueryEngine.min(testData, 'score');
       expect(result).toBe(75);
     });
 
-    it('should handle aggregation on empty data', () => {
+    it('returns empty-data aggregation defaults', () => {
       expect(QueryEngine.sum([], 'age')).toBe(0);
       expect(QueryEngine.avg([], 'age')).toBe(0);
       expect(QueryEngine.max([], 'age')).toBeUndefined();
       expect(QueryEngine.min([], 'age')).toBeUndefined();
     });
 
-    it('should handle aggregation on non-numeric data', () => {
+    it('returns aggregation defaults for nonnumeric data', () => {
       expect(QueryEngine.sum(testData, 'name')).toBe(0);
       expect(QueryEngine.avg(testData, 'name')).toBe(0);
       expect(QueryEngine.max(testData, 'name')).toBe('test5');
@@ -229,14 +225,14 @@ describe('QueryEngine', () => {
   });
 
   describe('Grouping Functionality Tests', () => {
-    it('should group by field', () => {
+    it('groups data by a field', () => {
       const result = QueryEngine.groupBy(testData, 'active');
       expect(Object.keys(result)).toEqual(['true', 'false']);
       expect(result['true'].length).toBe(3);
       expect(result['false'].length).toBe(2);
     });
 
-    it('should group by non-existent field', () => {
+    it('groups nonexistent-field values under an empty key', () => {
       const result = QueryEngine.groupBy(testData, 'nonExistentField');
       expect(Object.keys(result)).toEqual(['']);
       expect(result[''].length).toBe(5);
@@ -257,6 +253,17 @@ describe('QueryEngine', () => {
   });
 
   describe('Edge Case Tests', () => {
+    it('does not mutate source arrays when applying array update operators', () => {
+      const original = { id: 'record-1', tags: ['existing'] };
+
+      const pushed = QueryEngine.update(original, { $push: { tags: 'pushed' } });
+      const added = QueryEngine.update(original, { $addToSet: { tags: 'added' } });
+
+      expect(original.tags).toEqual(['existing']);
+      expect(pushed.tags).toEqual(['existing', 'pushed']);
+      expect(added.tags).toEqual(['existing', 'added']);
+    });
+
     it('does not treat inherited object properties as operators', () => {
       expect(isQueryOperator('toString')).toBe(false);
       expect(isUpdateOperator('__proto__')).toBe(false);
@@ -268,28 +275,28 @@ describe('QueryEngine', () => {
       expect(() => QueryEngine.update({ id: 'record-1' }, payload)).toThrow('Unsafe update field: __proto__');
     });
 
-    it('should handle empty conditions', () => {
+    it('returns all records for empty conditions', () => {
       const result = QueryEngine.filter(testData, undefined);
       expect(result).toEqual(testData);
     });
 
-    it('should handle non-existent fields', () => {
+    it('returns no records for an unknown field', () => {
       const result = QueryEngine.filter(testData, { nonExistentField: 'value' });
       expect(result).toEqual([]);
     });
 
-    it('should handle function conditions', () => {
+    it('filters records with a function condition', () => {
       const result = QueryEngine.filter(testData, item => item.age > 30 && item.score > 80);
       expect(result.length).toBe(1);
       expect(result).toEqual([testData[3]]);
     });
 
-    it('should handle empty data array', () => {
+    it('returns no records from empty data', () => {
       const result = QueryEngine.filter([], { active: true });
       expect(result).toEqual([]);
     });
 
-    it('should handle null and undefined values in data', () => {
+    it('matches null values when data contains null and undefined fields', () => {
       const dataWithNulls = [...testData, { id: 6, name: null, age: undefined, active: true, tags: [] }];
       const result = QueryEngine.filter(dataWithNulls, { name: null });
       expect(result.length).toBe(1);
@@ -298,18 +305,17 @@ describe('QueryEngine', () => {
   });
 
   describe('Combined Functionality Tests', () => {
-    it('should handle filter, sort and pagination together', () => {
-      // First filter, then sort, then paginate
+    it('combines filtering, sorting, and pagination', () => {
       let result = QueryEngine.filter(testData, { active: true });
       result = QueryEngine.sort(result, 'age', 'desc');
       result = QueryEngine.paginate(result, 0, 2);
 
       expect(result.length).toBe(2);
-      expect(result[0].id).toBe(4); // age 35
-      expect(result[1].id).toBe(3); // age 30
+      expect(result[0].id).toBe(4);
+      expect(result[1].id).toBe(3);
     });
 
-    it('should handle complex query with multiple operations', () => {
+    it('evaluates a complex query with multiple operations', () => {
       const result = QueryEngine.filter(testData, {
         $and: [
           { score: { $gte: 80 } },
@@ -319,9 +325,6 @@ describe('QueryEngine', () => {
       });
 
       expect(result.length).toBe(2);
-      // testData[0]: id 1, score 85, tags ['a', 'b'], age 20 (matches all conditions)
-      // testData[1]: id 2, score 90, tags ['b', 'c'], age 25 (matches all conditions)
-      // testData[4]: id 5, score 80, tags ['a', 'b', 'c'], active false, age 40 (fails $or condition)
       expect(result).toContain(testData[0]);
       expect(result).toContain(testData[1]);
     });

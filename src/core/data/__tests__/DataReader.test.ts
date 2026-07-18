@@ -1,11 +1,11 @@
-// src/core/data/__tests__/DataReader.test.ts
-// DataReader 单元测试
+/// <reference path="../../../__tests__/test-globals.d.ts" />
 
 import { CacheManager, CacheStrategy } from '../../cache/CacheManager';
-
 import { IndexManager } from '../../index/IndexManager';
 import { SingleFileHandler } from '../../file/SingleFileHandler';
 import { MetadataManager } from '../../meta/MetadataManager';
+import type { StorageRecord } from '../../../types/storageTypes';
+import logger from '../../../utils/logger';
 import { DataReader } from '../DataReader';
 
 describe('DataReader', () => {
@@ -16,11 +16,11 @@ describe('DataReader', () => {
   const testTableName = 'test_table';
 
   beforeEach(() => {
-    if ((global as any).__expo_file_system_mock__) {
-      (global as any).__expo_file_system_mock__.mockFileSystem = {};
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    if (global.__expo_file_system_mock__) {
+      global.__expo_file_system_mock__.mockFileSystem = {};
     }
 
-    // 创建新的实例用于每个测试
     metadataManager = new MetadataManager();
     cacheManager = new CacheManager({
       strategy: CacheStrategy.LRU,
@@ -34,31 +34,26 @@ describe('DataReader', () => {
 
     dataReader = new DataReader(metadataManager, indexManager, cacheManager);
 
-    // 清除测试表元数据
     metadataManager.delete(testTableName);
   });
 
-  afterEach(done => {
-    // 清理定时器，防止测试挂起
+  afterEach(() => {
     if (cacheManager) {
       cacheManager.cleanup();
     }
     if (metadataManager) {
       metadataManager.cleanup();
     }
-    // 使用 process.nextTick 而不是 setTimeout，避免阻塞
-    process.nextTick(() => {
-      done();
-    });
+    jest.restoreAllMocks();
   });
 
   describe('read', () => {
-    it('should be able to read data from non-existent table, return empty array', async () => {
+    it('returns an empty array for a nonexistent table', async () => {
       const result = await dataReader.read('non_existent_table');
       expect(result).toEqual([]);
     });
 
-    it('should recover single-file data when metadata is missing', async () => {
+    it('recovers single-file data when metadata is missing', async () => {
       const handler = new SingleFileHandler('/mock/documents/lite-data-store/test_table.ldb');
       const testData = [
         { id: '1', name: 'Alice' },
@@ -78,9 +73,9 @@ describe('DataReader', () => {
       });
     });
 
-    it('should reject corrupted single-file data when metadata is missing', async () => {
-      if ((global as any).__expo_file_system_mock__) {
-        (global as any).__expo_file_system_mock__.mockFileSystem['/mock/documents/lite-data-store/test_table.ldb'] =
+    it('rejects corrupted single-file data when metadata is missing', async () => {
+      if (global.__expo_file_system_mock__) {
+        global.__expo_file_system_mock__.mockFileSystem['/mock/documents/lite-data-store/test_table.ldb'] =
           JSON.stringify({
             data: [{ id: '1', name: 'Broken' }],
             hash: 'not-a-real-hash',
@@ -93,8 +88,7 @@ describe('DataReader', () => {
       expect(metadataManager.get(testTableName)).toBeUndefined();
     });
 
-    it('should be able to read data from existing table', async () => {
-      // Create table metadata first
+    it('reads data from an existing table', async () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -111,8 +105,7 @@ describe('DataReader', () => {
       expect(result).toEqual([]);
     });
 
-    it('should be able to query data with filter conditions', async () => {
-      // Create table metadata first
+    it('filters data with query conditions', async () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -126,15 +119,13 @@ describe('DataReader', () => {
         },
       });
 
-      // Here we simulate data reading, actual data would be read from file system
-      // Since we're using mock, it returns empty array
       const result = await dataReader.read(testTableName, {
         filter: { age: { $gt: 18 } },
       });
       expect(result).toEqual([]);
     });
 
-    it('should apply every filter condition after narrowing results with an index', async () => {
+    it('applies every filter condition after narrowing results with an index', async () => {
       const records = [
         { id: '1', team: 'alpha', active: true },
         { id: '2', team: 'alpha', active: false },
@@ -166,7 +157,7 @@ describe('DataReader', () => {
       }
     });
 
-    it('should not cache function filters with each other or with an unfiltered read', async () => {
+    it('does not share cached results between function filters and unfiltered reads', async () => {
       const records = [
         { id: '1', team: 'alpha' },
         { id: '2', team: 'beta' },
@@ -182,10 +173,10 @@ describe('DataReader', () => {
       await new SingleFileHandler('/mock/documents/lite-data-store/test_table.ldb').write(records);
 
       const alpha = await dataReader.read(testTableName, {
-        filter: (item: Record<string, any>) => item.team === 'alpha',
+        filter: (item: StorageRecord) => item.team === 'alpha',
       });
       const beta = await dataReader.read(testTableName, {
-        filter: (item: Record<string, any>) => item.team === 'beta',
+        filter: (item: StorageRecord) => item.team === 'beta',
       });
       const unfiltered = await dataReader.read(testTableName);
 
@@ -195,7 +186,10 @@ describe('DataReader', () => {
     });
 
     it('keeps cached records isolated from callers on cache fill and cache hits', async () => {
-      const records = [{ id: '1', profile: { name: 'Alice' } }];
+      type ProfileRecord = { id: string; profile: { name: string } };
+      const records: ProfileRecord[] = [{ id: '1', profile: { name: 'Alice' } }];
+      const readProfileRecords = async (): Promise<ProfileRecord[]> =>
+        (await dataReader.read(testTableName)) as unknown as ProfileRecord[];
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -206,11 +200,11 @@ describe('DataReader', () => {
       });
       await new SingleFileHandler('/mock/documents/lite-data-store/test_table.ldb').write(records);
 
-      const initialRead = await dataReader.read(testTableName);
+      const initialRead = await readProfileRecords();
       initialRead[0].profile.name = 'changed-before-cache-hit';
       initialRead.push({ id: '2', profile: { name: 'Injected' } });
 
-      const cachedRead = await dataReader.read(testTableName);
+      const cachedRead = await readProfileRecords();
       expect(cachedRead).toEqual(records);
       expect(cachedRead).not.toBe(initialRead);
       expect(cachedRead[0]).not.toBe(initialRead[0]);
@@ -218,14 +212,13 @@ describe('DataReader', () => {
 
       cachedRead[0].profile.name = 'changed-from-cache-hit';
 
-      const nextCachedRead = await dataReader.read(testTableName);
+      const nextCachedRead = await readProfileRecords();
       expect(nextCachedRead).toEqual(records);
       expect(nextCachedRead[0]).not.toBe(cachedRead[0]);
       expect(nextCachedRead[0].profile).not.toBe(cachedRead[0].profile);
     });
 
-    it('should be able to query data with pagination', async () => {
-      // Create table metadata first
+    it('paginates queried data', async () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -245,8 +238,7 @@ describe('DataReader', () => {
       expect(result).toEqual([]);
     });
 
-    it('should be able to bypass cache when querying data', async () => {
-      // Create table metadata first
+    it('bypasses cached data for a query', async () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -267,13 +259,12 @@ describe('DataReader', () => {
   });
 
   describe('findOne', () => {
-    it('should be able to find non-existent record, return null', async () => {
+    it('returns null for a nonexistent record', async () => {
       const result = await dataReader.findOne(testTableName, { id: 'non_existent_id' });
       expect(result).toBeNull();
     });
 
-    it('should be able to find existing record', async () => {
-      // Create table metadata first
+    it('finds an existing record', async () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -292,8 +283,7 @@ describe('DataReader', () => {
   });
 
   describe('findMany', () => {
-    it('should be able to find multiple records', async () => {
-      // Create table metadata first
+    it('finds multiple records', async () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -312,8 +302,7 @@ describe('DataReader', () => {
       expect(result).toEqual([]);
     });
 
-    it('should be able to find multiple records with pagination', async () => {
-      // Create table metadata first
+    it('paginates multiple matching records', async () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,

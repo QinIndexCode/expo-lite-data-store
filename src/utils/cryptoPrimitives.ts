@@ -16,13 +16,14 @@ const toWordArray = (data: string | Uint8Array): WordArrayLike =>
 const fromWordArray = (wordArray: WordArrayLike): Uint8Array =>
   Uint8Array.from(hexToBytes(CryptoJS.enc.Hex.stringify(wordArray)));
 
-const resolveHasher = (algorithm: HashAlgorithm | NativeDigest): typeof CryptoJS.algo.SHA256 | typeof CryptoJS.algo.SHA512 =>
+const resolveHasher = (
+  algorithm: HashAlgorithm | NativeDigest
+): typeof CryptoJS.algo.SHA256 | typeof CryptoJS.algo.SHA512 =>
   resolveHashAlgorithm(algorithm) === 'SHA-256' ? CryptoJS.algo.SHA256 : CryptoJS.algo.SHA512;
 
 export const hashBytesSync = (data: string | Uint8Array, algorithm: HashAlgorithm = 'SHA-512'): Uint8Array => {
   const message = toWordArray(data);
-  const digest =
-    resolveHashAlgorithm(algorithm) === 'SHA-256' ? CryptoJS.SHA256(message) : CryptoJS.SHA512(message);
+  const digest = resolveHashAlgorithm(algorithm) === 'SHA-256' ? CryptoJS.SHA256(message) : CryptoJS.SHA512(message);
   return fromWordArray(digest);
 };
 

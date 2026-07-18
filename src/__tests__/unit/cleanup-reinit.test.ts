@@ -1,14 +1,23 @@
+/// <reference path="../test-globals.d.ts" />
+
 import { configManager } from '../../core/config/ConfigManager';
 import { SingleFileHandler } from '../../core/file/SingleFileHandler';
+import { MetadataManager } from '../../core/meta/MetadataManager';
 import { plainStorage } from '../../core/db';
 import { db, findOne, hasTable, insert, read, createTable } from '../../expo-lite-data-store';
 import { getRootPath, resetRootPathState } from '../../utils/ROOTPath';
+
+type StorageTestAccess = {
+  metadataManager: MetadataManager;
+};
+
+const getStorageTestAccess = (storage: object): StorageTestAccess => storage as unknown as StorageTestAccess;
 
 describe('cleanup and reinit runtime state', () => {
   const tableName = 'cleanup_reinit_users';
 
   beforeEach(async () => {
-    (global as any).__expo_file_system_mock__.mockFileSystem = {};
+    global.__expo_file_system_mock__.mockFileSystem = {};
     configManager.resetConfig();
     resetRootPathState();
     await plainStorage.cleanup();
@@ -19,7 +28,7 @@ describe('cleanup and reinit runtime state', () => {
     await plainStorage.cleanup();
     configManager.resetConfig();
     resetRootPathState();
-    (global as any).__expo_file_system_mock__.mockFileSystem = {};
+    global.__expo_file_system_mock__.mockFileSystem = {};
   });
 
   it('reloads metadata for the active root and clears stale filtered cache entries', async () => {
@@ -36,7 +45,7 @@ describe('cleanup and reinit runtime state', () => {
     });
 
     const firstRoot = await getRootPath();
-    const metadataManager = (plainStorage as any).metadataManager;
+    const metadataManager = getStorageTestAccess(plainStorage).metadataManager;
     metadataManager.update(tableName, {
       count: 2,
     });
@@ -56,7 +65,9 @@ describe('cleanup and reinit runtime state', () => {
 
     expect(await hasTable(tableName)).toBe(false);
 
-    const persistedOldMeta = JSON.parse((global as any).__expo_file_system_mock__.mockFileSystem[`${firstRoot}meta.ldb`]);
+    const persistedOldMeta = JSON.parse(
+      global.__expo_file_system_mock__.mockFileSystem[`${firstRoot}meta.ldb`] as string
+    );
     expect(persistedOldMeta.tables[tableName].count).toBe(2);
 
     const nextRoot = await getRootPath();

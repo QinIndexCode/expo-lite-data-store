@@ -4,6 +4,7 @@ node_modules/
 # Build outputs
 dist/
 coverage/
+artifacts/
 
 # Expo
 .expo/
@@ -26,9 +27,6 @@ Thumbs.db
 
 # Local env files
 .env*.local
-
-# Test
-__mocks__/
 
 # Misc
 *.pem

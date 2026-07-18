@@ -57,16 +57,16 @@ import { db, configManager, performanceMonitor, StorageError, StorageErrorCode }
 
 ### 导出分组
 
-| 导出分组           | 公共项                                                                                                                                                                                                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Facade 对象        | `db`                                                                                                                                                                                                                      |
-| 命名 CRUD 函数     | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked` |
-| 事务函数           | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                  |
-| 配置导出           | `configManager`, `ConfigManager`                                                                                                                                                                                          |
-| 监控导出           | `performanceMonitor`                                                                                                                                                                                                      |
-| 加密辅助导出       | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`                                                                                   |
-| 错误导出           | `StorageError`, `StorageErrorCode`, `CryptoError`                                                                                                                                                                         |
-| 类型导出           | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FilterCondition`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats` |
+| 导出分组       | 公共项                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Facade 对象    | `db`                                                                                                                                                                                                                                                                                                                                                                           |
+| 命名 CRUD 函数 | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked`                                                                                                                                                      |
+| 事务函数       | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                                                                                                                                                                       |
+| 配置导出       | `configManager`, `ConfigManager`                                                                                                                                                                                                                                                                                                                                               |
+| 监控导出       | `performanceMonitor`                                                                                                                                                                                                                                                                                                                                                           |
+| 加密辅助导出   | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`                                                                                                                                                                                                                                        |
+| 错误导出       | `StorageError`, `StorageErrorCode`, `CryptoError`                                                                                                                                                                                                                                                                                                                              |
+| 类型导出       | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FindOneOptions`, `FindManyOptions`, `UpdateOptions`, `FilterCondition`, `BulkOperation`, `StorageInput`, `StorageRecord`, `UpdatePayload`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats` |
 
 ### `db` facade 与命名导出
 
@@ -116,14 +116,26 @@ type WriteResult = {
 - `totalAfterWrite` 表示操作完成后的总记录数；
 - `chunked` 表示最终表是否处于 chunked 模式。
 
-### `CreateTableOptions`
+### 类型化记录与 `CreateTableOptions`
+
+面向记录的 API 都是泛型。需要字段补全时传入命名记录类型；无 schema 表可使用默认的 `StorageRecord`。
 
 ```ts
-type CreateTableOptions = CommonOptions & {
-  columns?: Record<string, string>;
+type StorageRecord = Record<string, unknown>;
+type StorageInput<T extends object = StorageRecord> = T | T[];
+type ColumnDefinition =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'date'
+  | 'blob'
+  | { type: 'string' | 'number' | 'boolean' | 'date' | 'blob'; isHighRisk?: boolean };
+
+type CreateTableOptions<T extends object = StorageRecord> = CommonOptions & {
+  columns?: Record<string, ColumnDefinition>;
   intermediates?: boolean;
   chunkSize?: number;
-  initialData?: Record<string, any>[];
+  initialData?: T[];
   mode?: 'single' | 'chunked';
   encryptedFields?: string[];
   encryptFullTable?: boolean;
@@ -141,11 +153,11 @@ type CreateTableOptions = CommonOptions & {
 ### `ReadOptions`
 
 ```ts
-type ReadOptions = CommonOptions & {
+type ReadOptions<T extends object = StorageRecord> = CommonOptions & {
   skip?: number;
   limit?: number;
-  filter?: FilterCondition;
-  sortBy?: string | string[];
+  filter?: FilterCondition<T>;
+  sortBy?: SortField<T> | SortField<T>[];
   order?: 'asc' | 'desc' | ('asc' | 'desc')[];
   sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
   bypassCache?: boolean;
@@ -170,10 +182,11 @@ type WriteOptions = CommonOptions & {
 ### `FilterCondition`
 
 ```ts
-type FilterCondition =
-  | ((item: Record<string, any>) => boolean)
-  | Partial<Record<string, any>>
-  | { $or?: FilterCondition[]; $and?: FilterCondition[] };
+type FilterCondition<T extends object = StorageRecord> =
+  | ((item: T) => boolean)
+  | Partial<T>
+  | StorageRecord
+  | { $or?: FilterCondition<T>[]; $and?: FilterCondition<T>[] };
 ```
 
 尽管内部查询引擎支持函数式过滤，公开 `findOne()` 和 `findMany()` 的类型文档仍以对象式 `where` 条件为主。若你希望保持稳定的公共兼容性，请优先使用对象条件。
@@ -336,10 +349,21 @@ await bulkWrite('users', [
 操作结构如下：
 
 ```ts
-type BulkOperation =
-  | { type: 'insert'; data: Record<string, any> | Record<string, any>[] }
-  | { type: 'update'; data: Record<string, any>; where: Record<string, any> }
-  | { type: 'delete'; where: Record<string, any> };
+type UpdateOperatorPayload = {
+  $inc?: Record<string, number>;
+  $set?: StorageRecord;
+  $unset?: string[];
+  $push?: StorageRecord;
+  $pull?: StorageRecord;
+  $addToSet?: StorageRecord;
+};
+
+type UpdatePayload<T extends object = StorageRecord> = Partial<T> | UpdateOperatorPayload | StorageRecord;
+
+type BulkOperation<T extends object = StorageRecord> =
+  | { type: 'insert'; data: StorageInput<T> }
+  | { type: 'update'; data: UpdatePayload<T>; where: FilterCondition<T> }
+  | { type: 'delete'; where: FilterCondition<T> };
 ```
 
 行为说明：
@@ -380,11 +404,11 @@ const user = await findOne('users', {
 签名结构：
 
 ```ts
-findOne(tableName, {
-  where: Record<string, any>;
+findOne<T extends object = StorageRecord>(tableName, {
+  where: FilterCondition<T>;
   encrypted?: boolean;
   requireAuthOnAccess?: boolean;
-})
+}): Promise<T | null>
 ```
 
 返回第一条命中的记录；若没有命中则返回 `null`。
@@ -405,16 +429,16 @@ const users = await findMany('users', {
 签名结构：
 
 ```ts
-findMany(tableName, {
-  where?: Record<string, any>;
+findMany<T extends object = StorageRecord>(tableName, {
+  where?: FilterCondition<T>;
   skip?: number;
   limit?: number;
-  sortBy?: string | string[];
+  sortBy?: SortField<T> | SortField<T>[];
   order?: 'asc' | 'desc' | Array<'asc' | 'desc'>;
   sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
   encrypted?: boolean;
   requireAuthOnAccess?: boolean;
-})
+}): Promise<T[]>
 ```
 
 #### 支持的查询操作符
@@ -594,7 +618,7 @@ configManager.set('monitoring.enablePerformanceTracking', true);
 
 ### `app.json` 示例
 
-`autoSync.enabled` 默认是 `false`。下面的示例表示显式开启后台脏缓存同步。
+`autoSync.enabled` 默认是 `false`。下面的示例表示显式开启后台脏缓存同步。`autoSync.batchSize` 限制一次同步中每张表处理的脏缓存条目数；它不会把一次整表覆盖拆成记录级写入。
 
 ```json
 {
@@ -745,21 +769,21 @@ try {
 
 ### 常见 `StorageErrorCode`
 
-| 错误码                       | 含义                                            |
-| ---------------------------- | ----------------------------------------------- |
-| `EXPO_MODULE_MISSING`        | 缺少必需的 Expo 运行时包                        |
-| `AUTH_ON_ACCESS_UNSUPPORTED` | 当前运行时无法兑现严格逐次访问认证              |
+| 错误码                       | 含义                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------- |
+| `EXPO_MODULE_MISSING`        | 缺少必需的 Expo 运行时包                                                |
+| `AUTH_ON_ACCESS_UNSUPPORTED` | 当前运行时无法兑现严格逐次访问认证                                      |
 | `PERMISSION_DENIED`          | 通过明文表面访问加密表，或未用严格认证表面访问严格表/列出严格表时被拒绝 |
-| `TABLE_NOT_FOUND`            | 请求的表不存在                                  |
-| `TABLE_NAME_INVALID`         | 表名为空或不合法                                |
-| `TABLE_COLUMN_INVALID`       | 列定义使用了不支持的类型                        |
-| `QUERY_FAILED`               | 查询引擎执行条件失败                            |
-| `MIGRATION_FAILED`           | 表迁移失败，或严格认证需要显式迁移密钥与数据    |
-| `TRANSACTION_IN_PROGRESS`    | 当前表面已经存在一个活动事务                    |
-| `NO_TRANSACTION_IN_PROGRESS` | 没有活动事务却调用了 `commit()` 或 `rollback()` |
-| `LOCK_TIMEOUT`               | 并发写锁获取超时                                |
-| `TIMEOUT`                    | 操作超过了配置的超时预算                        |
-| `CORRUPTED_DATA`             | 磁盘数据无法安全解析                            |
+| `TABLE_NOT_FOUND`            | 请求的表不存在                                                          |
+| `TABLE_NAME_INVALID`         | 表名为空或不合法                                                        |
+| `TABLE_COLUMN_INVALID`       | 列定义使用了不支持的类型                                                |
+| `QUERY_FAILED`               | 查询引擎执行条件失败                                                    |
+| `MIGRATION_FAILED`           | 表迁移失败，或严格认证需要显式迁移密钥与数据                            |
+| `TRANSACTION_IN_PROGRESS`    | 当前表面已经存在一个活动事务                                            |
+| `NO_TRANSACTION_IN_PROGRESS` | 没有活动事务却调用了 `commit()` 或 `rollback()`                         |
+| `LOCK_TIMEOUT`               | 并发写锁获取超时                                                        |
+| `TIMEOUT`                    | 操作超过了配置的超时预算                                                |
+| `CORRUPTED_DATA`             | 磁盘数据无法安全解析                                                    |
 
 ### `CryptoError`
 

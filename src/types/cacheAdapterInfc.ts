@@ -1,11 +1,4 @@
 /**
- * @module cacheAdapterInfc
- * @description Cache adapter interface definition
- * @since 2025-11-19
- * @version 3.0.0
- */
-
-/**
  * Cache adapter interface
  */
 export interface ICacheAdapter {
@@ -16,14 +9,14 @@ export interface ICacheAdapter {
    * @param options Cache options
    * @returns Promise<void>
    */
-  set(key: string, value: any, options?: any): Promise<void>;
+  set<T>(key: string, value: T, options?: CacheEntryOptions): Promise<void>;
 
   /**
    * Get a cached value
    * @param key Cache key
-   * @returns Promise<any>
+   * @returns The cached value for the requested type, or undefined.
    */
-  get(key: string): Promise<any>;
+  get<T>(key: string): Promise<T | undefined>;
 
   /**
    * Delete a cached value
@@ -38,3 +31,8 @@ export interface ICacheAdapter {
    */
   clear(): Promise<void>;
 }
+
+export type CacheEntryOptions = {
+  expiry?: number;
+  dirty?: boolean;
+};

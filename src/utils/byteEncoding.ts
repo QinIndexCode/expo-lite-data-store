@@ -1,9 +1,3 @@
-/**
- * @module byteEncoding
- * @description Lightweight byte encoding helpers that avoid pulling browser crypto shims.
- * @since 2026-04-26
- */
-
 const HEX_ALPHABET = '0123456789abcdef';
 
 /**

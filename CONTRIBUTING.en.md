@@ -2,7 +2,7 @@
 
 Thank you for contributing to `expo-lite-data-store`. This repository is maintained as a runtime-verified Expo storage library, so contribution quality is judged by package behavior in real Expo consumers, not by compilation alone.
 
-[README Entry](./README.md) | [简体中文](./CONTRIBUTING.zh-CN.md) | [Security Policy](./SECURITY.en.md) | [Runtime QA Guide](./docs/EXPO_RUNTIME_QA.en.md)
+[README Entry](./README.md) | [Simplified Chinese](./CONTRIBUTING.zh-CN.md) | [Code and Test Style](./docs/COMMENT_SPECIFICATION.en.md) | [Security Policy](./SECURITY.en.md) | [Runtime QA Guide](./docs/EXPO_RUNTIME_QA.en.md)
 
 ## Contribution Scope
 
@@ -62,6 +62,8 @@ npm test -- --runInBand
 
 The build must precede the test command on a clean checkout because the package-export and built-artifact contract tests inspect `dist/`.
 
+Normal Jest runs do not collect coverage and suppress library logs. Set `EXPO_LITE_DATA_STORE_TEST_LOGS=1` to inspect library output or `EXPO_LITE_DATA_STORE_TEST_DIAGNOSTICS=1` to enable the test watchdog diagnostics for a focused investigation.
+
 When packaging, install-contract, or Expo runtime behavior is affected, also run:
 
 ```bash
@@ -92,6 +94,17 @@ When updating public behavior, installation requirements, QA semantics, or relea
 - update the Simplified Chinese counterpart,
 - keep commands, thresholds, and verdict semantics aligned across both languages.
 
+## Code and Test Style
+
+Follow the repository [code comment and test style guide](./docs/COMMENT_SPECIFICATION.en.md). In particular, use English comments that explain durable intent, avoid manual source-history tags, keep public contracts concise, and make tests typed and self-cleaning.
+
+Before requesting review, run the style checks that cover the changed files:
+
+```bash
+npm run format:check
+npm run lint
+```
+
 ## Pull Request Checklist
 
 Before opening a pull request, confirm the following:
@@ -100,6 +113,7 @@ Before opening a pull request, confirm the following:
 - [ ] Changes include tests where applicable
 - [ ] `npm test -- --runInBand` passes
 - [ ] `npm run typecheck` passes
+- [ ] `npm run lint` and `npm run format:check` pass without warnings
 - [ ] `npm run build:all` completed before tests on a clean checkout
 - [ ] `npm run smoke:expo-consumer` passes when packaging or runtime behavior changed
 - [ ] Documentation was updated in both English and Simplified Chinese where applicable

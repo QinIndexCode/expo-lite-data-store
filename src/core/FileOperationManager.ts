@@ -1,10 +1,3 @@
-/**
- * @module FileOperationManager
- * @description File operation manager coordinating single and chunked file handling
- * @since 2025-11-28
- * @version 3.0.0
- */
-
 import { getFileSystem } from '../utils/fileSystemCompat';
 import { getRootPathSync } from '../utils/ROOTPath';
 import { assertValidTableName } from '../utils/tableName';
@@ -15,164 +8,82 @@ import { FileInfoCache } from './file/FileInfoCache';
 import { PermissionChecker } from './file/PermissionChecker';
 import { SingleFileHandler } from './file/SingleFileHandler';
 import { IMetadataManager } from '../types/metadataManagerInfc';
+import { type StorageRecord } from '../types/storageTypes';
 import logger from '../utils/logger';
+import { type FileInfoCompat } from '../utils/fileSystemCompat';
 
-/**
- * 文件操作管理器类
- * 负责协调文件系统相关的操作，委托给具体的文件处理器实现类
- * 支持单文件和分片文件两种存储模式，并提供超时保护机制
- */
 export class FileOperationManager {
-  /**
-   * 文件信息缓存
-   */
   private fileInfoCache: FileInfoCache;
 
-  /**
-   * 权限检查器
-   */
   private permissionChecker: PermissionChecker;
 
-  /**
-   * 文件处理器工厂
-   */
   private fileHandlerFactory: FileHandlerFactory;
 
-  /**
-   * 构造函数
-   * @param chunkSize 分片大小
-   * @param metadataManager 元数据管理器实例
-   */
   constructor(chunkSize: number, metadataManager: IMetadataManager) {
     this.fileInfoCache = new FileInfoCache();
     this.permissionChecker = new PermissionChecker();
     this.fileHandlerFactory = new FileHandlerFactory(chunkSize, metadataManager);
   }
 
-  /**
-   * 更新分片大小
-   * @param chunkSize 新的分片大小
-   */
   updateChunkSize(chunkSize: number): void {
-    if (this.fileHandlerFactory && typeof (this.fileHandlerFactory as any).updateChunkSize === 'function') {
-      (this.fileHandlerFactory as any).updateChunkSize(chunkSize);
-      logger.info('[FileOperationManager] Chunk size updated to:', chunkSize);
-    }
+    this.fileHandlerFactory.updateChunkSize(chunkSize);
+    logger.info('[FileOperationManager] Chunk size updated to:', chunkSize);
   }
 
-  /**
-   * 获取文件信息，优先从缓存中获取
-   * @param path 文件路径
-   * @returns 文件信息
-   */
-  async getFileInfo(path: string): Promise<any> {
+  async getFileInfo(path: string): Promise<FileInfoCompat> {
     return this.fileInfoCache.getFileInfo(path);
   }
 
-  /**
-   * 清除文件信息缓存
-   * @param path 文件路径（可选），如果不提供则清除所有缓存
-   */
   clearFileInfoCache(path?: string): void {
     this.fileInfoCache.clearFileInfoCache(path);
   }
 
-  /**
-   * 检查文件系统访问权限
-   */
   async checkPermissions(): Promise<void> {
     return this.permissionChecker.checkPermissions();
   }
 
-  /**
-   * 获取单文件处理器
-   * @param tableName 表名
-   * @returns 单文件处理器实例
-   */
   getSingleFileHandler(tableName: string): SingleFileHandler {
     return this.fileHandlerFactory.getSingleFileHandler(tableName);
   }
 
-  /**
-   * 获取分片文件处理器
-   * @param tableName 表名
-   * @returns 分片文件处理器实例
-   */
   getChunkedFileHandler(tableName: string): ChunkedFileHandler {
     return this.fileHandlerFactory.getChunkedFileHandler(tableName);
   }
 
-  /**
-   * 判断是否应该使用分片模式
-   * @param data 要写入的数据
-   * @returns 是否应该使用分片模式
-   */
-  shouldUseChunkedMode(data: Record<string, any>[]): boolean {
+  shouldUseChunkedMode(data: StorageRecord[]): boolean {
     return this.fileHandlerFactory.shouldUseChunkedMode(data);
   }
 
-  /**
-   * 读取单文件数据
-   * @param tableName 表名
-   * @returns 读取的数据
-   */
-  async readSingleFile(tableName: string): Promise<Record<string, any>[]> {
+  async readSingleFile(tableName: string): Promise<StorageRecord[]> {
     const handler = this.getSingleFileHandler(tableName);
     return await withTimeout(handler.read(), 10000, `read single file table ${tableName}`);
   }
 
-  /**
-   * 写入单文件数据
-   * @param tableName 表名
-   * @param data 要写入的数据
-   */
-  async writeSingleFile(tableName: string, data: Record<string, any>[]): Promise<void> {
+  async writeSingleFile(tableName: string, data: StorageRecord[]): Promise<void> {
     const handler = this.getSingleFileHandler(tableName);
     await withTimeout(handler.write(data), 10000, `write to single file table ${tableName}`);
   }
 
-  /**
-   * 读取分片文件数据
-   * @param tableName 表名
-   * @returns 读取的数据
-   */
-  async readChunkedFile(tableName: string): Promise<Record<string, any>[]> {
+  async readChunkedFile(tableName: string): Promise<StorageRecord[]> {
     const handler = this.getChunkedFileHandler(tableName);
     return await withTimeout(handler.readAll(), 10000, `read chunked table ${tableName}`);
   }
 
-  /**
-   * 写入分片文件数据
-   * @param tableName 表名
-   * @param data 要写入的数据
-   */
-  async writeChunkedFile(tableName: string, data: Record<string, any>[]): Promise<void> {
+  async writeChunkedFile(tableName: string, data: StorageRecord[]): Promise<void> {
     const handler = this.getChunkedFileHandler(tableName);
     await withTimeout(handler.write(data), 10000, `write to chunked table ${tableName}`);
   }
 
-  /**
-   * 清空分片文件
-   * @param tableName 表名
-   */
   async clearChunkedFile(tableName: string): Promise<void> {
     const handler = this.getChunkedFileHandler(tableName);
     await withTimeout(handler.clear(), 10000, `clear chunked table ${tableName}`);
   }
 
-  /**
-   * 删除单文件
-   * @param tableName 表名
-   */
   async deleteSingleFile(tableName: string): Promise<void> {
     const handler = this.getSingleFileHandler(tableName);
     await handler.delete();
   }
 
-  /**
-   * 删除目录
-   * @param tableName 表名
-   */
   async deleteDirectory(tableName: string): Promise<void> {
     assertValidTableName(tableName);
     const directoryPath = `${getRootPathSync()}${tableName}`;

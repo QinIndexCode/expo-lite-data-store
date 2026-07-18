@@ -159,7 +159,7 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 
 - Periodic dirty data synchronization
 - Exponential backoff retry with jitter
-- Batch processing for efficiency
+- Per-table dirty-cache entry batching without splitting a table overwrite
 - Graceful shutdown support
 
 #### CacheService
@@ -238,6 +238,7 @@ These are implementation characteristics, not device-independent latency guarant
 
 ### 6.4 Access-Bound Table Policy
 
+- The supported public surface is the root `db` facade and named exports; `plainStorage` is not exported.
 - A table created with `encrypted: true` must be accessed through calls that also pass `encrypted: true`; a plain-surface request fails with `PERMISSION_DENIED` rather than exposing ciphertext or appending plaintext.
 - A table created with `requireAuthOnAccess: true` is bound to a separate strict-authentication key scope. `requireAuthOnAccess: true` implicitly selects the encrypted surface; callers should normally pass both flags explicitly. A weaker access surface fails with `PERMISSION_DENIED`.
 - Strict access is not an in-place upgrade for a regular encrypted table. The application must migrate and verify data into a newly created strict table; a silent key substitution is never used.

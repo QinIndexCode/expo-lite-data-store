@@ -1,9 +1,3 @@
-/**
- * @module withTimeout
- * @description Promise timeout utility to prevent operations from hanging indefinitely
- * @since 2025-11-19
- * @version 3.0.0
- */
 import { StorageError } from '../types/storageErrorInfc';
 import { configManager } from '../core/config/ConfigManager';
 

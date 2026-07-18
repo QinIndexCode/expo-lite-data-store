@@ -1,6 +1,3 @@
-// src/__tests__/api/api.test.ts
-// 完整的API测试，覆盖所有主要API和使用场景
-
 import {
   createTable,
   deleteTable,
@@ -20,13 +17,29 @@ import {
   rollback,
   migrateToChunked,
   update,
-  clearTable
+  clearTable,
 } from '../../expo-lite-data-store';
 import { dbManager } from '../../core/db';
 import storage from '../../core/adapter/FileSystemStorageAdapter';
 import { EncryptedStorageAdapter } from '../../core/EncryptedStorageAdapter';
+import type { IStorageAdapter } from '../../types/storageAdapterInfc';
 
-describe('Complete API Tests', () => {
+type EncryptedAdapterKeyAccess = {
+  key: () => Promise<string>;
+};
+
+const getEncryptedAdapterKeyAccess = (adapter: EncryptedStorageAdapter): EncryptedAdapterKeyAccess =>
+  adapter as unknown as EncryptedAdapterKeyAccess;
+
+const asStorageAdapter = (adapter: object): IStorageAdapter => adapter as unknown as IStorageAdapter;
+
+const removeTableIfPresent = async (tableName: string): Promise<void> => {
+  if (await storage.hasTable(tableName)) {
+    await storage.deleteTable(tableName);
+  }
+};
+
+describe('public API', () => {
   const TEST_TABLE_PREFIX = 'api_test_';
   let testTable: string;
   let testTableSequence = 0;
@@ -36,7 +49,6 @@ describe('Complete API Tests', () => {
   });
 
   afterAll(async () => {
-    // 清理所有测试表
     const tables = await listTables({});
     for (const table of tables) {
       if (table.startsWith(TEST_TABLE_PREFIX)) {
@@ -45,11 +57,13 @@ describe('Complete API Tests', () => {
     }
   });
 
-  describe('Table Management APIs', () => {
+  describe('table management', () => {
     it('does not allow the default public surface to bypass a strict table', async () => {
       const strictTable = `${TEST_TABLE_PREFIX}strict_${Date.now()}`;
       const strictAdapter = new EncryptedStorageAdapter({ requireAuthOnAccess: true });
-      const keySpy = jest.spyOn(strictAdapter as any, 'key').mockResolvedValue('strict-test-key');
+      const keySpy = jest
+        .spyOn(getEncryptedAdapterKeyAccess(strictAdapter), 'key')
+        .mockResolvedValue('strict-test-key');
 
       try {
         await strictAdapter.createTable(strictTable, { encrypted: true });
@@ -63,14 +77,16 @@ describe('Complete API Tests', () => {
         await expect(listTables()).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
       } finally {
         keySpy.mockRestore();
-        await storage.deleteTable(strictTable).catch(() => undefined);
+        await removeTableIfPresent(strictTable);
       }
     });
 
     it('does not route a normal encrypted table through the plain facade', async () => {
       const encryptedTable = `${TEST_TABLE_PREFIX}encrypted_${Date.now()}`;
       const encryptedAdapter = new EncryptedStorageAdapter();
-      const keySpy = jest.spyOn(encryptedAdapter as any, 'key').mockResolvedValue('encrypted-test-key');
+      const keySpy = jest
+        .spyOn(getEncryptedAdapterKeyAccess(encryptedAdapter), 'key')
+        .mockResolvedValue('encrypted-test-key');
 
       try {
         await encryptedAdapter.createTable(encryptedTable, { encrypted: true, encryptFullTable: true });
@@ -83,7 +99,7 @@ describe('Complete API Tests', () => {
         });
       } finally {
         keySpy.mockRestore();
-        await storage.deleteTable(encryptedTable).catch(() => undefined);
+        await removeTableIfPresent(encryptedTable);
       }
     });
 
@@ -98,21 +114,20 @@ describe('Complete API Tests', () => {
         signalStrictCreateStarted = resolve;
       });
       const strictAdapter = {
-        createTable: jest.fn(async (tableName: string, options: any) => {
+        createTable: jest.fn(async (...args: Parameters<IStorageAdapter['createTable']>) => {
+          const [tableName, options] = args;
           signalStrictCreateStarted();
           await strictCreateGate;
           await storage.createTable(tableName, options);
         }),
       };
       const plainAdapter = {
-        insert: jest.fn((tableName: string, data: Record<string, any>, options?: any) =>
-          storage.insert(tableName, data, options)
-        ),
+        insert: jest.fn((...args: Parameters<IStorageAdapter['insert']>) => storage.insert(...args)),
       };
       const getDbInstanceSpy = jest
         .spyOn(dbManager, 'getDbInstance')
         .mockImplementation((encrypted, requireAuthOnAccess) =>
-          (encrypted && requireAuthOnAccess ? strictAdapter : plainAdapter) as any
+          asStorageAdapter(encrypted && requireAuthOnAccess ? strictAdapter : plainAdapter)
         );
       let strictCreation: Promise<void> | undefined;
       let ordinaryInsert: Promise<unknown> | undefined;
@@ -139,13 +154,13 @@ describe('Complete API Tests', () => {
       } finally {
         releaseStrictCreate();
         if (strictCreation) {
-          await strictCreation.catch(() => undefined);
+          await Promise.allSettled([strictCreation]);
         }
         if (ordinaryInsert) {
-          await ordinaryInsert.catch(() => undefined);
+          await Promise.allSettled([ordinaryInsert]);
         }
         getDbInstanceSpy.mockRestore();
-        await storage.deleteTable(strictTable).catch(() => undefined);
+        await removeTableIfPresent(strictTable);
       }
     });
 
@@ -157,7 +172,7 @@ describe('Complete API Tests', () => {
           return [strictTable];
         }),
       };
-      const getDbInstanceSpy = jest.spyOn(dbManager, 'getDbInstance').mockReturnValue(plainAdapter as any);
+      const getDbInstanceSpy = jest.spyOn(dbManager, 'getDbInstance').mockReturnValue(asStorageAdapter(plainAdapter));
 
       try {
         await expect(storage.hasTable(strictTable)).resolves.toBe(false);
@@ -169,141 +184,122 @@ describe('Complete API Tests', () => {
         });
       } finally {
         getDbInstanceSpy.mockRestore();
-        await storage.deleteTable(strictTable).catch(() => undefined);
+        await removeTableIfPresent(strictTable);
       }
     });
 
-    it('should create, check, and delete table', async () => {
-      // 创建表
+    it('creates, checks, and deletes a table', async () => {
       await createTable(testTable);
       expect(await hasTable(testTable)).toBe(true);
 
-      // 删除表
       await deleteTable(testTable);
       expect(await hasTable(testTable)).toBe(false);
     });
 
-    it('should handle listTables with multiple tables', async () => {
-      // 创建多个表
+    it('lists multiple created tables', async () => {
       const tableNames = [
         `${TEST_TABLE_PREFIX}table1_${Date.now()}`,
         `${TEST_TABLE_PREFIX}table2_${Date.now()}`,
-        `${TEST_TABLE_PREFIX}table3_${Date.now()}`
+        `${TEST_TABLE_PREFIX}table3_${Date.now()}`,
       ];
 
       for (const tableName of tableNames) {
         await createTable(tableName);
       }
 
-      // 列出所有表
       const allTables = await listTables({});
-      
-      // 验证所有创建的表都在列表中
+
       for (const tableName of tableNames) {
         expect(allTables).toContain(tableName);
       }
 
-      // 清理
       for (const tableName of tableNames) {
         await deleteTable(tableName);
       }
     });
 
-    it('should test clearTable functionality', async () => {
+    it('clears records while preserving the table', async () => {
       await createTable(testTable);
 
-      // 插入数据
       await insert(testTable, [
         { id: 1, name: 'Test 1' },
         { id: 2, name: 'Test 2' },
-        { id: 3, name: 'Test 3' }
+        { id: 3, name: 'Test 3' },
       ]);
 
-      // 验证数据已插入
       let data = await read(testTable);
       expect(data.length).toBe(3);
 
-      // 清空表
       await clearTable(testTable);
 
-      // 验证表已清空但仍然存在
       data = await read(testTable);
       expect(data.length).toBe(0);
       expect(await hasTable(testTable)).toBe(true);
 
-      // 可以继续插入数据
       await insert(testTable, { id: 4, name: 'Test 4' });
       data = await read(testTable);
       expect(data.length).toBe(1);
     });
   });
 
-  describe('Data Write APIs', () => {
-    it('should test overwrite with single and multiple records', async () => {
+  describe('writes', () => {
+    it('overwrites single and multiple records', async () => {
       await createTable(testTable);
 
-      // 覆盖单条记录
       const singleResult = await overwrite(testTable, {
         id: 1,
         name: 'Single Record',
-        value: 100
+        value: 100,
       });
       expect(singleResult.written).toBe(1);
       expect(singleResult.totalAfterWrite).toBe(1);
 
-      // 覆盖多条记录
       const multipleResult = await overwrite(testTable, [
         { id: 2, name: 'Multiple 1', value: 200 },
-        { id: 3, name: 'Multiple 2', value: 300 }
+        { id: 3, name: 'Multiple 2', value: 300 },
       ]);
       expect(multipleResult.written).toBe(2);
       expect(multipleResult.totalAfterWrite).toBe(2);
     });
 
-    it('should test insert with append mode', async () => {
+    it('appends records with insert', async () => {
       await createTable(testTable);
 
-      // 初始数据
       await insert(testTable, [
         { id: 1, name: 'Initial 1', value: 100 },
-        { id: 2, name: 'Initial 2', value: 200 }
+        { id: 2, name: 'Initial 2', value: 200 },
       ]);
 
-      // 追加数据（insert总是使用append模式）
       const appendResult = await insert(testTable, [
         { id: 3, name: 'Appended 1', value: 300 },
-        { id: 4, name: 'Appended 2', value: 400 }
+        { id: 4, name: 'Appended 2', value: 400 },
       ]);
 
       expect(appendResult.written).toBe(2);
       expect(appendResult.totalAfterWrite).toBe(4);
 
-      // 验证数据
       const data = await read(testTable);
       expect(data.length).toBe(4);
       expect(data[0].name).toBe('Initial 1');
       expect(data[2].name).toBe('Appended 1');
     });
 
-    it('should test overwrite', async () => {
+    it('replaces records with overwrite', async () => {
       await createTable(testTable);
 
-      // 初始数据
       await insert(testTable, [
         { id: 1, name: 'Original 1', value: 100 },
-        { id: 2, name: 'Original 2', value: 200 }
+        { id: 2, name: 'Original 2', value: 200 },
       ]);
 
-      // 覆盖数据（overwrite总是使用覆盖模式）
       const overwriteResult = await overwrite(testTable, [
         { id: 3, name: 'New 1', value: 300 },
-        { id: 4, name: 'New 2', value: 400 }
+        { id: 4, name: 'New 2', value: 400 },
       ]);
 
       expect(overwriteResult.written).toBe(2);
       expect(overwriteResult.totalAfterWrite).toBe(2);
 
-      // 验证数据被覆盖
       const data = await read(testTable);
       expect(data.length).toBe(2);
       expect(data[0].name).toBe('New 1');
@@ -311,14 +307,13 @@ describe('Complete API Tests', () => {
       expect(data.find(item => item.name === 'Original 1')).toBeUndefined();
     });
 
-    it('should test insert with single record', async () => {
+    it('inserts a single record', async () => {
       await createTable(testTable);
 
-      // 写入单条记录
       const result = await insert(testTable, {
         id: 1,
         name: 'Single Insert',
-        value: 100
+        value: 100,
       });
 
       expect(result.written).toBe(1);
@@ -329,53 +324,47 @@ describe('Complete API Tests', () => {
       expect(data[0].name).toBe('Single Insert');
     });
 
-    it('should test bulkWrite with mixed operations', async () => {
+    it('applies mixed bulk write operations', async () => {
       await createTable(testTable);
 
-      // 初始数据
       await insert(testTable, [
         { id: 1, name: 'Initial 1', value: 100 },
-        { id: 2, name: 'Initial 2', value: 200 }
+        { id: 2, name: 'Initial 2', value: 200 },
       ]);
 
-      // 执行批量操作
       const bulkResult = await bulkWrite(testTable, [
-        // 插入新记录
         {
           type: 'insert',
-          data: { id: 3, name: 'Bulk Insert', value: 300 }
+          data: { id: 3, name: 'Bulk Insert', value: 300 },
         },
-        // 更新现有记录
         {
           type: 'update',
           data: { value: 150 },
-          where: { id: 1 }
+          where: { id: 1 },
         },
-        // 删除记录
         {
           type: 'delete',
-          where: { id: 2 }
-        }
+          where: { id: 2 },
+        },
       ]);
 
       expect(bulkResult.written).toBe(3);
 
-      // 验证结果
       const data = await read(testTable);
       expect(data.length).toBe(2);
-      
+
       const updatedItem = data.find(item => item.id === 1);
       expect(updatedItem?.value).toBe(150);
-      
+
       const deletedItem = data.find(item => item.id === 2);
       expect(deletedItem).toBeUndefined();
-      
+
       const insertedItem = data.find(item => item.id === 3);
       expect(insertedItem).toBeDefined();
     });
   });
 
-  describe('Data Read APIs', () => {
+  describe('reads', () => {
     beforeEach(async () => {
       await createTable(testTable);
       await insert(testTable, [
@@ -383,74 +372,68 @@ describe('Complete API Tests', () => {
         { id: 2, name: 'Item 2', category: 'B', value: 200, active: false },
         { id: 3, name: 'Item 3', category: 'A', value: 300, active: true },
         { id: 4, name: 'Item 4', category: 'C', value: 400, active: true },
-        { id: 5, name: 'Item 5', category: 'B', value: 500, active: false }
+        { id: 5, name: 'Item 5', category: 'B', value: 500, active: false },
       ]);
     });
 
-    it('should test read all data', async () => {
+    it('reads all records', async () => {
       const data = await read(testTable);
       expect(data.length).toBe(5);
       expect(data[0].id).toBe(1);
       expect(data[4].id).toBe(5);
     });
 
-    it('should test findOne with different conditions', async () => {
-      // 按ID查找
-      const byId = await findOne(testTable, { where: { id: 3 } });
+    it('finds one record under different predicates', async () => {
+      const byId = await findOne<{ id: number; name: string }>(testTable, { where: { id: 3 } });
       expect(byId?.name).toBe('Item 3');
-      
-      // 按条件查找
-      const byCategory = await findOne(testTable, { where: { category: 'B', active: false } });
+
+      const byCategory = await findOne<{ id: number; category: string; active: boolean }>(testTable, {
+        where: { category: 'B', active: false },
+      });
       expect(byCategory?.id).toBe(2);
-      
-      // 查找不存在的记录
+
       const notFound = await findOne(testTable, { where: { id: 100 } });
       expect(notFound).toBeNull();
     });
 
-    it('should test findMany with filtering, sorting, and pagination', async () => {
-      // 基本过滤
+    it('filters, sorts, and paginates records', async () => {
       const activeItems = await findMany(testTable, { where: { active: true } });
       expect(activeItems.length).toBe(3);
-      
-      // 过滤+排序
-      const sortedItems = await findMany(testTable, {
+
+      const sortedItems = await findMany<{ id: number; value: number; active: boolean }>(testTable, {
         where: { active: true },
         sortBy: 'value',
-        order: 'desc'
+        order: 'desc',
       });
       expect(sortedItems.length).toBe(3);
       expect(sortedItems[0].value).toBe(400);
       expect(sortedItems[2].value).toBe(100);
-      
-      // 过滤+分页
-      const paginatedItems = await findMany(testTable, {
+
+      const paginatedItems = await findMany<{ id: number; category: string }>(testTable, {
         where: { category: 'A' },
         skip: 1,
-        limit: 1
+        limit: 1,
       });
       expect(paginatedItems.length).toBe(1);
       expect(paginatedItems[0].id).toBe(3);
     });
 
-    it('should test countTable functionality', async () => {
-      // 基本计数
+    it('counts records before and after inserts', async () => {
       const count = await countTable(testTable);
       expect(count).toBe(5);
-      
-      // 插入更多数据后计数
+
       await insert(testTable, {
         id: 6,
         name: 'Item 6',
         category: 'A',
         value: 600,
-        active: true
+        active: true,
       });
       const updatedCount = await countTable(testTable);
       expect(updatedCount).toBe(6);
     });
 
-    it('should test verifyCountTable functionality', async () => {
+    it('reports matching metadata and stored counts', async () => {
       const result = await verifyCountTable(testTable);
       expect(result.metadata).toBe(5);
       expect(result.actual).toBe(5);
@@ -458,120 +441,94 @@ describe('Complete API Tests', () => {
     });
   });
 
-  describe('Data Update and Delete APIs', () => {
+  describe('updates and deletes', () => {
     beforeEach(async () => {
       await createTable(testTable);
       await insert(testTable, [
         { id: 1, name: 'Update Test 1', value: 100, active: true },
         { id: 2, name: 'Update Test 2', value: 200, active: false },
-        { id: 3, name: 'Update Test 3', value: 300, active: true }
+        { id: 3, name: 'Update Test 3', value: 300, active: true },
       ]);
     });
 
-    it('should test update with different conditions', async () => {
-      // 更新单条记录
-      const singleUpdate = await update(testTable, 
-        { value: 150 }, 
-        { where: { id: 1 } }
-      );
+    it('updates records selected by different conditions', async () => {
+      const singleUpdate = await update(testTable, { value: 150 }, { where: { id: 1 } });
       expect(singleUpdate).toBe(1);
-      
-      // 验证更新结果
-      const updatedItem = await findOne(testTable, { where: { id: 1 } });
+
+      const updatedItem = await findOne<{ id: number; value: number }>(testTable, { where: { id: 1 } });
       expect(updatedItem?.value).toBe(150);
-      
-      // 更新多条记录
-      const multipleUpdate = await update(testTable, 
-        { active: true }, 
-        { where: { active: false } }
-      );
+
+      const multipleUpdate = await update(testTable, { active: true }, { where: { active: false } });
       expect(multipleUpdate).toBe(1);
-      
-      // 验证更新结果
+
       const allActiveItems = await findMany(testTable, { where: { active: true } });
       expect(allActiveItems.length).toBe(3);
     });
 
-    it('should test remove with different conditions', async () => {
-      // 删除单条记录
+    it('removes records selected by different conditions', async () => {
       const singleRemove = await remove(testTable, { where: { id: 1 } });
       expect(singleRemove).toBe(1);
-      
-      // 验证删除结果
+
       const remaining = await read(testTable);
       expect(remaining.length).toBe(2);
-      
-      // 删除多条记录
+
       const multipleRemove = await remove(testTable, { where: { active: true } });
       expect(multipleRemove).toBe(1);
-      
-      // 验证最终结果
+
       const final = await read(testTable);
       expect(final.length).toBe(1);
       expect(final[0].id).toBe(2);
     });
   });
 
-  describe('Transaction APIs', () => {
+  describe('transactions', () => {
     beforeEach(async () => {
       await createTable(testTable);
-      await insert(testTable, [
-        { id: 1, name: 'Transaction Test', balance: 1000 }
-      ]);
+      await insert(testTable, [{ id: 1, name: 'Transaction Test', balance: 1000 }]);
     });
 
-    it('should test successful transaction', async () => {
+    it('commits a transaction', async () => {
       await beginTransaction({});
-      
-      // 在事务中执行操作
+
       await update(testTable, { balance: 1500 }, { where: { id: 1 } });
       await insert(testTable, { id: 2, name: 'New Item', balance: 500 });
-      
-      // 提交事务
+
       await commit({});
-      
-      // 验证结果
-      const item1 = await findOne(testTable, { where: { id: 1 } });
+
+      const item1 = await findOne<{ id: number; balance: number }>(testTable, { where: { id: 1 } });
       const item2 = await findOne(testTable, { where: { id: 2 } });
-      
+
       expect(item1?.balance).toBe(1500);
       expect(item2).toBeDefined();
     });
 
-    it('should test transaction rollback', async () => {
+    it('rolls back a transaction', async () => {
       await beginTransaction({});
-      
-      // 在事务中执行操作
+
       await update(testTable, { balance: 1500 }, { where: { id: 1 } });
       await insert(testTable, { id: 2, name: 'Rollback Test', balance: 500 });
-      
-      // 回滚事务
+
       await rollback({});
-      
-      // 验证回滚结果
+
       const items = await read(testTable);
       expect(items.length).toBe(1);
       expect(items[0].balance).toBe(1000);
     });
 
-    it('should test transaction with complex operations', async () => {
+    it('commits multiple transaction operations', async () => {
       await beginTransaction({});
       let transactionActive = true;
-      
+
       try {
-        // 执行多个操作
         await update(testTable, { balance: 1200 }, { where: { id: 1 } });
         await insert(testTable, { id: 2, name: 'Complex Test', balance: 800 });
         await remove(testTable, { where: { id: 1 } });
-        
-        // 提交事务
+
         await commit({});
         transactionActive = false;
-        
-        // 验证结果 - 这里应该还有1条记录，因为初始数据是1条，删除了1条，添加了1条
+
         const items = await read(testTable);
         expect(items.length).toBe(1);
-        // 验证id为2的记录存在
         const item2 = items.find(item => item.id === 2);
         expect(item2).toBeDefined();
       } catch (error) {
@@ -598,7 +555,7 @@ describe('Complete API Tests', () => {
       const getDbInstanceSpy = jest
         .spyOn(dbManager, 'getDbInstance')
         .mockImplementation((encrypted, requireAuthOnAccess) =>
-          (encrypted && requireAuthOnAccess ? strictAdapter : plainAdapter) as any
+          asStorageAdapter(encrypted && requireAuthOnAccess ? strictAdapter : plainAdapter)
         );
 
       try {
@@ -624,34 +581,29 @@ describe('Complete API Tests', () => {
     });
   });
 
-  describe('Advanced Features', () => {
-    it('should test migrateToChunked functionality', async () => {
+  describe('storage migrations', () => {
+    it('migrates a large table to chunks', async () => {
       await createTable(testTable);
-      
-      // 插入足够的数据以触发分片
+
+      // The fixture exceeds the single-file threshold and exercises chunk migration.
       const largeData = Array.from({ length: 100 }, (_, i) => ({
         id: i + 1,
         name: `Large Item ${i + 1}`,
-        data: 'x'.repeat(500) // 增加数据大小
+        data: 'x'.repeat(500),
       }));
       await insert(testTable, largeData);
-      
-      // 执行迁移
+
       await migrateToChunked(testTable);
-      
-      // 验证数据完整性
+
       const migratedData = await read(testTable);
       expect(migratedData.length).toBe(100);
-      
-      // 验证查询仍然有效
+
       const found = await findOne(testTable, { where: { id: 50 } });
       expect(found?.id).toBe(50);
     });
-
-
   });
 
-  describe('Complex Query Scenarios', () => {
+  describe('complex queries', () => {
     beforeEach(async () => {
       await createTable(testTable);
       await insert(testTable, [
@@ -659,59 +611,50 @@ describe('Complete API Tests', () => {
         { id: 2, name: 'Product 2', category: 'Clothing', price: 50, rating: 3.8, tags: ['b', 'c'], active: true },
         { id: 3, name: 'Product 3', category: 'Electronics', price: 200, rating: 4.2, tags: ['a', 'c'], active: false },
         { id: 4, name: 'Product 4', category: 'Books', price: 20, rating: 4.7, tags: ['d'], active: true },
-        { id: 5, name: 'Product 5', category: 'Clothing', price: 80, rating: 3.5, tags: ['a', 'b', 'c'], active: true }
+        { id: 5, name: 'Product 5', category: 'Clothing', price: 80, rating: 3.5, tags: ['a', 'b', 'c'], active: true },
       ]);
     });
 
-    it('should test complex filtering with operators', async () => {
-      // 使用比较运算符
+    it('filters comparison and array operators', async () => {
       const expensiveItems = await findMany(testTable, {
-        where: { price: { $gt: 80 } }
+        where: { price: { $gt: 80 } },
       });
       expect(expensiveItems.length).toBe(2);
-      
-      // 使用范围运算符
+
       const mediumRatedItems = await findMany(testTable, {
-        where: { rating: { $gte: 4.0, $lte: 4.5 } }
+        where: { rating: { $gte: 4.0, $lte: 4.5 } },
       });
       expect(mediumRatedItems.length).toBe(2);
-      
-      // 使用数组包含运算符
+
       const taggedItems = await findMany(testTable, {
-        where: { tags: { $in: ['a', 'd'] } }
+        where: { tags: { $in: ['a', 'd'] } },
       });
       expect(taggedItems.length).toBe(4);
     });
 
-    it('should test logical operators in queries', async () => {
-      // AND条件
+    it('evaluates logical query operators', async () => {
       const electronicsAndActive = await findMany(testTable, {
-        where: { $and: [{ category: 'Electronics' }, { active: true }] }
+        where: { $and: [{ category: 'Electronics' }, { active: true }] },
       });
       expect(electronicsAndActive.length).toBe(1);
-      
-      // OR条件
+
       const cheapOrHighRated = await findMany(testTable, {
-        where: { $or: [{ price: { $lt: 50 } }, { rating: { $gt: 4.5 } }] }
+        where: { $or: [{ price: { $lt: 50 } }, { rating: { $gt: 4.5 } }] },
       });
-      expect(cheapOrHighRated.length).toBe(1); // 只有Product 4符合条件
-      
-      // 组合条件
+      expect(cheapOrHighRated.length).toBe(1);
+
       const complexQuery = await findMany(testTable, {
         where: {
           $and: [
             { active: true },
             {
-              $or: [
-                { category: 'Clothing' },
-                { rating: { $gt: 4.5 } }
-              ]
+              $or: [{ category: 'Clothing' }, { rating: { $gt: 4.5 } }],
             },
-            { price: { $lt: 100 } }
-          ]
-        }
+            { price: { $lt: 100 } },
+          ],
+        },
       });
-      expect(complexQuery.length).toBe(3); // Product 2, Product 4, Product 5都符合条件
+      expect(complexQuery.length).toBe(3);
     });
   });
 });

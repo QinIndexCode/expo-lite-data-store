@@ -1,76 +1,36 @@
-/**
- * @module FileHandlerFactory
- * @description Factory class for creating different types of file handlers
- * @since 2025-11-28
- * @version 3.0.0
- */
-
 import { IMetadataManager } from '../../types/metadataManagerInfc';
+import { type StorageRecord } from '../../types/storageTypes';
 import { assertValidTableName } from '../../utils/tableName';
 import { getRootPathSync } from '../../utils/ROOTPath';
 import { ChunkedFileHandler } from './ChunkedFileHandler';
 import { SingleFileHandler } from './SingleFileHandler';
 
-/**
- * 文件处理器工厂类，用于创建不同类型的文件处理器
- */
 export class FileHandlerFactory {
-  /**
-   * 分片大小
-   */
   private chunkSize: number;
 
-  /**
-   * 元数据管理器实例
-   */
   private metadataManager: IMetadataManager;
 
-  /**
-   * 构造函数
-   * @param chunkSize 分片大小
-   * @param metadataManager 元数据管理器实例
-   */
   constructor(chunkSize: number, metadataManager: IMetadataManager) {
     this.chunkSize = chunkSize;
     this.metadataManager = metadataManager;
   }
 
-  /**
-   * 获取单文件处理器
-   * @param tableName 表名
-   * @returns 单文件处理器实例
-   */
   getSingleFileHandler(tableName: string): SingleFileHandler {
     assertValidTableName(tableName);
     const filePath = `${getRootPathSync()}${tableName}.ldb`;
     return new SingleFileHandler(filePath);
   }
 
-  /**
-   * 获取分片文件处理器
-   * @param tableName 表名
-   * @returns 分片文件处理器实例
-   */
   getChunkedFileHandler(tableName: string): ChunkedFileHandler {
     assertValidTableName(tableName);
     return new ChunkedFileHandler(tableName, this.metadataManager);
   }
 
-  /**
-   * 判断是否应该使用分片模式
-   * @param data 要写入的数据
-   * @returns 是否应该使用分片模式
-   */
-  shouldUseChunkedMode(data: Record<string, any>[]): boolean {
-    // Decide whether to use chunked mode based on data size
+  shouldUseChunkedMode(data: StorageRecord[]): boolean {
     const estimatedSize = data.reduce((acc, item) => acc + JSON.stringify(item).length, 0);
     return estimatedSize > (this.chunkSize || 1024 * 1024) / 2;
   }
 
-  /**
-   * 更新分片大小
-   * @param chunkSize 新的分片大小
-   */
   updateChunkSize(chunkSize: number): void {
     if (typeof chunkSize === 'number' && chunkSize > 0) {
       this.chunkSize = chunkSize;

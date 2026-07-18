@@ -1,6 +1,3 @@
-// jest.simple.config.js
-// Simple Jest configuration for testing non-Expo dependent modules
-
 module.exports = {
   transform: {
     '^.+\.(ts|tsx)$': [
@@ -14,18 +11,16 @@ module.exports = {
   transformIgnorePatterns: [
     'node_modules/(?!(expo-file-system|expo-constants|expo-crypto|expo-secure-store|@expo|expo-.*|expo-modules-core)/)',
   ],
-  testMatch: ['**/__tests__/**/*.(js|ts|tsx)', '**/?(*.)+(spec|test).(js|ts|tsx)'],
-  testPathIgnorePatterns: ['<rootDir>/node_modules/', '<rootDir>/test.ts'],
+  testMatch: ['**/?(*.)+(spec|test).(js|ts|tsx)'],
+  testPathIgnorePatterns: ['<rootDir>/node_modules/', '<rootDir>/test.ts', '\\.d\\.ts$'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   testEnvironment: 'node',
   moduleNameMapper: {},
   setupFilesAfterEnv: ['<rootDir>/jest.setup.cjs'],
-  // 60秒超时设置
-  testTimeout: 60000, // 60秒
-  // 启用并行测试执行
-  maxWorkers: '50%', // 使用50%的CPU核心数进行并行测试
-  // 启用测试结果缓存
+  clearMocks: true,
+  restoreMocks: true,
+  testTimeout: 60000,
+  maxWorkers: '50%',
   cache: true,
-  // 启用测试分割
   testSequencer: '@jest/test-sequencer',
 };

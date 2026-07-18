@@ -36,7 +36,7 @@ npm pack --dry-run --ignore-scripts
 
 ## One-Time Repository Setup
 
-The release workflow requires a GitHub Actions repository secret named `NPM_TOKEN`. Use a publish-capable npm token scoped as narrowly as the npm account and package support. Never put the token in workflow YAML, repository files, command output, or issue comments.
+The release workflow requires a GitHub Actions repository secret named `NPM_TOKEN`. Use a publish-capable npm token scoped as narrowly as the npm account and package support, with npm 2FA bypass enabled for this automation. The workflow's `id-token: write` permission supplies provenance attestation; it does not replace the required npm token. Never put the token in workflow YAML, repository files, command output, or issue comments.
 
 Set it interactively with the authenticated GitHub CLI:
 

@@ -1,15 +1,7 @@
-/**
- * @module ConfigManager
- * @description Configuration manager supporting multiple configuration sources
- * @since 2025-11-19
- * @version 3.0.0
- */
-
 import defaultConfig from '../../defaultConfig';
 import { LiteStoreConfig, DeepPartial } from '../../types/config';
 import logger from '../../utils/logger';
 import { assertValidStorageFolderName, pathHelper } from '../../utils/PathHelper';
-// Inline basic logger to avoid Metro bundler import issues
 
 type LiteStoreExtraConfig = {
   extra?: {
@@ -30,29 +22,18 @@ type LiteStoreGlobals = {
   liteStoreConfig?: DeepPartial<LiteStoreConfig>;
 };
 
-/**
- * 配置管理器类
- * 支持从多个来源加载配置，具有明确的优先级顺序
- */
+/** Resolves configuration sources in precedence order while rejecting unsafe property names. */
 export class ConfigManager {
   private static readonly UNSAFE_CONFIG_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
   private static instance: ConfigManager | null = null;
   private currentConfig: LiteStoreConfig;
   private customConfig: DeepPartial<LiteStoreConfig> = Object.create(null) as DeepPartial<LiteStoreConfig>;
 
-  /**
-   * 私有构造函数，单例模式
-   */
   private constructor() {
-    // Initialize时加载默认配置
     this.currentConfig = this.sanitizeConfigValue(defaultConfig as LiteStoreConfig);
     this.loadConfig();
   }
 
-  /**
-   * 获取配置管理器实例
-   * @returns ConfigManager 单例实例
-   */
   public static getInstance(): ConfigManager {
     if (!ConfigManager.instance) {
       ConfigManager.instance = new ConfigManager();
@@ -62,6 +43,16 @@ export class ConfigManager {
 
   private createConfigContainer<T extends object>(): T {
     return Object.create(null) as T;
+  }
+
+  private isConfigObject(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  private assertConfigObject(value: unknown): asserts value is Record<string, unknown> {
+    if (!this.isConfigObject(value)) {
+      throw new TypeError('Configuration must be a non-array object.');
+    }
   }
 
   private isUnsafeConfigKey(key: string): boolean {
@@ -74,12 +65,22 @@ export class ConfigManager {
     }
   }
 
+  private parseConfigPath(path: string): string[] {
+    const keys = path.split('.');
+    if (keys.some(key => key.length === 0)) {
+      throw new Error('Configuration path must not contain empty keys.');
+    }
+
+    keys.forEach(key => this.assertSafeConfigKey(key));
+    return keys;
+  }
+
   private sanitizeConfigValue<T>(value: T): T {
     if (Array.isArray(value)) {
       return value.map(item => this.sanitizeConfigValue(item)) as T;
     }
 
-    if (value && typeof value === 'object') {
+    if (this.isConfigObject(value)) {
       const sanitized = this.createConfigContainer<Record<string, unknown>>();
       for (const [key, nestedValue] of Object.entries(value)) {
         if (this.isUnsafeConfigKey(key)) {
@@ -102,26 +103,18 @@ export class ConfigManager {
     return global as LiteStoreGlobals;
   }
 
-  private extractLiteStoreConfig(config: LiteStoreExtraConfig | null | undefined): DeepPartial<LiteStoreConfig> | undefined {
+  private extractLiteStoreConfig(
+    config: LiteStoreExtraConfig | null | undefined
+  ): DeepPartial<LiteStoreConfig> | undefined {
     const liteStoreConfig = config?.extra?.liteStore;
-    return liteStoreConfig && typeof liteStoreConfig === 'object' ? liteStoreConfig : undefined;
+    return this.isConfigObject(liteStoreConfig) ? liteStoreConfig : undefined;
   }
 
-  /**
-   * 加载配置
-   * 按优先级顺序加载配置：默认配置 -> 环境变量 -> 自定义配置文件 -> 程序化配置
-   */
   private loadConfig(): void {
-    // 1. 从默认配置开始
+    // Later sources override earlier sources: defaults, environment, Expo/global, then programmatic values.
     let mergedConfig = this.sanitizeConfigValue(defaultConfig as LiteStoreConfig);
-
-    // 2. 从环境变量加载配置
     mergedConfig = this.mergeConfigFromEnvironment(mergedConfig);
-
-    // 3. 从自定义配置文件加载配置
     mergedConfig = this.mergeConfigFromFile(mergedConfig);
-
-    // 4. 应用程序化配置
     mergedConfig = this.mergeConfig(mergedConfig, this.customConfig);
 
     assertValidStorageFolderName(mergedConfig.storageFolder);
@@ -134,15 +127,9 @@ export class ConfigManager {
     logger.success('Configuration loaded successfully');
   }
 
-  /**
-   * 从环境变量加载配置
-   * @param baseConfig 基础配置
-   * @returns 合并后的配置
-   */
   private mergeConfigFromEnvironment(baseConfig: LiteStoreConfig): LiteStoreConfig {
     const envConfig: DeepPartial<LiteStoreConfig> = {};
 
-    // Basic configuration
     if (process.env.LITE_STORE_CHUNK_SIZE) {
       envConfig.chunkSize = parseInt(process.env.LITE_STORE_CHUNK_SIZE, 10);
     }
@@ -156,13 +143,11 @@ export class ConfigManager {
       envConfig.timeout = parseInt(process.env.LITE_STORE_TIMEOUT, 10);
     }
 
-    // Encrypt配置
     if (process.env.LITE_STORE_ENCRYPTION_KEY_ITERATIONS) {
       envConfig.encryption = envConfig.encryption || {};
       envConfig.encryption.keyIterations = parseInt(process.env.LITE_STORE_ENCRYPTION_KEY_ITERATIONS, 10);
     }
 
-    // Performance configuration
     if (process.env.LITE_STORE_PERFORMANCE_MAX_CONCURRENT_OPERATIONS) {
       envConfig.performance = envConfig.performance || {};
       envConfig.performance.maxConcurrentOperations = parseInt(
@@ -177,7 +162,6 @@ export class ConfigManager {
       );
     }
 
-    // Cache配置
     if (process.env.LITE_STORE_CACHE_MAX_SIZE) {
       envConfig.cache = envConfig.cache || {};
       envConfig.cache.maxSize = parseInt(process.env.LITE_STORE_CACHE_MAX_SIZE, 10);
@@ -187,7 +171,6 @@ export class ConfigManager {
       envConfig.cache.defaultExpiry = parseInt(process.env.LITE_STORE_CACHE_DEFAULT_EXPIRY, 10);
     }
 
-    // Auto-sync configuration
     if (process.env.LITE_STORE_AUTO_SYNC_ENABLED) {
       envConfig.autoSync = envConfig.autoSync || {};
       envConfig.autoSync.enabled = process.env.LITE_STORE_AUTO_SYNC_ENABLED === 'true';
@@ -200,23 +183,13 @@ export class ConfigManager {
     return this.mergeConfig(baseConfig, envConfig);
   }
 
-  /**
-   * 从自定义配置文件加载配置
-   * @param baseConfig 基础配置
-   * @returns 合并后的配置
-   */
   private mergeConfigFromFile(baseConfig: LiteStoreConfig): LiteStoreConfig {
     try {
-      // Check if在React Native/Expo环境中，或者在测试环境中
       const isReactNative =
         typeof window !== 'undefined' || typeof navigator !== 'undefined' || process.env.NODE_ENV === 'test';
 
       if (isReactNative) {
-        // React Native/Expo环境：
-        // 1. 首先尝试从app.json读取配置（推荐方式）
         try {
-          // In Expo, get config directly from global.__expoConfig
-          // More reliable way, directly accesses Expo internal config
           const globalConfig = this.getGlobalLiteStoreConfig();
           const globalExpoConfig = this.extractLiteStoreConfig(globalConfig?.__expoConfig);
           if (globalExpoConfig) {
@@ -224,11 +197,9 @@ export class ConfigManager {
             return this.mergeConfig(baseConfig, globalExpoConfig);
           }
 
-          // 2. 尝试使用expo-constants获取配置
           try {
             let Constants = require('expo-constants') as ExpoConstantsConfigLike;
 
-            // If Constants is a module, try to get default export
             if (
               typeof Constants === 'object' &&
               Constants &&
@@ -240,27 +211,22 @@ export class ConfigManager {
 
             let expoConfig: LiteStoreExtraConfig | null = null;
 
-            // Method 1: Use getConfig() (most reliable)
             if (typeof Constants.getConfig === 'function') {
               try {
                 expoConfig = Constants.getConfig();
               } catch {
-                // IgnoregetConfig()错误
+                // An unavailable Expo config is treated as absent.
               }
             }
 
-            // Method 2: Use Constants properties directly
             if (!expoConfig && Constants.expoConfig) {
-              // Expo SDK 49及以上
+              // Expo SDK 49+ exposes expoConfig; older SDKs use manifest.
               expoConfig = Constants.expoConfig;
             } else if (!expoConfig && Constants.manifest) {
-              // Expo SDK 48及以下
               expoConfig = Constants.manifest;
             }
 
-            // Method 3: Try to access extra from Constants
             if (!expoConfig && Constants.extra) {
-              // Get liteStore config directly from Constants.extra
               const liteStoreConfig = this.extractLiteStoreConfig(Constants);
               if (liteStoreConfig) {
                 logger.info('Configuration loaded from app.json via expo-constants');
@@ -276,41 +242,28 @@ export class ConfigManager {
                 return this.mergeConfig(baseConfig, liteStoreConfig);
               }
             }
-          } catch {
-            // Ignoreexpo-constants加载错误
-          }
+          } catch {}
 
-          // 3. 尝试直接从global对象获取配置（备选方案）
           const globalExpoFallback = this.extractLiteStoreConfig(globalConfig?.expo);
           if (globalExpoFallback) {
             logger.info('Configuration loaded from app.json via expo-constants');
             return this.mergeConfig(baseConfig, globalExpoFallback);
           }
 
-          // 4. 尝试从global.liteStoreConfig获取配置
-          if (globalConfig?.liteStoreConfig && typeof globalConfig.liteStoreConfig === 'object') {
+          if (this.isConfigObject(globalConfig?.liteStoreConfig)) {
             logger.info('Configuration loaded from global.liteStoreConfig');
             return this.mergeConfig(baseConfig, globalConfig.liteStoreConfig);
           }
-        } catch {
-          // Ignore配置加载错误，使用默认配置
-        }
+        } catch {}
       }
-    } catch {
-      // Ignore所有配置文件加载错误，使用默认配置
-    }
+    } catch {}
 
     return baseConfig;
   }
 
-  /**
-   * 合并配置
-   * @param baseConfig 基础配置
-   * @param newConfig 新配置
-   * @returns 合并后的配置
-   */
   private mergeConfig<T extends object>(baseConfig: T, newConfig: DeepPartial<T>): T {
-    const merged = { ...baseConfig } as T;
+    this.assertConfigObject(newConfig);
+    const merged = this.sanitizeConfigValue(baseConfig);
 
     for (const key of Object.keys(newConfig) as string[]) {
       if (this.isUnsafeConfigKey(key)) {
@@ -322,20 +275,12 @@ export class ConfigManager {
       const baseValue = merged[typedKey];
       const newValue = newConfig[typedKey];
 
-      if (
-        typeof newValue === 'object' &&
-        newValue !== null &&
-        !Array.isArray(newValue) &&
-        typeof baseValue === 'object' &&
-        baseValue !== null
-      ) {
-        // Recursive合并对象
-        merged[typedKey] = this.mergeConfig(
-          baseValue as object,
-          newValue as DeepPartial<object>
-        ) as typeof baseValue;
+      if (this.isConfigObject(baseValue) && newValue !== undefined) {
+        if (!this.isConfigObject(newValue)) {
+          throw new TypeError(`Configuration section "${key}" must be an object.`);
+        }
+        merged[typedKey] = this.mergeConfig(baseValue as object, newValue as DeepPartial<object>) as typeof baseValue;
       } else if (newValue !== undefined) {
-        // Only replace if newValue is not undefined
         merged[typedKey] = this.sanitizeConfigValue(newValue) as typeof baseValue;
       }
     }
@@ -343,10 +288,7 @@ export class ConfigManager {
     return merged;
   }
 
-  /**
-   * 获取当前配置
-   * @returns LiteStoreConfig 当前配置
-   */
+  /** Returns a defensive copy that callers cannot use to mutate internal configuration. */
   public getConfig(): LiteStoreConfig {
     return this.sanitizeConfigValue(this.currentConfig);
   }
@@ -363,47 +305,30 @@ export class ConfigManager {
     }
   }
 
-  /**
-   * 设置自定义配置
-   * @param customConfig 自定义配置
-   */
   public setConfig(customConfig: DeepPartial<LiteStoreConfig>): void {
+    this.assertConfigObject(customConfig);
     this.applyCustomConfig(this.sanitizeConfigValue(customConfig));
   }
 
-  /**
-   * 更新部分配置
-   * @param partialConfig 部分配置
-   */
   public updateConfig(partialConfig: DeepPartial<LiteStoreConfig>): void {
+    this.assertConfigObject(partialConfig);
     this.applyCustomConfig(this.mergeConfig(this.customConfig, this.sanitizeConfigValue(partialConfig)));
   }
 
-  /**
-   * 重置配置到默认值
-   */
   public resetConfig(): void {
     this.applyCustomConfig(this.createConfigContainer<DeepPartial<LiteStoreConfig>>());
   }
 
-  /**
-   * 重置单例实例（用于测试）
-   */
   static resetInstance(): void {
     ConfigManager.instance = null;
   }
 
-  /**
-   * 获取配置值
-   * @param path 配置路径，如 'encryption.encryptedFields'
-   * @returns 配置值
-   */
+  /** Reads a defensive copy from a dot-separated configuration path. */
   public get<T>(path: string): T | undefined {
-    const keys = path.split('.');
+    const keys = this.parseConfigPath(path);
     let value: unknown = this.currentConfig;
 
     for (const key of keys) {
-      this.assertSafeConfigKey(key);
       if (value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, key)) {
         value = (value as Record<string, unknown>)[key];
       } else {
@@ -414,24 +339,18 @@ export class ConfigManager {
     return this.sanitizeConfigValue(value) as T;
   }
 
-  /**
-   * 设置配置值
-   * @param path 配置路径，如 'encryption.encryptedFields'
-   * @param value 配置值
-   */
+  /** Sets a programmatic override at a dot-separated configuration path. */
   public set(path: string, value: unknown): void {
-    const keys = path.split('.');
+    const keys = this.parseConfigPath(path);
     const lastKey = keys.pop();
-    if (!lastKey) return;
-
-    // Validate所有键名
-    keys.forEach(key => this.assertSafeConfigKey(key));
-    this.assertSafeConfigKey(lastKey);
+    if (!lastKey) {
+      throw new Error('Configuration path must contain at least one key.');
+    }
 
     const nextConfig = this.sanitizeConfigValue(this.customConfig) as Record<string, unknown>;
     let config = nextConfig;
     for (const key of keys) {
-      if (!Object.prototype.hasOwnProperty.call(config, key) || typeof config[key] !== 'object' || config[key] === null) {
+      if (!Object.prototype.hasOwnProperty.call(config, key) || !this.isConfigObject(config[key])) {
         Object.defineProperty(config, key, {
           value: this.createConfigContainer<Record<string, unknown>>(),
           enumerable: true,
@@ -451,5 +370,4 @@ export class ConfigManager {
   }
 }
 
-// Export default config manager instance
 export const configManager = ConfigManager.getInstance();

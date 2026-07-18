@@ -8,11 +8,10 @@ const qa = require('../../../scripts/expo-runtime-qa.cjs') as {
     status: 'completed' | 'failed';
     error?: Error | null;
   }) => string[];
-  createBoundedTailFileWriter: (options: {
-    filePath: string;
-    maxBytes: number;
-    flushBytes: number;
-  }) => { write: (value: string) => void; close: () => void };
+  createBoundedTailFileWriter: (options: { filePath: string; maxBytes: number; flushBytes: number }) => {
+    write: (value: string) => void;
+    close: () => void;
+  };
   parseArgs: (args: string[]) => { artifactsDir: string; usesDefaultArtifacts: boolean };
   pruneCompletedArtifactRuns: (options: { artifactsRoot: string; keep: number }) => string[];
   startArtifactRun: (options: { artifactsDir: string; usesDefaultArtifacts: boolean }) => unknown;

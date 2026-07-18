@@ -1,10 +1,3 @@
-/**
- * @module logger
- * @description Colored console logging utility for development
- * @since 2025-11-19
- * @version 3.0.0
- */
-
 // Detect ANSI color code support
 const supportsColor =
   typeof process !== 'undefined' &&
@@ -21,7 +14,7 @@ const blue = supportsColor ? '\x1b[34m' : '';
 const magenta = supportsColor ? '\x1b[35m' : '';
 const cyan = supportsColor ? '\x1b[36m' : '';
 
-const shouldLogNonCriticalMessage = (): boolean =>
+const shouldLogMessage = (): boolean =>
   typeof process === 'undefined' ||
   process.env.NODE_ENV !== 'test' ||
   process.env.EXPO_LITE_DATA_STORE_TEST_LOGS === '1';
@@ -33,8 +26,8 @@ class Logger {
   /**
    * Success message (green)
    */
-  success(message: string, ...args: any[]): void {
-    if (!shouldLogNonCriticalMessage()) {
+  success(message: string, ...args: unknown[]): void {
+    if (!shouldLogMessage()) {
       return;
     }
     console.log(green + message + reset, ...args);
@@ -43,22 +36,28 @@ class Logger {
   /**
    * Error message (red)
    */
-  error(message: string, ...args: any[]): void {
+  error(message: string, ...args: unknown[]): void {
+    if (!shouldLogMessage()) {
+      return;
+    }
     console.error(red + message + reset, ...args);
   }
 
   /**
    * Warning message (yellow)
    */
-  warn(message: string, ...args: any[]): void {
+  warn(message: string, ...args: unknown[]): void {
+    if (!shouldLogMessage()) {
+      return;
+    }
     console.warn(yellow + message + reset, ...args);
   }
 
   /**
    * Info message (blue)
    */
-  info(message: string, ...args: any[]): void {
-    if (!shouldLogNonCriticalMessage()) {
+  info(message: string, ...args: unknown[]): void {
+    if (!shouldLogMessage()) {
       return;
     }
     console.log(blue + message + reset, ...args);
@@ -67,8 +66,8 @@ class Logger {
   /**
    * Debug message (cyan)
    */
-  debug(message: string, ...args: any[]): void {
-    if (!shouldLogNonCriticalMessage()) {
+  debug(message: string, ...args: unknown[]): void {
+    if (!shouldLogMessage()) {
       return;
     }
     console.debug(cyan + message + reset, ...args);
@@ -77,8 +76,8 @@ class Logger {
   /**
    * Highlight message (magenta)
    */
-  highlight(message: string, ...args: any[]): void {
-    if (!shouldLogNonCriticalMessage()) {
+  highlight(message: string, ...args: unknown[]): void {
+    if (!shouldLogMessage()) {
       return;
     }
     console.log(magenta + message + reset, ...args);

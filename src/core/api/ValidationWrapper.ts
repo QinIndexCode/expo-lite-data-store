@@ -1,12 +1,6 @@
-/**
- * @module ValidationWrapper
- * @description Validation wrapper for input data verification
- * @since 2025-12-03
- * @version 3.0.0
- */
-
 import { StorageError } from '../../types/storageErrorInfc';
 import type { StorageErrorCode } from '../../types/storageErrorCode';
+import type { BulkOperation, FilterCondition, StorageInput } from '../../types/storageTypes';
 import { assertValidTableName } from '../../utils/tableName';
 
 export const API_INPUT_LIMITS = {
@@ -16,9 +10,7 @@ export const API_INPUT_LIMITS = {
   maxSerializedPayloadBytes: 5 * 1024 * 1024,
 } as const;
 
-/**
- * 验证包装器，负责输入数据验证
- */
+/** Validates public API inputs before they reach the storage adapter. */
 export class ValidationWrapper {
   private assertSerializedPayloadSize(
     payload: unknown,
@@ -47,19 +39,11 @@ export class ValidationWrapper {
     }
   }
 
-  /**
-   * 验证表名
-   * @param tableName 表名
-   */
   validateTableName(tableName: string): void {
     assertValidTableName(tableName);
   }
 
-  /**
-   * 验证写入数据
-   * @param data 要验证的数据
-   */
-  validateWriteData(data: Record<string, any> | Record<string, any>[]): void {
+  validateWriteData<T extends object>(data: StorageInput<T>): void {
     const items = Array.isArray(data) ? data : [data];
 
     if (items.length === 0) {
@@ -91,24 +75,20 @@ export class ValidationWrapper {
     this.assertSerializedPayloadSize(data, 'Write data', 'FILE_CONTENT_INVALID', 'FILE_CONTENT_TOO_LARGE');
   }
 
-  /** Validate optional create-table seed data while allowing an intentionally empty table. */
-  validateInitialData(initialData: unknown): void {
-    if (!Array.isArray(initialData)) {
-      throw new StorageError('Invalid initial data: expected an array', 'FILE_CONTENT_INVALID');
-    }
-
+  /** Validates seed data while allowing an intentionally empty table. */
+  validateInitialData<T extends object>(initialData: T[]): void {
     if (initialData.length > 0) {
       this.validateWriteData(initialData);
     }
   }
 
-  /**
-   * 验证过滤条件
-   * @param filter 过滤条件
-   */
-  validateFilter(filter: Record<string, any>): void {
-    if (typeof filter !== 'object' || filter === null) {
-      throw new StorageError('Invalid filter condition: filter must be an object', 'QUERY_FAILED');
+  validateFilter<T extends object>(filter: FilterCondition<T>): void {
+    if (typeof filter === 'function') {
+      return;
+    }
+
+    if (typeof filter !== 'object' || filter === null || Array.isArray(filter)) {
+      throw new StorageError('Invalid filter condition: filter must be an object or predicate', 'QUERY_FAILED');
     }
 
     if (Object.keys(filter).length === 0) {
@@ -116,27 +96,7 @@ export class ValidationWrapper {
     }
   }
 
-  /**
-   * 验证批量操作
-   * @param operations 批量操作数组
-   */
-  validateBulkOperations(
-    operations: Array<
-      | {
-          type: 'insert';
-          data: Record<string, any> | Record<string, any>[];
-        }
-      | {
-          type: 'update';
-          data: Record<string, any>;
-          where: Record<string, any>;
-        }
-      | {
-          type: 'delete';
-          where: Record<string, any>;
-        }
-    >
-  ): number {
+  validateBulkOperations<T extends object>(operations: BulkOperation<T>[]): number {
     if (!Array.isArray(operations) || operations.length === 0) {
       throw new StorageError('Invalid bulk operations: operations must be a non-empty array', 'BULK_OPERATION_FAILED');
     }

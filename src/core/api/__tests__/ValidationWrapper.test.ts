@@ -1,18 +1,21 @@
-// src/core/api/__tests__/ValidationWrapper.test.ts
-// ValidationWrapper 单元测试
-
 import { API_INPUT_LIMITS, ValidationWrapper } from '../ValidationWrapper';
 import { StorageError } from '../../../types/storageErrorInfc';
 
+const asInvalidInput = <T>(value: unknown): T => value as T;
+
 describe('ValidationWrapper', () => {
   let validationWrapper: ValidationWrapper;
+  type BulkOperations = Parameters<ValidationWrapper['validateBulkOperations']>[0];
+  type Filter = Parameters<ValidationWrapper['validateFilter']>[0];
+  type TableName = Parameters<ValidationWrapper['validateTableName']>[0];
+  type WriteData = Parameters<ValidationWrapper['validateWriteData']>[0];
 
   beforeEach(() => {
     validationWrapper = new ValidationWrapper();
   });
 
-  describe('validateTableName 测试', () => {
-    it('应该验证有效表名', () => {
+  describe('validateTableName', () => {
+    it('accepts valid table names', () => {
       expect(() => {
         validationWrapper.validateTableName('valid_table_name');
       }).not.toThrow();
@@ -26,7 +29,7 @@ describe('ValidationWrapper', () => {
       }).not.toThrow();
     });
 
-    it('应该拒绝空表名', () => {
+    it('rejects blank table names', () => {
       expect(() => {
         validationWrapper.validateTableName('');
       }).toThrow(StorageError);
@@ -36,15 +39,15 @@ describe('ValidationWrapper', () => {
       }).toThrow(StorageError);
 
       expect(() => {
-        validationWrapper.validateTableName(null as any);
+        validationWrapper.validateTableName(asInvalidInput<TableName>(null));
       }).toThrow(StorageError);
 
       expect(() => {
-        validationWrapper.validateTableName(undefined as any);
+        validationWrapper.validateTableName(asInvalidInput<TableName>(undefined));
       }).toThrow(StorageError);
     });
 
-    it('应该拒绝无效字符的表名', () => {
+    it('rejects table names with invalid characters', () => {
       expect(() => {
         validationWrapper.validateTableName('invalid-table-name');
       }).toThrow(StorageError);
@@ -62,8 +65,7 @@ describe('ValidationWrapper', () => {
       }).toThrow(StorageError);
     });
 
-    it('应该拒绝过长的表名', () => {
-      // 创建一个超过最大长度的表名
+    it('rejects a table name longer than the limit', () => {
       const longTableName = 'a'.repeat(101);
       expect(() => {
         validationWrapper.validateTableName(longTableName);
@@ -71,79 +73,69 @@ describe('ValidationWrapper', () => {
     });
   });
 
-  describe('validateWriteData 测试', () => {
-    it('应该验证有效的写入数据', () => {
-      // 验证单个对象
+  describe('validateWriteData', () => {
+    it('accepts valid single and array record payloads', () => {
       expect(() => {
         validationWrapper.validateWriteData({ id: 1, name: 'Test' });
       }).not.toThrow();
 
-      // 验证对象数组
       expect(() => {
         validationWrapper.validateWriteData([
           { id: 1, name: 'Test 1' },
-          { id: 2, name: 'Test 2' }
+          { id: 2, name: 'Test 2' },
         ]);
       }).not.toThrow();
     });
 
-    it('应该拒绝空数据', () => {
+    it('rejects empty write data', () => {
       expect(() => {
         validationWrapper.validateWriteData([]);
       }).toThrow(StorageError);
     });
 
-    it('应该拒绝非对象数据', () => {
+    it('rejects non-record write data', () => {
       expect(() => {
-        validationWrapper.validateWriteData('string' as any);
+        validationWrapper.validateWriteData(asInvalidInput<WriteData>('string'));
       }).toThrow(StorageError);
 
       expect(() => {
-        validationWrapper.validateWriteData(123 as any);
+        validationWrapper.validateWriteData(asInvalidInput<WriteData>(123));
       }).toThrow(StorageError);
 
       expect(() => {
-        validationWrapper.validateWriteData(null as any);
+        validationWrapper.validateWriteData(asInvalidInput<WriteData>(null));
       }).toThrow(StorageError);
 
       expect(() => {
-        validationWrapper.validateWriteData(undefined as any);
-      }).toThrow(StorageError);
-    });
-
-    it('应该拒绝数组中的无效对象', () => {
-      expect(() => {
-        validationWrapper.validateWriteData([
-          { id: 1, name: 'Valid' },
-          'invalid' as any,
-          { id: 3, name: 'Valid' }
-        ]);
-      }).toThrow(StorageError);
-
-      expect(() => {
-        validationWrapper.validateWriteData([
-          { id: 1, name: 'Valid' },
-          null as any,
-          { id: 3, name: 'Valid' }
-        ]);
+        validationWrapper.validateWriteData(asInvalidInput<WriteData>(undefined));
       }).toThrow(StorageError);
     });
 
-    it('应该拒绝空对象', () => {
+    it('rejects invalid records in an array payload', () => {
+      expect(() => {
+        validationWrapper.validateWriteData(
+          asInvalidInput<WriteData>([{ id: 1, name: 'Valid' }, 'invalid', { id: 3, name: 'Valid' }])
+        );
+      }).toThrow(StorageError);
+
+      expect(() => {
+        validationWrapper.validateWriteData(
+          asInvalidInput<WriteData>([{ id: 1, name: 'Valid' }, null, { id: 3, name: 'Valid' }])
+        );
+      }).toThrow(StorageError);
+    });
+
+    it('rejects empty records', () => {
       expect(() => {
         validationWrapper.validateWriteData({});
       }).toThrow(StorageError);
 
       expect(() => {
-        validationWrapper.validateWriteData([
-          { id: 1, name: 'Valid' },
-          {},
-          { id: 3, name: 'Valid' }
-        ]);
+        validationWrapper.validateWriteData([{ id: 1, name: 'Valid' }, {}, { id: 3, name: 'Valid' }]);
       }).toThrow(StorageError);
     });
 
-    it('应该限制记录数和序列化负载大小', () => {
+    it('limits record counts and serialized payload size', () => {
       expect(() => {
         validationWrapper.validateWriteData(
           Array.from({ length: API_INPUT_LIMITS.maxWriteRecords + 1 }, (_, id) => ({ id }))
@@ -156,8 +148,8 @@ describe('ValidationWrapper', () => {
     });
   });
 
-  describe('validateFilter 测试', () => {
-    it('应该验证有效的过滤条件', () => {
+  describe('validateFilter', () => {
+    it('accepts valid filters', () => {
       expect(() => {
         validationWrapper.validateFilter({ id: 1 });
       }).not.toThrow();
@@ -167,98 +159,90 @@ describe('ValidationWrapper', () => {
       }).not.toThrow();
     });
 
-    it('应该拒绝无效的过滤条件', () => {
+    it('rejects invalid filters', () => {
       expect(() => {
         validationWrapper.validateFilter({});
       }).toThrow(StorageError);
 
       expect(() => {
-        validationWrapper.validateFilter(null as any);
+        validationWrapper.validateFilter(asInvalidInput<Filter>(null));
       }).toThrow(StorageError);
 
       expect(() => {
-        validationWrapper.validateFilter('string' as any);
+        validationWrapper.validateFilter(asInvalidInput<Filter>('string'));
       }).toThrow(StorageError);
 
       expect(() => {
-        validationWrapper.validateFilter(123 as any);
+        validationWrapper.validateFilter(asInvalidInput<Filter>(123));
       }).toThrow(StorageError);
     });
   });
 
-  describe('validateBulkOperations 测试', () => {
-    it('应该验证有效的批量操作', () => {
+  describe('validateBulkOperations', () => {
+    it('accepts valid bulk operations', () => {
       expect(() => {
         validationWrapper.validateBulkOperations([
           { type: 'insert', data: { id: 1, name: 'Test' } },
           { type: 'update', data: { name: 'Updated' }, where: { id: 1 } },
-          { type: 'delete', where: { id: 1 } }
+          { type: 'delete', where: { id: 1 } },
         ]);
       }).not.toThrow();
     });
 
-    it('应该拒绝空操作数组', () => {
+    it('rejects an empty bulk operation array', () => {
       expect(() => {
         validationWrapper.validateBulkOperations([]);
       }).toThrow(StorageError);
     });
 
-    it('应该拒绝非数组操作', () => {
+    it('rejects non-array bulk operations', () => {
       expect(() => {
-        validationWrapper.validateBulkOperations({} as any);
+        validationWrapper.validateBulkOperations(asInvalidInput<BulkOperations>({}));
       }).toThrow(StorageError);
 
       expect(() => {
-        validationWrapper.validateBulkOperations('string' as any);
+        validationWrapper.validateBulkOperations(asInvalidInput<BulkOperations>('string'));
       }).toThrow(StorageError);
     });
 
-    it('应该拒绝无效操作类型', () => {
+    it('rejects an invalid bulk operation type', () => {
       expect(() => {
-        validationWrapper.validateBulkOperations([
-          { type: 'invalid' as any, data: { id: 1, name: 'Test' } }
-        ]);
+        validationWrapper.validateBulkOperations(
+          asInvalidInput<BulkOperations>([{ type: 'invalid', data: { id: 1, name: 'Test' } }])
+        );
       }).toThrow(StorageError);
     });
 
-    it('应该拒绝缺少数据的插入操作', () => {
+    it('rejects an insert operation without data', () => {
       expect(() => {
-        validationWrapper.validateBulkOperations([
-          { type: 'insert' } as any
-        ]);
+        validationWrapper.validateBulkOperations(asInvalidInput<BulkOperations>([{ type: 'insert' }]));
       }).toThrow(StorageError);
     });
 
-    it('应该拒绝缺少数据的更新操作', () => {
+    it('rejects an update operation without data', () => {
       expect(() => {
-        validationWrapper.validateBulkOperations([
-          { type: 'update', data: { name: 'Updated' } } as any
-        ]);
+        validationWrapper.validateBulkOperations(
+          asInvalidInput<BulkOperations>([{ type: 'update', data: { name: 'Updated' } }])
+        );
       }).toThrow(StorageError);
     });
 
-    it('应该拒绝缺少过滤条件的删除操作', () => {
+    it('rejects a delete operation without a filter', () => {
       expect(() => {
-        validationWrapper.validateBulkOperations([
-          { type: 'delete' } as any
-        ]);
+        validationWrapper.validateBulkOperations(asInvalidInput<BulkOperations>([{ type: 'delete' }]));
       }).toThrow(StorageError);
     });
 
-    it('应该拒绝无效操作对象', () => {
+    it('rejects invalid bulk operation objects', () => {
       expect(() => {
-        validationWrapper.validateBulkOperations([
-          null as any
-        ]);
+        validationWrapper.validateBulkOperations(asInvalidInput<BulkOperations>([null]));
       }).toThrow(StorageError);
       expect(() => {
-        validationWrapper.validateBulkOperations([
-          'string' as any
-        ]);
+        validationWrapper.validateBulkOperations(asInvalidInput<BulkOperations>(['string']));
       }).toThrow(StorageError);
     });
 
-    it('应该限制批处理操作和有效记录数', () => {
+    it('limits bulk operation and valid record counts', () => {
       expect(
         validationWrapper.validateBulkOperations([
           { type: 'insert', data: [{ id: 1 }, { id: 2 }] },

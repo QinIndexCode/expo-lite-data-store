@@ -1,5 +1,13 @@
 import { MetadataManager } from '../../meta/MetadataManager';
+import { DataReader } from '../../data/DataReader';
 import { FileSystemStorageAdapter } from '../FileSystemStorageAdapter';
+
+type AdapterPrivateAccess = {
+  dataReader: DataReader;
+};
+
+const getAdapterPrivateAccess = (adapter: FileSystemStorageAdapter): AdapterPrivateAccess =>
+  adapter as unknown as AdapterPrivateAccess;
 
 describe('FileSystemStorageAdapter - concurrent append writes', () => {
   let adapter: FileSystemStorageAdapter;
@@ -16,12 +24,10 @@ describe('FileSystemStorageAdapter - concurrent append writes', () => {
     try {
       await adapter.deleteTable(tableName);
     } catch {
-      // Ignore cleanup failures from partially-written test state.
+      // The table may not exist after a failed setup.
     }
 
-    if (adapter && typeof (adapter as any).cleanup === 'function') {
-      await (adapter as any).cleanup();
-    }
+    await adapter.cleanup();
 
     if (metadataManager) {
       metadataManager.cleanup();
@@ -29,7 +35,7 @@ describe('FileSystemStorageAdapter - concurrent append writes', () => {
   });
 
   it('preserves concurrent inserts without adapter-level pre-read merging', async () => {
-    const adapterInternals = adapter as any;
+    const adapterInternals = getAdapterPrivateAccess(adapter);
     const dataReaderReadSpy = jest.spyOn(adapterInternals.dataReader, 'read').mockResolvedValue([]);
 
     const results = await Promise.all(

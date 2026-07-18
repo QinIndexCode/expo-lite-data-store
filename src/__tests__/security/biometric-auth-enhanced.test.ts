@@ -1,5 +1,7 @@
+/// <reference path="../test-globals.d.ts" />
+
 describe('requireAuthOnAccess', () => {
-  const secureStoreMock = () => (global as any).__expo_secure_store_mock__;
+  const secureStoreMock = () => global.__expo_secure_store_mock__;
 
   beforeEach(() => {
     secureStoreMock().mockStore = {};

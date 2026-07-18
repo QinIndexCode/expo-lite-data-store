@@ -1,9 +1,3 @@
-/**
- * @module StorageErrorHandler
- * @description Unified error handling utility for storage operations
- * @since 2025-11-19
- * @version 3.0.0
- */
 import { StorageErrorCode } from '../types/storageErrorCode';
 import { StorageError } from '../types/storageErrorInfc';
 import logger from './logger';
@@ -12,14 +6,6 @@ import logger from './logger';
  * Error handling utility class providing unified error creation and handling
  */
 export class ErrorHandler {
-  /**
-   * 创建表相关错误
-   * @param operation 操作类型（create、delete、update、read等）
-   * @param tableName 表名
-   * @param cause 原始错误（可选）
-   * @param details 详细错误信息（可选）
-   * @returns StorageError 格式化后的存储错误对象
-   */
   static createTableError(operation: string, tableName: string, cause?: unknown, details?: string): StorageError {
     // Print underlying errors in test/dev for table create/delete debugging
     if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
@@ -36,14 +22,6 @@ export class ErrorHandler {
     );
   }
 
-  /**
-   * 创建文件相关错误
-   * @param operation 操作类型（write、read、delete、move等）
-   * @param resource 资源路径或名称
-   * @param cause 原始错误（可选）
-   * @param details 详细错误信息（可选）
-   * @returns StorageError 格式化后的存储错误对象
-   */
   static createFileError(operation: string, resource: string, cause?: unknown, details?: string): StorageError {
     return new StorageError(
       `${operation} ${resource} failed`,
@@ -56,14 +34,6 @@ export class ErrorHandler {
     );
   }
 
-  /**
-   * 创建查询相关错误
-   * @param operation 操作类型（findOne、findMany等）
-   * @param tableName 表名
-   * @param cause 原始错误（可选）
-   * @param details 详细错误信息（可选）
-   * @returns StorageError 格式化后的存储错误对象
-   */
   static createQueryError(operation: string, tableName: string, cause?: unknown, details?: string): StorageError {
     return new StorageError(`${operation} in table ${tableName} failed`, 'QUERY_FAILED', {
       cause,
@@ -72,13 +42,6 @@ export class ErrorHandler {
     });
   }
 
-  /**
-   * 创建事务相关错误
-   * @param operation 操作类型（begin、commit、rollback等）
-   * @param cause 原始错误（可选）
-   * @param details 详细错误信息（可选）
-   * @returns StorageError 格式化后的存储错误对象
-   */
   static createTransactionError(operation: string, cause?: unknown, details?: string): StorageError {
     return new StorageError(
       `${operation} transaction failed`,
@@ -91,15 +54,6 @@ export class ErrorHandler {
     );
   }
 
-  /**
-   * 创建通用错误
-   * @param message 错误消息
-   * @param code 错误代码
-   * @param cause 原始错误（可选）
-   * @param details 详细错误信息（可选）
-   * @param suggestion 错误解决建议（可选）
-   * @returns StorageError 格式化后的存储错误对象
-   */
   static createGeneralError(
     message: string,
     code: StorageErrorCode,
@@ -114,11 +68,6 @@ export class ErrorHandler {
     });
   }
 
-  /**
-   * 获取表操作错误的建议
-   * @param operation 操作类型
-   * @returns string 错误解决建议
-   */
   private static getTableErrorSuggestion(operation: string): string {
     switch (operation.toLowerCase()) {
       case 'create':
@@ -134,11 +83,6 @@ export class ErrorHandler {
     }
   }
 
-  /**
-   * 获取文件操作错误的建议
-   * @param operation 操作类型
-   * @returns string 错误解决建议
-   */
   private static getFileErrorSuggestion(operation: string): string {
     switch (operation.toLowerCase()) {
       case 'write':
@@ -156,11 +100,6 @@ export class ErrorHandler {
     }
   }
 
-  /**
-   * 获取事务操作错误的建议
-   * @param operation 操作类型
-   * @returns string 错误解决建议
-   */
   private static getTransactionErrorSuggestion(operation: string): string {
     switch (operation.toLowerCase()) {
       case 'begin':
@@ -174,13 +113,7 @@ export class ErrorHandler {
     }
   }
 
-  /**
-   * 处理异步操作错误，确保所有异步操作都返回统一的错误格式
-   * @param operation 异步操作函数
-   * @param errorCreator 错误创建函数
-   * @returns Promise<T> 操作结果
-   * @throws StorageError 格式化后的存储错误
-   */
+  /** Preserves StorageError instances and normalizes other asynchronous failures. */
   static async handleAsyncError<T>(
     operation: () => Promise<T>,
     errorCreator: (cause: unknown) => StorageError
@@ -195,13 +128,7 @@ export class ErrorHandler {
     }
   }
 
-  /**
-   * 处理同步操作错误，确保所有同步操作都返回统一的错误格式
-   * @param operation 同步操作函数
-   * @param errorCreator 错误创建函数
-   * @returns T 操作结果
-   * @throws StorageError 格式化后的存储错误
-   */
+  /** Preserves StorageError instances and normalizes other synchronous failures. */
   static handleSyncError<T>(operation: () => T, errorCreator: (cause: unknown) => StorageError): T {
     try {
       return operation();
@@ -213,11 +140,6 @@ export class ErrorHandler {
     }
   }
 
-  /**
-   * 格式化错误信息，使其更易读
-   * @param error 错误对象
-   * @returns string 格式化后的错误字符串
-   */
   static formatError(error: unknown): string {
     if (error instanceof StorageError) {
       return (

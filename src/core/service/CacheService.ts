@@ -1,78 +1,72 @@
-/**
- * @module CacheService
- * @description Cache service managing data caching operations
- * @since 2025-11-28
- * @version 3.0.0
- */
-import { CacheManager } from '../cache/CacheManager';
+import { CacheManager, type CacheStats } from '../cache/CacheManager';
+
+const getStringArray = (value: unknown): string[] =>
+  Array.isArray(value) && value.every(item => typeof item === 'string') ? value : [];
 
 /**
- * 缓存服务类
- * 提供统一的缓存操作接口，封装了 CacheManager 的功能
- * 负责管理数据缓存，包括缓存的读写、删除、清理和统计等
+ * Typed facade around CacheManager.
  */
 export class CacheService {
   private cacheManager: CacheManager;
 
   /**
-   * 构造函数
-   * @param cacheManager 缓存管理器实例
+   * Creates a cache facade for the supplied manager.
    */
   constructor(cacheManager: CacheManager) {
     this.cacheManager = cacheManager;
   }
 
   /**
-   * 设置缓存
+   * Stores a value in the cache.
    */
-  set(key: string, data: any, expiry?: number, dirty: boolean = false): void {
+  set<T>(key: string, data: T, expiry?: number, dirty: boolean = false): void {
     this.cacheManager.set(key, data, expiry, dirty);
   }
 
   /**
-   * 获取缓存
+   * Reads a value from the cache.
    */
-  get(key: string): any {
-    return this.cacheManager.get(key);
+  get<T = unknown>(key: string): T | undefined {
+    return this.cacheManager.get<T>(key);
   }
 
   /**
-   * 删除缓存
+   * Removes a cached value.
    */
   delete(key: string): void {
     this.cacheManager.delete(key);
   }
 
   /**
-   * 清空缓存
+   * Clears all cached values.
    */
   clear(): void {
     this.cacheManager.clear();
   }
 
   /**
-   * 检查缓存键是否存在
+   * Checks whether a cache key exists.
    */
   has(key: string): boolean {
     return this.cacheManager.has(key);
   }
 
   /**
-   * 标记缓存项为脏数据
+   * Marks a cache entry as dirty.
    */
   markAsDirty(key: string): void {
     this.cacheManager.markAsDirty(key);
   }
 
   /**
-   * 标记缓存项为干净数据
+   * Marks a cache entry as clean.
    */
   markAsClean(key: string): void {
     this.cacheManager.markAsClean(key);
   }
 
   /**
-   * 批量标记缓存项为干净数据
+   * Marks several cache entries as clean.
    */
   markAsCleanBulk(keys: string[]): void {
     keys.forEach(key => {
@@ -81,75 +75,73 @@ export class CacheService {
   }
 
   /**
-   * 获取所有脏数据
+   * Returns all dirty cache values.
    */
-  getDirtyData(): Map<string, any> {
+  getDirtyData(): Map<string, unknown> {
     return this.cacheManager.getDirtyData();
   }
 
   /**
-   * 获取缓存统计信息
+   * Returns current cache statistics.
    */
-  getStats(): any {
+  getStats(): CacheStats {
     return this.cacheManager.getStats();
   }
 
   /**
-   * 获取缓存大小
+   * Returns the number of cached entries.
    */
   getSize(): number {
     return this.cacheManager.getSize();
   }
 
   /**
-   * 线程安全的获取缓存数据
+   * Reads or fetches a value under the manager lock.
    */
-  async getSafe(key: string, fetchFn: () => Promise<any>, expiry?: number): Promise<any> {
-    return this.cacheManager.getSafe(key, fetchFn, expiry);
+  async getSafe<T>(key: string, fetchFn: () => Promise<T>, expiry?: number): Promise<T> {
+    return this.cacheManager.getSafe<T>(key, fetchFn, expiry);
   }
 
   /**
-   * 线程安全的设置缓存数据
+   * Stores a value under the manager lock.
    */
-  async setSafe(key: string, data: any, expiry?: number, dirty: boolean = false): Promise<void> {
-    return this.cacheManager.setSafe(key, data, expiry, dirty);
+  async setSafe<T>(key: string, data: T, expiry?: number, dirty: boolean = false): Promise<void> {
+    return this.cacheManager.setSafe<T>(key, data, expiry, dirty);
   }
 
   /**
-   * 缓存穿透防护
+   * Fetches a value with cache-penetration protection.
    */
-  async getWithPenetrationProtection(
+  async getWithPenetrationProtection<T>(
     key: string,
-    fetchFn: () => Promise<any>,
-    defaultValue: any = null,
+    fetchFn: () => Promise<T>,
+    defaultValue: T | null = null,
     expiry?: number
-  ): Promise<any> {
-    return this.cacheManager.getWithPenetrationProtection(key, fetchFn, defaultValue, expiry);
+  ): Promise<T | null> {
+    return this.cacheManager.getWithPenetrationProtection<T | null>(key, fetchFn, defaultValue, expiry);
   }
 
   /**
-   * 清除与特定表相关的所有缓存
+   * Clears cache entries associated with a table.
    */
   clearTableCache(tableName: string): void {
     // Use special cache key to track all cache keys for this table
     const tableCacheKeysKey = `${tableName}_cache_keys`;
-    const tableCacheKeys = (this.cacheManager.get(tableCacheKeysKey) as string[]) || [];
+    const tableCacheKeys = getStringArray(this.cacheManager.get(tableCacheKeysKey));
 
-    // Delete所有相关缓存条目
     for (const key of tableCacheKeys) {
       this.cacheManager.delete(key);
     }
 
-    // Clear cache key list
     this.cacheManager.delete(tableCacheKeysKey);
   }
 
   /**
-   * 记录与表相关的缓存键
+   * Records a cache key associated with a table.
    */
   recordTableCacheKey(tableName: string, cacheKey: string): void {
     const tableCacheKeysKey = `${tableName}_cache_keys`;
-    const tableCacheKeys = (this.cacheManager.get(tableCacheKeysKey) as string[]) || [];
+    const tableCacheKeys = getStringArray(this.cacheManager.get(tableCacheKeysKey));
 
     if (!tableCacheKeys.includes(cacheKey)) {
       tableCacheKeys.push(cacheKey);

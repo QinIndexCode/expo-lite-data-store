@@ -2,7 +2,7 @@
 
 感谢为 `expo-lite-data-store` 做出贡献。本仓库维护的是一个经过真实运行时验证的 Expo 存储库，因此贡献质量不仅以“能编译”为准，还以打包后的 npm 产物在真实 Expo consumer 中是否按契约工作为准。
 
-[README 入口](./README.md) | [English](./CONTRIBUTING.en.md) | [安全策略](./SECURITY.zh-CN.md) | [运行时 QA 指南](./docs/EXPO_RUNTIME_QA.zh-CN.md)
+[README 入口](./README.md) | [English](./CONTRIBUTING.en.md) | [代码与测试风格](./docs/COMMENT_SPECIFICATION.zh-CN.md) | [安全策略](./SECURITY.zh-CN.md) | [运行时 QA 指南](./docs/EXPO_RUNTIME_QA.zh-CN.md)
 
 ## 贡献范围
 
@@ -62,6 +62,8 @@ npm test -- --runInBand
 
 在干净 checkout 中，构建必须先于测试执行，因为 package export 和 built artifact 契约测试会检查 `dist/`。
 
+常规 Jest 运行不会采集覆盖率，并会抑制库日志。需要针对性排查时，可设置 `EXPO_LITE_DATA_STORE_TEST_LOGS=1` 查看库输出，或设置 `EXPO_LITE_DATA_STORE_TEST_DIAGNOSTICS=1` 启用测试 watchdog 诊断。
+
 如果改动影响打包、安装契约或 Expo 运行时行为，还应运行：
 
 ```bash
@@ -92,6 +94,17 @@ npm run qa:baseline:native-flagship
 - 更新简体中文对应文档
 - 保持两种语言中的命令、阈值和 verdict 语义一致
 
+## 代码与测试风格
+
+请遵循仓库的[代码注释与测试风格规范](./docs/COMMENT_SPECIFICATION.zh-CN.md)。特别是：代码注释使用英文并说明持久意图，不手工维护源码历史标签，公开契约保持简洁，测试必须有类型且自行清理资源。
+
+请求审查前，请运行覆盖改动文件的风格检查：
+
+```bash
+npm run format:check
+npm run lint
+```
+
 ## Pull Request 检查清单
 
 提交 Pull Request 前，请确认：
@@ -100,6 +113,7 @@ npm run qa:baseline:native-flagship
 - [ ] 改动包含必要测试
 - [ ] `npm test -- --runInBand` 通过
 - [ ] `npm run typecheck` 通过
+- [ ] `npm run lint` 和 `npm run format:check` 均无 warning 通过
 - [ ] 干净 checkout 中已先执行 `npm run build:all` 再运行测试
 - [ ] 涉及打包或运行时行为时，`npm run smoke:expo-consumer` 通过
 - [ ] 需要更新的文档已同时覆盖英文和简体中文

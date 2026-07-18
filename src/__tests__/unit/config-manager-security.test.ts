@@ -23,9 +23,10 @@ describe('ConfigManager security hardening', () => {
 
   it('ignores unsafe keys nested inside updateConfig payloads', () => {
     const manager = ConfigManager.getInstance();
-    const payload = JSON.parse(
-      '{"cache":{"defaultExpiry":42,"__proto__":{"polluted":"yes"}}}'
-    ) as Record<string, unknown>;
+    const payload = JSON.parse('{"cache":{"defaultExpiry":42,"__proto__":{"polluted":"yes"}}}') as Record<
+      string,
+      unknown
+    >;
 
     manager.updateConfig(payload as never);
 

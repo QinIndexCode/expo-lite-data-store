@@ -1,39 +1,21 @@
-/**
- * @module configValidator
- * @description Configuration validator for ConfigManager parameters
- * @since 2025-11-19
- * @version 3.0.0
- */
 import { configManager } from '../core/config/ConfigManager';
 import defaultConfig from '../defaultConfig';
+import type { DeepPartial, LiteStoreConfig } from '../types/config';
 import { isValidStorageFolderName } from './PathHelper';
 
-/**
- * 配置验证结果接口
- */
+type ConfigDraft = DeepPartial<LiteStoreConfig>;
+
+const VALID_SORT_METHODS = ['default', 'fast', 'counting', 'merge', 'slow'] as const;
+const VALID_ENCRYPTION_ALGORITHMS = ['auto', 'AES-GCM', 'AES-CTR'] as const;
+const VALID_HMAC_ALGORITHMS = ['SHA-256', 'SHA-512'] as const;
+
 export interface ConfigValidationResult {
-  /**
-   * 是否通过验证
-   */
   isValid: boolean;
-  /**
-   * 错误消息列表
-   */
   errors: string[];
-  /**
-   * 警告消息列表
-   */
   warnings: string[];
 }
 
-/**
- * 配置验证工具类
- */
 export class ConfigValidator {
-  /**
-   * 验证所有配置参数
-   * @returns 验证结果
-   */
   static validateAll(): ConfigValidationResult {
     const result: ConfigValidationResult = {
       isValid: true,
@@ -43,31 +25,18 @@ export class ConfigValidator {
 
     const config = configManager.getConfig();
 
-    // Validate基础配置
     this.validateBasicConfig(config, result);
-
-    // Validate加密配置
     this.validateEncryptionConfig(config, result);
-
-    // Validate性能配置
     this.validatePerformanceConfig(config, result);
-
-    // Validate缓存配置
     this.validateCacheConfig(config, result);
-
-    // Validate监控配置
+    this.validateApiConfig(config, result);
+    this.validateAutoSyncConfig(config, result);
     this.validateMonitoringConfig(config, result);
 
     return result;
   }
 
-  /**
-   * 验证基础配置
-   * @param config 配置对象
-   * @param result 验证结果对象
-   */
-  private static validateBasicConfig(config: any, result: ConfigValidationResult): void {
-    // ValidatechunkSize
+  private static validateBasicConfig(config: ConfigDraft, result: ConfigValidationResult): void {
     if (config.chunkSize !== undefined) {
       if (typeof config.chunkSize !== 'number') {
         result.errors.push('chunkSize must be a number');
@@ -78,7 +47,6 @@ export class ConfigValidator {
       }
     }
 
-    // ValidatestorageFolder
     if (config.storageFolder !== undefined) {
       if (!isValidStorageFolderName(config.storageFolder)) {
         result.errors.push('storageFolder must be one non-empty directory name without path separators or traversal');
@@ -86,20 +54,17 @@ export class ConfigValidator {
       }
     }
 
-    // ValidatesortMethods
     if (config.sortMethods !== undefined) {
       if (typeof config.sortMethods !== 'string') {
         result.errors.push('sortMethods must be a string');
         result.isValid = false;
       } else {
-        const validSortMethods = ['default', 'fast', 'counting', 'merge', 'slow'];
-        if (!validSortMethods.includes(config.sortMethods)) {
-          result.warnings.push(`sortMethods should be one of ${validSortMethods.join(', ')}`);
+        if (!VALID_SORT_METHODS.includes(config.sortMethods)) {
+          result.warnings.push(`sortMethods should be one of ${VALID_SORT_METHODS.join(', ')}`);
         }
       }
     }
 
-    // Validatetimeout
     if (config.timeout !== undefined) {
       if (typeof config.timeout !== 'number') {
         result.errors.push('timeout must be a number');
@@ -111,28 +76,20 @@ export class ConfigValidator {
     }
   }
 
-  /**
-   * 验证加密配置
-   * @param config 配置对象
-   * @param result 验证结果对象
-   */
-  private static validateEncryptionConfig(config: any, result: ConfigValidationResult): void {
+  private static validateEncryptionConfig(config: ConfigDraft, result: ConfigValidationResult): void {
     const encryption = config.encryption;
     if (encryption) {
-      // Validatealgorithm
       if (encryption.algorithm !== undefined) {
         if (typeof encryption.algorithm !== 'string') {
           result.errors.push('encryption.algorithm must be a string');
           result.isValid = false;
         } else {
-          const validAlgorithms = ['auto', 'AES-GCM', 'AES-CTR'];
-          if (!validAlgorithms.includes(encryption.algorithm)) {
-            result.warnings.push(`encryption.algorithm should be one of ${validAlgorithms.join(', ')}`);
+          if (!VALID_ENCRYPTION_ALGORITHMS.includes(encryption.algorithm)) {
+            result.warnings.push(`encryption.algorithm should be one of ${VALID_ENCRYPTION_ALGORITHMS.join(', ')}`);
           }
         }
       }
 
-      // ValidatekeySize
       if (encryption.keySize !== undefined) {
         if (typeof encryption.keySize !== 'number') {
           result.errors.push('encryption.keySize must be a number');
@@ -145,20 +102,17 @@ export class ConfigValidator {
         }
       }
 
-      // ValidatehmacAlgorithm
       if (encryption.hmacAlgorithm !== undefined) {
         if (typeof encryption.hmacAlgorithm !== 'string') {
           result.errors.push('encryption.hmacAlgorithm must be a string');
           result.isValid = false;
         } else {
-          const validHmacAlgorithms = ['SHA-256', 'SHA-512'];
-          if (!validHmacAlgorithms.includes(encryption.hmacAlgorithm)) {
-            result.warnings.push(`encryption.hmacAlgorithm should be one of ${validHmacAlgorithms.join(', ')}`);
+          if (!VALID_HMAC_ALGORITHMS.includes(encryption.hmacAlgorithm)) {
+            result.warnings.push(`encryption.hmacAlgorithm should be one of ${VALID_HMAC_ALGORITHMS.join(', ')}`);
           }
         }
       }
 
-      // ValidatekeyIterations
       if (encryption.keyIterations !== undefined) {
         if (typeof encryption.keyIterations !== 'number') {
           result.errors.push('encryption.keyIterations must be a number');
@@ -170,13 +124,11 @@ export class ConfigValidator {
         }
       }
 
-      // ValidateencryptedFields
       if (encryption.encryptedFields !== undefined) {
         if (!Array.isArray(encryption.encryptedFields)) {
           result.errors.push('encryption.encryptedFields must be an array');
           result.isValid = false;
         } else {
-          // Validate数组元素是否都是字符串
           for (const field of encryption.encryptedFields) {
             if (typeof field !== 'string') {
               result.errors.push('encryption.encryptedFields must contain only strings');
@@ -187,7 +139,6 @@ export class ConfigValidator {
         }
       }
 
-      // ValidatecacheTimeout
       if (encryption.cacheTimeout !== undefined) {
         if (typeof encryption.cacheTimeout !== 'number') {
           result.errors.push('encryption.cacheTimeout must be a number');
@@ -198,7 +149,6 @@ export class ConfigValidator {
         }
       }
 
-      // ValidatemaxCacheSize
       if (encryption.maxCacheSize !== undefined) {
         if (typeof encryption.maxCacheSize !== 'number') {
           result.errors.push('encryption.maxCacheSize must be a number');
@@ -209,7 +159,6 @@ export class ConfigValidator {
         }
       }
 
-      // ValidateuseBulkOperations
       if (encryption.useBulkOperations !== undefined) {
         if (typeof encryption.useBulkOperations !== 'boolean') {
           result.errors.push('encryption.useBulkOperations must be a boolean');
@@ -219,15 +168,9 @@ export class ConfigValidator {
     }
   }
 
-  /**
-   * 验证性能配置
-   * @param config 配置对象
-   * @param result 验证结果对象
-   */
-  private static validatePerformanceConfig(config: any, result: ConfigValidationResult): void {
+  private static validatePerformanceConfig(config: ConfigDraft, result: ConfigValidationResult): void {
     const performance = config.performance;
     if (performance) {
-      // ValidateenableQueryOptimization
       if (performance.enableQueryOptimization !== undefined) {
         if (typeof performance.enableQueryOptimization !== 'boolean') {
           result.errors.push('performance.enableQueryOptimization must be a boolean');
@@ -235,7 +178,6 @@ export class ConfigValidator {
         }
       }
 
-      // ValidatemaxConcurrentOperations
       if (performance.maxConcurrentOperations !== undefined) {
         if (typeof performance.maxConcurrentOperations !== 'number') {
           result.errors.push('performance.maxConcurrentOperations must be a number');
@@ -248,7 +190,6 @@ export class ConfigValidator {
         }
       }
 
-      // ValidateenableBatchOptimization
       if (performance.enableBatchOptimization !== undefined) {
         if (typeof performance.enableBatchOptimization !== 'boolean') {
           result.errors.push('performance.enableBatchOptimization must be a boolean');
@@ -256,7 +197,6 @@ export class ConfigValidator {
         }
       }
 
-      // ValidatememoryWarningThreshold
       if (performance.memoryWarningThreshold !== undefined) {
         if (typeof performance.memoryWarningThreshold !== 'number') {
           result.errors.push('performance.memoryWarningThreshold must be a number');
@@ -269,15 +209,9 @@ export class ConfigValidator {
     }
   }
 
-  /**
-   * 验证缓存配置
-   * @param config 配置对象
-   * @param result 验证结果对象
-   */
-  private static validateCacheConfig(config: any, result: ConfigValidationResult): void {
+  private static validateCacheConfig(config: ConfigDraft, result: ConfigValidationResult): void {
     const cache = config.cache;
     if (cache) {
-      // ValidatemaxSize
       if (cache.maxSize !== undefined) {
         if (typeof cache.maxSize !== 'number') {
           result.errors.push('cache.maxSize must be a number');
@@ -290,7 +224,6 @@ export class ConfigValidator {
         }
       }
 
-      // ValidatedefaultExpiry
       if (cache.defaultExpiry !== undefined) {
         if (typeof cache.defaultExpiry !== 'number') {
           result.errors.push('cache.defaultExpiry must be a number');
@@ -301,7 +234,6 @@ export class ConfigValidator {
         }
       }
 
-      // ValidatecleanupInterval
       if (cache.cleanupInterval !== undefined) {
         if (typeof cache.cleanupInterval !== 'number') {
           result.errors.push('cache.cleanupInterval must be a number');
@@ -314,15 +246,106 @@ export class ConfigValidator {
     }
   }
 
-  /**
-   * 验证监控配置
-   * @param config 配置对象
-   * @param result 验证结果对象
-   */
-  private static validateMonitoringConfig(config: any, result: ConfigValidationResult): void {
+  private static validateApiConfig(config: ConfigDraft, result: ConfigValidationResult): void {
+    const rateLimit = config.api?.rateLimit;
+    if (rateLimit) {
+      if (rateLimit.enabled !== undefined && typeof rateLimit.enabled !== 'boolean') {
+        result.errors.push('api.rateLimit.enabled must be a boolean');
+        result.isValid = false;
+      }
+
+      if (rateLimit.requestsPerSecond !== undefined) {
+        if (typeof rateLimit.requestsPerSecond !== 'number') {
+          result.errors.push('api.rateLimit.requestsPerSecond must be a number');
+          result.isValid = false;
+        } else if (rateLimit.requestsPerSecond < 1) {
+          result.errors.push('api.rateLimit.requestsPerSecond must be greater than 0');
+          result.isValid = false;
+        } else if (rateLimit.requestsPerSecond > 1000) {
+          result.warnings.push('api.rateLimit.requestsPerSecond should be less than or equal to 1000');
+        }
+      }
+
+      if (rateLimit.burstCapacity !== undefined) {
+        if (typeof rateLimit.burstCapacity !== 'number') {
+          result.errors.push('api.rateLimit.burstCapacity must be a number');
+          result.isValid = false;
+        } else if (rateLimit.burstCapacity < 1) {
+          result.errors.push('api.rateLimit.burstCapacity must be greater than 0');
+          result.isValid = false;
+        }
+      }
+    }
+
+    const retry = config.api?.retry;
+    if (retry) {
+      if (retry.maxAttempts !== undefined) {
+        if (typeof retry.maxAttempts !== 'number') {
+          result.errors.push('api.retry.maxAttempts must be a number');
+          result.isValid = false;
+        } else if (retry.maxAttempts < 1) {
+          result.errors.push('api.retry.maxAttempts must be greater than 0');
+          result.isValid = false;
+        }
+      }
+
+      if (retry.backoffMultiplier !== undefined) {
+        if (typeof retry.backoffMultiplier !== 'number') {
+          result.errors.push('api.retry.backoffMultiplier must be a number');
+          result.isValid = false;
+        } else if (retry.backoffMultiplier < 1) {
+          result.errors.push('api.retry.backoffMultiplier must be greater than or equal to 1');
+          result.isValid = false;
+        }
+      }
+    }
+  }
+
+  private static validateAutoSyncConfig(config: ConfigDraft, result: ConfigValidationResult): void {
+    const autoSync = config.autoSync;
+    if (!autoSync) {
+      return;
+    }
+
+    if (autoSync.enabled !== undefined && typeof autoSync.enabled !== 'boolean') {
+      result.errors.push('autoSync.enabled must be a boolean');
+      result.isValid = false;
+    }
+
+    if (autoSync.interval !== undefined) {
+      if (typeof autoSync.interval !== 'number') {
+        result.errors.push('autoSync.interval must be a number');
+        result.isValid = false;
+      } else if (autoSync.interval <= 0) {
+        result.errors.push('autoSync.interval must be greater than 0');
+        result.isValid = false;
+      }
+    }
+
+    if (autoSync.minItems !== undefined) {
+      if (typeof autoSync.minItems !== 'number') {
+        result.errors.push('autoSync.minItems must be a number');
+        result.isValid = false;
+      } else if (autoSync.minItems < 0) {
+        result.errors.push('autoSync.minItems must be greater than or equal to 0');
+        result.isValid = false;
+      }
+    }
+
+    if (autoSync.batchSize !== undefined) {
+      if (typeof autoSync.batchSize !== 'number') {
+        result.errors.push('autoSync.batchSize must be a number');
+        result.isValid = false;
+      } else if (autoSync.batchSize < 1) {
+        result.errors.push('autoSync.batchSize must be greater than 0');
+        result.isValid = false;
+      }
+    }
+  }
+
+  private static validateMonitoringConfig(config: ConfigDraft, result: ConfigValidationResult): void {
     const monitoring = config.monitoring;
     if (monitoring) {
-      // ValidateenablePerformanceTracking
       if (monitoring.enablePerformanceTracking !== undefined) {
         if (typeof monitoring.enablePerformanceTracking !== 'boolean') {
           result.errors.push('monitoring.enablePerformanceTracking must be a boolean');
@@ -330,7 +353,6 @@ export class ConfigValidator {
         }
       }
 
-      // ValidateenableHealthChecks
       if (monitoring.enableHealthChecks !== undefined) {
         if (typeof monitoring.enableHealthChecks !== 'boolean') {
           result.errors.push('monitoring.enableHealthChecks must be a boolean');
@@ -338,7 +360,6 @@ export class ConfigValidator {
         }
       }
 
-      // ValidatemetricsRetention
       if (monitoring.metricsRetention !== undefined) {
         if (typeof monitoring.metricsRetention !== 'number') {
           result.errors.push('monitoring.metricsRetention must be a number');
@@ -351,43 +372,24 @@ export class ConfigValidator {
     }
   }
 
-  /**
-   * 自动修复无效配置
-   * @returns 修复后的配置对象
-   */
-  static autoFix(): any {
-    // Get当前配置
-    let config = { ...configManager.getConfig() };
+  /** Replaces invalid current configuration values with defaults and persists the result. */
+  static autoFix(): LiteStoreConfig {
+    const config: ConfigDraft = configManager.getConfig();
 
-    // Auto-fix basic configuration
     this.autoFixBasicConfig(config);
-
-    // Auto-fix encryption configuration
     this.autoFixEncryptionConfig(config);
-
-    // Auto-fix performance configuration
     this.autoFixPerformanceConfig(config);
-
-    // Auto-fix cache configuration
     this.autoFixCacheConfig(config);
-
-    // Auto-fix API configuration
     this.autoFixApiConfig(config);
-
-    // Auto-fix monitoring configuration
+    this.autoFixAutoSyncConfig(config);
     this.autoFixMonitoringConfig(config);
 
-    // Update配置
     configManager.setConfig(config);
 
-    return config;
+    return configManager.getConfig();
   }
 
-  /**
-   * 自动修复基础配置
-   * @param config 配置对象
-   */
-  private static autoFixBasicConfig(config: any): void {
+  private static autoFixBasicConfig(config: ConfigDraft): void {
     if (typeof config.chunkSize !== 'number' || config.chunkSize <= 0) {
       config.chunkSize = defaultConfig.chunkSize;
     }
@@ -396,8 +398,7 @@ export class ConfigValidator {
       config.storageFolder = defaultConfig.storageFolder;
     }
 
-    const validSortMethods = ['default', 'fast', 'counting', 'merge', 'slow'];
-    if (typeof config.sortMethods !== 'string' || !validSortMethods.includes(config.sortMethods)) {
+    if (typeof config.sortMethods !== 'string' || !VALID_SORT_METHODS.includes(config.sortMethods)) {
       config.sortMethods = defaultConfig.sortMethods;
     }
 
@@ -406,18 +407,14 @@ export class ConfigValidator {
     }
   }
 
-  /**
-   * 自动修复加密配置
-   * @param config 配置对象
-   */
-  private static autoFixEncryptionConfig(config: any): void {
+  private static autoFixEncryptionConfig(config: ConfigDraft): void {
     if (!config.encryption) {
       config.encryption = {};
     }
 
     if (
       typeof config.encryption.algorithm !== 'string' ||
-      !['auto', 'AES-GCM', 'AES-CTR'].includes(config.encryption.algorithm)
+      !VALID_ENCRYPTION_ALGORITHMS.includes(config.encryption.algorithm)
     ) {
       config.encryption.algorithm = defaultConfig.encryption.algorithm;
     }
@@ -428,7 +425,7 @@ export class ConfigValidator {
 
     if (
       typeof config.encryption.hmacAlgorithm !== 'string' ||
-      !['SHA-256', 'SHA-512'].includes(config.encryption.hmacAlgorithm)
+      !VALID_HMAC_ALGORITHMS.includes(config.encryption.hmacAlgorithm)
     ) {
       config.encryption.hmacAlgorithm = defaultConfig.encryption.hmacAlgorithm;
     }
@@ -441,7 +438,10 @@ export class ConfigValidator {
       config.encryption.keyIterations = defaultConfig.encryption.keyIterations;
     }
 
-    if (!Array.isArray(config.encryption.encryptedFields)) {
+    if (
+      !Array.isArray(config.encryption.encryptedFields) ||
+      config.encryption.encryptedFields.some(field => typeof field !== 'string')
+    ) {
       config.encryption.encryptedFields = [...defaultConfig.encryption.encryptedFields];
     }
 
@@ -454,15 +454,11 @@ export class ConfigValidator {
     }
 
     if (typeof config.encryption.useBulkOperations !== 'boolean') {
-      config.encryption.useBulkOperations = true;
+      config.encryption.useBulkOperations = defaultConfig.encryption.useBulkOperations;
     }
   }
 
-  /**
-   * 自动修复性能配置
-   * @param config 配置对象
-   */
-  private static autoFixPerformanceConfig(config: any): void {
+  private static autoFixPerformanceConfig(config: ConfigDraft): void {
     if (!config.performance) {
       config.performance = {};
     }
@@ -491,11 +487,7 @@ export class ConfigValidator {
     }
   }
 
-  /**
-   * 自动修复缓存配置
-   * @param config 配置对象
-   */
-  private static autoFixCacheConfig(config: any): void {
+  private static autoFixCacheConfig(config: ConfigDraft): void {
     if (!config.cache) {
       config.cache = {};
     }
@@ -513,11 +505,7 @@ export class ConfigValidator {
     }
   }
 
-  /**
-   * 自动修复API配置
-   * @param config 配置对象
-   */
-  private static autoFixApiConfig(config: any): void {
+  private static autoFixApiConfig(config: ConfigDraft): void {
     if (!config.api) {
       config.api = {};
     }
@@ -555,11 +543,29 @@ export class ConfigValidator {
     }
   }
 
-  /**
-   * 自动修复监控配置
-   * @param config 配置对象
-   */
-  private static autoFixMonitoringConfig(config: any): void {
+  private static autoFixAutoSyncConfig(config: ConfigDraft): void {
+    if (!config.autoSync) {
+      config.autoSync = {};
+    }
+
+    if (typeof config.autoSync.enabled !== 'boolean') {
+      config.autoSync.enabled = defaultConfig.autoSync.enabled;
+    }
+
+    if (typeof config.autoSync.interval !== 'number' || config.autoSync.interval <= 0) {
+      config.autoSync.interval = defaultConfig.autoSync.interval;
+    }
+
+    if (typeof config.autoSync.minItems !== 'number' || config.autoSync.minItems < 0) {
+      config.autoSync.minItems = defaultConfig.autoSync.minItems;
+    }
+
+    if (typeof config.autoSync.batchSize !== 'number' || config.autoSync.batchSize < 1) {
+      config.autoSync.batchSize = defaultConfig.autoSync.batchSize;
+    }
+  }
+
+  private static autoFixMonitoringConfig(config: ConfigDraft): void {
     if (!config.monitoring) {
       config.monitoring = {};
     }
@@ -578,12 +584,5 @@ export class ConfigValidator {
   }
 }
 
-/**
- * 导出默认配置验证结果
- */
 export const configValidationResult = ConfigValidator.validateAll();
-
-/**
- * 导出修复后的配置
- */
 export const fixedConfig = ConfigValidator.autoFix();

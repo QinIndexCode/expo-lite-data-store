@@ -47,7 +47,7 @@ describe('expo runtime QA UI template', () => {
     expect(qaScript).toContain("'expo-clipboard'");
     expect(qaScript).toContain("'react-native-quick-crypto'");
     expect(qaScript).toContain("'react-native-get-random-values'");
-    expect(qaScript).toContain("profile === NATIVE_PROFILE ? null : runtime.packageName");
+    expect(qaScript).toContain('profile === NATIVE_PROFILE ? null : runtime.packageName');
   });
 
   it('keeps the native MuMu field-encrypted baseline at 1200 ops/s', () => {

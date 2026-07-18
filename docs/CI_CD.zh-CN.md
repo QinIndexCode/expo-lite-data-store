@@ -36,7 +36,7 @@ npm pack --dry-run --ignore-scripts
 
 ## 仓库一次性配置
 
-发布 workflow 要求存在名为 `NPM_TOKEN` 的 GitHub Actions repository secret。应使用具备发布权限、同时尽可能缩小 npm 账户和包作用域的 token。不要把 token 写进 workflow YAML、仓库文件、命令输出或 Issue 评论。
+发布 workflow 要求存在名为 `NPM_TOKEN` 的 GitHub Actions repository secret。应使用具备发布权限、同时尽可能缩小 npm 账户和包作用域、并为该自动化启用 npm 2FA bypass 的 token。workflow 的 `id-token: write` 权限用于 provenance 证明，不能替代所需的 npm token。不要把 token 写进 workflow YAML、仓库文件、命令输出或 Issue 评论。
 
 通过已认证的 GitHub CLI 交互式设置：
 

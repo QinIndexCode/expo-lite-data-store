@@ -7,7 +7,7 @@ type EncodingTypeShape = {
   UTF16?: string;
 };
 
-type FileInfoCompat = {
+export type FileInfoCompat = {
   exists: boolean;
   isDirectory?: boolean;
   size?: number;
@@ -19,11 +19,7 @@ export type ExpoFileSystemCompat = {
   EncodingType?: EncodingTypeShape;
   getInfoAsync: (uri: string, options?: Record<string, unknown>) => Promise<FileInfoCompat>;
   makeDirectoryAsync: (uri: string, options?: { intermediates?: boolean }) => Promise<void>;
-  writeAsStringAsync: (
-    uri: string,
-    contents: string,
-    options?: { encoding?: string }
-  ) => Promise<void>;
+  writeAsStringAsync: (uri: string, contents: string, options?: { encoding?: string }) => Promise<void>;
   readAsStringAsync: (uri: string, options?: { encoding?: string }) => Promise<string>;
   deleteAsync: (uri: string, options?: { idempotent?: boolean }) => Promise<void>;
   moveAsync: (options: { from: string; to: string }) => Promise<void>;
@@ -112,13 +108,13 @@ const hasLegacyFileSystemShape = (
   NativeLegacyFileSystemModule => {
   return Boolean(
     moduleValue &&
-      typeof moduleValue.getInfoAsync === 'function' &&
-      typeof moduleValue.makeDirectoryAsync === 'function' &&
-      typeof moduleValue.writeAsStringAsync === 'function' &&
-      typeof moduleValue.readAsStringAsync === 'function' &&
-      typeof moduleValue.deleteAsync === 'function' &&
-      typeof moduleValue.moveAsync === 'function' &&
-      typeof moduleValue.readDirectoryAsync === 'function'
+    typeof moduleValue.getInfoAsync === 'function' &&
+    typeof moduleValue.makeDirectoryAsync === 'function' &&
+    typeof moduleValue.writeAsStringAsync === 'function' &&
+    typeof moduleValue.readAsStringAsync === 'function' &&
+    typeof moduleValue.deleteAsync === 'function' &&
+    typeof moduleValue.moveAsync === 'function' &&
+    typeof moduleValue.readDirectoryAsync === 'function'
   );
 };
 
@@ -139,8 +135,7 @@ const loadNativeLegacyFileSystemModule = (): ExpoFileSystemCompat | null => {
       EncodingType: createEncodingTypeShape(),
       getInfoAsync: (uri, options = {}) => nativeModule.getInfoAsync(uri, options),
       makeDirectoryAsync: (uri, options = {}) => nativeModule.makeDirectoryAsync(uri, options),
-      writeAsStringAsync: (uri, contents, options = {}) =>
-        nativeModule.writeAsStringAsync(uri, contents, options),
+      writeAsStringAsync: (uri, contents, options = {}) => nativeModule.writeAsStringAsync(uri, contents, options),
       readAsStringAsync: (uri, options = {}) => nativeModule.readAsStringAsync(uri, options),
       deleteAsync: (uri, options = {}) => nativeModule.deleteAsync(uri, options),
       moveAsync: options => nativeModule.moveAsync(options),
@@ -220,9 +215,7 @@ export const getDocumentDirectory = (): string => {
 
   const nativeDocumentDirectory = loadModernFileSystemModule()?.documentDirectory;
   if (typeof nativeDocumentDirectory === 'string' && nativeDocumentDirectory.length > 0) {
-    return nativeDocumentDirectory.endsWith('/')
-      ? nativeDocumentDirectory
-      : `${nativeDocumentDirectory}/`;
+    return nativeDocumentDirectory.endsWith('/') ? nativeDocumentDirectory : `${nativeDocumentDirectory}/`;
   }
 
   return getFileSystem().documentDirectory || '/mock/documents/';

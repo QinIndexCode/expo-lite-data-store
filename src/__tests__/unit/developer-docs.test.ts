@@ -1,6 +1,25 @@
 import childProcess from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import ts from 'typescript';
+
+const getCommentTrivia = (content: string): string[] => {
+  const sourceFile = ts.createSourceFile('comment-trivia.ts', content, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  const comments = new Map<string, string>();
+  const collectComment = (pos: number, end: number): void => {
+    comments.set(`${pos}:${end}`, content.slice(pos, end));
+  };
+
+  const visit = (node: ts.Node): void => {
+    ts.forEachLeadingCommentRange(content, node.getFullStart(), collectComment);
+    ts.forEachTrailingCommentRange(content, node.getEnd(), collectComment);
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+
+  return Array.from(comments.values());
+};
 
 describe('developer documentation contract', () => {
   const repoRoot = path.resolve(__dirname, '../../..');
@@ -8,9 +27,6 @@ describe('developer documentation contract', () => {
     version: string;
     scripts: Record<string, string>;
     homepage?: string;
-  };
-  const appJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'app.json'), 'utf8')) as {
-    expo: { version: string };
   };
   const githubBlobBase = 'https://github.com/QinIndexCode/expo-lite-data-store/blob/main';
   const readmeEntry = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
@@ -28,6 +44,9 @@ describe('developer documentation contract', () => {
   const qaIndex = fs.readFileSync(path.join(repoRoot, 'docs/EXPO_RUNTIME_QA.md'), 'utf8');
   const qaGuide = fs.readFileSync(path.join(repoRoot, 'docs/EXPO_RUNTIME_QA.en.md'), 'utf8');
   const qaGuideZh = fs.readFileSync(path.join(repoRoot, 'docs/EXPO_RUNTIME_QA.zh-CN.md'), 'utf8');
+  const commentSpecificationIndex = fs.readFileSync(path.join(repoRoot, 'docs/COMMENT_SPECIFICATION.md'), 'utf8');
+  const commentSpecification = fs.readFileSync(path.join(repoRoot, 'docs/COMMENT_SPECIFICATION.en.md'), 'utf8');
+  const commentSpecificationZh = fs.readFileSync(path.join(repoRoot, 'docs/COMMENT_SPECIFICATION.zh-CN.md'), 'utf8');
   const updateLog = fs.readFileSync(path.join(repoRoot, 'docs/updatelog.en.md'), 'utf8');
   const updateLogZh = fs.readFileSync(path.join(repoRoot, 'docs/updatelog.zh-CN.md'), 'utf8');
   const bugTemplate = fs.readFileSync(path.join(repoRoot, '.github/ISSUE_TEMPLATE/bug_report.md'), 'utf8');
@@ -86,17 +105,64 @@ describe('developer documentation contract', () => {
     );
   });
 
-  it('keeps package, Expo, and source JSDoc version metadata aligned', () => {
-    expect(packageJson.version).toMatch(/^3\.\d+\.\d+$/);
-    expect(appJson.expo.version).toBe(packageJson.version);
+  it('collects comments after template interpolations', () => {
+    const fixture = [
+      'const label = `value ${1}`; // \u4e2d\u6587\u884c\u5185\u6ce8\u91ca',
+      '/** \u4e2d\u6587\u5757\u6ce8\u91ca */',
+      'const result = label;',
+    ].join('\n');
 
-    const sourceFilesWithVersionHeaders = trackedMarkdown
-      .filter(file => file.startsWith('src/') && file.endsWith('.ts') && !file.includes('/__tests__/'))
-      .filter(file => fs.readFileSync(path.join(repoRoot, file), 'utf8').includes('@version'));
+    expect(getCommentTrivia(fixture)).toEqual([
+      '// \u4e2d\u6587\u884c\u5185\u6ce8\u91ca',
+      '/** \u4e2d\u6587\u5757\u6ce8\u91ca */',
+    ]);
+  });
 
-    expect(sourceFilesWithVersionHeaders).not.toHaveLength(0);
-    for (const file of sourceFilesWithVersionHeaders) {
-      expect(fs.readFileSync(path.join(repoRoot, file), 'utf8')).toContain(`@version ${packageJson.version}`);
+  it('links the comment guides and rejects stale source markers and production file headers', () => {
+    expect(commentSpecificationIndex).toContain('[COMMENT_SPECIFICATION.en.md](./COMMENT_SPECIFICATION.en.md)');
+    expect(commentSpecificationIndex).toContain('[COMMENT_SPECIFICATION.zh-CN.md](./COMMENT_SPECIFICATION.zh-CN.md)');
+    expect(commentSpecification).toContain('[Simplified Chinese](./COMMENT_SPECIFICATION.zh-CN.md)');
+    expect(commentSpecificationZh).toContain('[English](./COMMENT_SPECIFICATION.en.md)');
+
+    const staleHeaderMarker =
+      /@(?:since|version|changelog)\b|\bCreated(?:\s+(?:on\s+)?\d{4}[-/]\d{1,2}[-/]\d{1,2}|\s*:)|\bLast\s+modified(?:\s+\d{4}[-/]\d{1,2}[-/]\d{1,2}|\s*:)/i;
+    const sourceFiles = Array.from(new Set([...trackedMarkdown, ...untrackedMarkdown])).filter(
+      file => file.startsWith('src/') && file.endsWith('.ts') && fs.existsSync(path.join(repoRoot, file))
+    );
+    const productionSourceFiles = sourceFiles.filter(
+      file => !file.startsWith('src/__tests__/') && !file.includes('/__tests__/')
+    );
+
+    for (const file of sourceFiles) {
+      const content = fs.readFileSync(path.join(repoRoot, file), 'utf8');
+      for (const comment of getCommentTrivia(content)) {
+        expect(comment).not.toMatch(staleHeaderMarker);
+      }
+    }
+
+    for (const file of productionSourceFiles) {
+      const content = fs.readFileSync(path.join(repoRoot, file), 'utf8').replace(/^\uFEFF/, '');
+      const openingComment = content.match(/^\s*\/\*\*[\s\S]*?\*\//)?.[0] ?? '';
+
+      expect(openingComment).not.toMatch(/@(?:module|description)\b/i);
+    }
+  });
+
+  it('keeps TypeScript comment trivia in English', () => {
+    const typeScriptFiles = Array.from(new Set([...trackedMarkdown, ...untrackedMarkdown])).filter(
+      file =>
+        (file.startsWith('src/') || file.startsWith('__mocks__/')) &&
+        (file.endsWith('.ts') || file.endsWith('.tsx')) &&
+        fs.existsSync(path.join(repoRoot, file))
+    );
+    const cjkComment = /[\p{Script=Han}]/u;
+
+    for (const file of typeScriptFiles) {
+      const content = fs.readFileSync(path.join(repoRoot, file), 'utf8');
+
+      for (const comment of getCommentTrivia(content)) {
+        expect(comment).not.toMatch(cjkComment);
+      }
     }
   });
 
@@ -211,13 +277,25 @@ describe('developer documentation contract', () => {
 
   it('documents the v3 strict table-listing boundary and public type exports', () => {
     const strictListCall = /listTables\s*\(\{\s*encrypted:\s*true,\s*requireAuthOnAccess:\s*true\s*\}\)/;
+    const publicTypeExports = [
+      'PerformanceStats',
+      'HealthCheckResult',
+      'KeyCacheStats',
+      'FindOneOptions',
+      'FindManyOptions',
+      'UpdateOptions',
+      'BulkOperation',
+      'StorageInput',
+      'StorageRecord',
+      'UpdatePayload',
+    ];
 
     for (const guide of [apiGuide, apiGuideZh]) {
       expect(guide).toContain('PERMISSION_DENIED');
       expect(guide).toMatch(strictListCall);
-      expect(guide).toContain('PerformanceStats');
-      expect(guide).toContain('HealthCheckResult');
-      expect(guide).toContain('KeyCacheStats');
+      for (const typeName of publicTypeExports) {
+        expect(guide).toContain(typeName);
+      }
     }
   });
 

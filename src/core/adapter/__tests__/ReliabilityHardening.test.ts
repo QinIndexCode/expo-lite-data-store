@@ -1,15 +1,37 @@
+/// <reference path="../../../__tests__/test-globals.d.ts" />
+
 import { MetadataManager } from '../../meta/MetadataManager';
 import { FileSystemStorageAdapter } from '../FileSystemStorageAdapter';
 import { configManager } from '../../config/ConfigManager';
 import { SingleFileHandler } from '../../file/SingleFileHandler';
+import { DataWriter } from '../../data/DataWriter';
 import { getFileSystem } from '../../../utils/fileSystemCompat';
 import { getRootPathSync } from '../../../utils/ROOTPath';
+import logger from '../../../utils/logger';
+import type { StorageRecord } from '../../../types/storageTypes';
+
+type AdapterPrivateAccess = {
+  dataWriter: DataWriter;
+};
+
+const getAdapterPrivateAccess = (adapter: FileSystemStorageAdapter): AdapterPrivateAccess =>
+  adapter as unknown as AdapterPrivateAccess;
+
+const readMockFileText = (path: string): string => {
+  const entry = global.__expo_file_system_mock__.mockFileSystem[path];
+  if (typeof entry !== 'string') {
+    throw new Error(`Expected a file at ${path}`);
+  }
+  return entry;
+};
 
 describe('FileSystemStorageAdapter reliability hardening', () => {
   let adapter: FileSystemStorageAdapter;
   let metadataManager: MetadataManager;
 
   beforeEach(() => {
+    jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     configManager.resetConfig();
     metadataManager = new MetadataManager();
     adapter = new FileSystemStorageAdapter(metadataManager);
@@ -19,6 +41,7 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
     await adapter.cleanup();
     metadataManager.cleanup();
     configManager.resetConfig();
+    jest.restoreAllMocks();
   });
 
   it('rejects traversal and path-like table names at the storage boundary', async () => {
@@ -31,8 +54,8 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
     await adapter.createTable('corrupted_table', { initialData: [{ id: 1, value: 'original' }] });
 
     const filePath = '/mock/documents/lite-data-store/corrupted_table.ldb';
-    const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
-    const parsed = JSON.parse(fileSystem[filePath]);
+    const fileSystem = global.__expo_file_system_mock__.mockFileSystem;
+    const parsed = JSON.parse(readMockFileText(filePath));
     parsed.data[0].value = 'tampered';
     fileSystem[filePath] = JSON.stringify(parsed);
 
@@ -50,16 +73,18 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
     await adapter.overwrite('transaction_a', [{ id: 1, value: 'a-updated' }]);
     await adapter.overwrite('transaction_b', [{ id: 1, value: 'b-updated' }]);
 
-    const dataWriter = (adapter as any).dataWriter;
+    const dataWriter = getAdapterPrivateAccess(adapter).dataWriter;
     const originalWrite = dataWriter.write.bind(dataWriter);
     let writeCalls = 0;
-    const writeSpy = jest.spyOn(dataWriter, 'write').mockImplementation(async (...args: any[]) => {
-      writeCalls++;
-      if (writeCalls === 2) {
-        throw new Error('injected second-table commit failure');
-      }
-      return originalWrite(...args);
-    });
+    const writeSpy = jest
+      .spyOn(dataWriter, 'write')
+      .mockImplementation(async (...args: Parameters<DataWriter['write']>) => {
+        writeCalls++;
+        if (writeCalls === 2) {
+          throw new Error('injected second-table commit failure');
+        }
+        return originalWrite(...args);
+      });
 
     await expect(adapter.commit()).rejects.toMatchObject({ code: 'FILE_WRITE_FAILED' });
     writeSpy.mockRestore();
@@ -80,16 +105,18 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
     await adapter.overwrite('transaction_new_a', [{ id: 1, value: 'a' }]);
     await adapter.overwrite('transaction_new_b', [{ id: 1, value: 'b' }]);
 
-    const dataWriter = (adapter as any).dataWriter;
+    const dataWriter = getAdapterPrivateAccess(adapter).dataWriter;
     const originalWrite = dataWriter.write.bind(dataWriter);
     let writeCalls = 0;
-    const writeSpy = jest.spyOn(dataWriter, 'write').mockImplementation(async (...args: any[]) => {
-      writeCalls++;
-      if (writeCalls === 2) {
-        throw new Error('injected new-table commit failure');
-      }
-      return originalWrite(...args);
-    });
+    const writeSpy = jest
+      .spyOn(dataWriter, 'write')
+      .mockImplementation(async (...args: Parameters<DataWriter['write']>) => {
+        writeCalls++;
+        if (writeCalls === 2) {
+          throw new Error('injected new-table commit failure');
+        }
+        return originalWrite(...args);
+      });
 
     try {
       await expect(adapter.commit()).rejects.toMatchObject({ code: 'FILE_WRITE_FAILED' });
@@ -103,7 +130,7 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
 
   it('discards an uncommitted transaction without rewriting table files', async () => {
     await adapter.createTable('transaction_discard', { initialData: [{ id: 1, value: 'original' }] });
-    const dataWriter = (adapter as any).dataWriter;
+    const dataWriter = getAdapterPrivateAccess(adapter).dataWriter;
     const writeSpy = jest.spyOn(dataWriter, 'write');
 
     await adapter.beginTransaction();
@@ -186,11 +213,11 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
     });
     await adapter.write('metadata_flush_table', { id: 2, value: 'second' });
 
-    const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+    const fileSystem = global.__expo_file_system_mock__.mockFileSystem;
     const metaText = fileSystem['/mock/documents/lite-data-store/meta.ldb'];
     expect(metaText).toBeDefined();
 
-    const persistedMeta = JSON.parse(metaText);
+    const persistedMeta = JSON.parse(readMockFileText('/mock/documents/lite-data-store/meta.ldb'));
     expect(persistedMeta.tables.metadata_flush_table.count).toBe(2);
     await adapter.deleteTable('metadata_flush_table');
   });
@@ -236,9 +263,7 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
       requireAuthOnAccess: true,
     });
 
-    const persistedMeta = JSON.parse(
-      (global as any).__expo_file_system_mock__.mockFileSystem[`${getRootPathSync()}meta.ldb`]
-    );
+    const persistedMeta = JSON.parse(readMockFileText(`${getRootPathSync()}meta.ldb`));
     expect(persistedMeta.tables[tableName].requireAuthOnAccess).toBe(true);
     await adapter.deleteTable(tableName);
   });
@@ -246,9 +271,9 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
   it('serializes migration with a concurrent write to avoid losing the new record', async () => {
     const tableName = 'migration_write_lock_table';
     const initialData = [{ id: 'before', value: 'original' }];
-    let resolveSourceRead!: (data: Record<string, any>[]) => void;
+    let resolveSourceRead!: (data: StorageRecord[]) => void;
     let markSourceReadStarted!: () => void;
-    const sourceRead = new Promise<Record<string, any>[]>(resolve => {
+    const sourceRead = new Promise<StorageRecord[]>(resolve => {
       resolveSourceRead = resolve;
     });
     const sourceReadStarted = new Promise<void>(resolve => {

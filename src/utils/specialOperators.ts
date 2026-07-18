@@ -1,9 +1,4 @@
-/**
- * @module specialOperators
- * @description Query and update operator definitions and handlers
- * @since 2025-12-12
- * @version 3.0.0
- */
+import type { UpdatePayload } from '../types/storageTypes';
 
 /**
  * Query operator type definition
@@ -11,11 +6,14 @@
 export type QueryOperator = '$and' | '$or' | '$eq' | '$ne' | '$gt' | '$gte' | '$lt' | '$lte' | '$in' | '$nin' | '$like';
 
 /**
- * 更新操作符类型定义
+ * Update operator type definition.
  */
 export type UpdateOperator = '$inc' | '$set' | '$unset' | '$push' | '$pull' | '$addToSet';
 
 const UNSAFE_UPDATE_FIELD_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const assertSafeUpdateFieldName = (field: string): void => {
   if (UNSAFE_UPDATE_FIELD_NAMES.has(field)) {
@@ -24,7 +22,7 @@ const assertSafeUpdateFieldName = (field: string): void => {
 };
 
 const safeObjectEntries = (value: unknown): Array<[string, unknown]> => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return [];
   }
 
@@ -35,7 +33,7 @@ const safeObjectEntries = (value: unknown): Array<[string, unknown]> => {
 };
 
 /**
- * 所有特殊操作符的集合
+ * Supported query and update operators.
  */
 export const SPECIAL_OPERATORS = {
   // Query operators
@@ -52,7 +50,7 @@ export const SPECIAL_OPERATORS = {
     $nin: true,
     $like: true,
   },
-  // Update操作符
+  // Update operators
   UPDATE: {
     $inc: true,
     $set: true,
@@ -64,50 +62,35 @@ export const SPECIAL_OPERATORS = {
 };
 
 /**
- * 检查是否为查询操作符
+ * Returns whether a key is a query operator.
  */
 export function isQueryOperator(key: string): key is QueryOperator {
   return Object.prototype.hasOwnProperty.call(SPECIAL_OPERATORS.QUERY, key);
 }
 
 /**
- * 检查是否为更新操作符
+ * Returns whether a key is an update operator.
  */
 export function isUpdateOperator(key: string): key is UpdateOperator {
   return Object.prototype.hasOwnProperty.call(SPECIAL_OPERATORS.UPDATE, key);
 }
 
 /**
- * 检查是否为任何特殊操作符
+ * Returns whether a key is a supported special operator.
  */
 export function isSpecialOperator(key: string): boolean {
   return isQueryOperator(key) || isUpdateOperator(key);
 }
 
 /**
- * 更新数据类型定义
+ * Separates ordinary fields from update operators.
  */
-export type UpdateData =
-  | Record<string, any>
-  | {
-      $inc?: Record<string, number>;
-      $set?: Record<string, any>;
-      $unset?: string[];
-      $push?: Record<string, any>;
-      $pull?: Record<string, any>;
-      $addToSet?: Record<string, any>;
-      [key: string]: any;
-    };
-
-/**
- * 分离普通更新字段和特殊操作符
- */
-export function separateUpdateOperators(updateData: UpdateData): {
-  regularFields: Record<string, any>;
-  operators: Partial<Record<UpdateOperator, any>>;
+export function separateUpdateOperators(updateData: object): {
+  regularFields: Record<string, unknown>;
+  operators: Partial<Record<UpdateOperator, unknown>>;
 } {
-  const regularFields: Record<string, any> = Object.create(null);
-  const operators: Partial<Record<UpdateOperator, any>> = Object.create(null);
+  const regularFields: Record<string, unknown> = Object.create(null);
+  const operators: Partial<Record<UpdateOperator, unknown>> = Object.create(null);
 
   for (const [key, value] of Object.entries(updateData)) {
     if (isUpdateOperator(key)) {
@@ -122,17 +105,16 @@ export function separateUpdateOperators(updateData: UpdateData): {
 }
 
 /**
- * 处理更新操作符，返回更新后的数据
- * @param originalData 原始数据
- * @param updateData 更新数据，包含普通字段和/或特殊操作符
- * @returns 更新后的数据
+ * Applies ordinary fields and supported update operators without mutating the
+ * original record.
  */
-export function processUpdateOperators<T extends Record<string, any>>(originalData: T, updateData: UpdateData): T {
-  // Create一个新对象，避免直接修改原始数据
-  const result: Record<string, any> = { ...originalData };
+export function processUpdateOperators<T extends object>(originalData: T, updateData: UpdatePayload<T>): T {
+  const result: Record<string, unknown> = Object.create(null);
+  for (const [field, value] of Object.entries(originalData)) {
+    result[field] = value;
+  }
   const { regularFields, operators } = separateUpdateOperators(updateData);
 
-  // Process特殊操作符
   if (operators.$inc) {
     for (const [field, increment] of safeObjectEntries(operators.$inc)) {
       if (typeof increment === 'number') {
@@ -151,6 +133,9 @@ export function processUpdateOperators<T extends Record<string, any>>(originalDa
   if (operators.$unset) {
     if (Array.isArray(operators.$unset)) {
       for (const field of operators.$unset) {
+        if (typeof field !== 'string') {
+          continue;
+        }
         assertSafeUpdateFieldName(field);
         delete result[field];
       }
@@ -159,10 +144,12 @@ export function processUpdateOperators<T extends Record<string, any>>(originalDa
 
   if (operators.$push) {
     for (const [field, value] of safeObjectEntries(operators.$push)) {
-      if (!Array.isArray(result[field])) {
-        result[field] = [];
-      }
-      result[field].push(value);
+      const existing = result[field];
+      // The result starts as a shallow record copy, so clone mutable values
+      // before applying an operator that appends to them.
+      const values = Array.isArray(existing) ? [...existing] : [];
+      result[field] = values;
+      values.push(value);
     }
   }
 
@@ -170,17 +157,15 @@ export function processUpdateOperators<T extends Record<string, any>>(originalDa
     for (const [field, condition] of safeObjectEntries(operators.$pull)) {
       if (Array.isArray(result[field])) {
         result[field] = result[field].filter(item => {
-          // Simple value comparison
           if (typeof condition !== 'object' || condition === null) {
             return item !== condition;
           }
-          // Object condition comparison
-          for (const [key, val] of Object.entries(condition)) {
-            if (item[key] === val) {
-              return false;
-            }
+
+          if (!isRecord(item) || !isRecord(condition)) {
+            return item !== condition;
           }
-          return true;
+
+          return !Object.entries(condition).some(([key, value]) => item[key] === value);
         });
       }
     }
@@ -188,16 +173,15 @@ export function processUpdateOperators<T extends Record<string, any>>(originalDa
 
   if (operators.$addToSet) {
     for (const [field, value] of safeObjectEntries(operators.$addToSet)) {
-      if (!Array.isArray(result[field])) {
-        result[field] = [];
-      }
-      if (!result[field].includes(value)) {
-        result[field].push(value);
+      const existing = result[field];
+      const values = Array.isArray(existing) ? [...existing] : [];
+      result[field] = values;
+      if (!values.includes(value)) {
+        values.push(value);
       }
     }
   }
 
-  // Process普通字段更新
   for (const [field, value] of Object.entries(regularFields)) {
     result[field] = value;
   }

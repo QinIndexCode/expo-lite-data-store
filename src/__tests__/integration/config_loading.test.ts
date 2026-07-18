@@ -1,4 +1,19 @@
-// Mock expo-constants before any imports
+/// <reference path="../test-globals.d.ts" />
+
+import { CacheManager } from '../../core/cache/CacheManager';
+import { AutoSyncService } from '../../core/service/AutoSyncService';
+
+type AdapterRuntimeAccess = {
+  autoSyncService: AutoSyncService;
+  cacheManager: CacheManager;
+  dataWriter: {
+    chunkSize: number;
+    maxConcurrentOperations: number;
+  };
+};
+
+const getAdapterRuntimeAccess = (adapter: object): AdapterRuntimeAccess => adapter as unknown as AdapterRuntimeAccess;
+
 jest.mock('expo-constants', () => ({
   expoConfig: {
     extra: {
@@ -48,17 +63,16 @@ describe('ConfigManager Integration with Expo Constants', () => {
 
   afterEach(async () => {
     const { AutoSyncService } = await import('../../core/service/AutoSyncService');
-    AutoSyncService.cleanupInstance();
+    await AutoSyncService.cleanupInstance();
     ConfigManager.resetInstance();
-    delete (global as any).__expoConfig;
-    delete (global as any).expo;
-    delete (global as any).liteStoreConfig;
+    Reflect.deleteProperty(globalThis, '__expoConfig');
+    Reflect.deleteProperty(globalThis, 'expo');
+    Reflect.deleteProperty(globalThis, 'liteStoreConfig');
   });
 
-  it('should load configuration from expo-constants', () => {
+  it('loads configuration from Expo Constants', () => {
     const config = ConfigManager.getInstance().getConfig();
 
-    // Verify it picked up values from the mock
     expect(config.chunkSize).toBe(999999);
     expect(config.storageFolder).toBe('mock-folder');
     expect(config.performance.maxConcurrentOperations).toBe(11);
@@ -70,10 +84,8 @@ describe('ConfigManager Integration with Expo Constants', () => {
     });
   });
 
-  it('should prioritize global.__expoConfig if available', async () => {
-    // Inject global config
-    const originalExpoConfig = (global as any).__expoConfig;
-    (global as any).__expoConfig = {
+  it('prioritizes global Expo configuration', async () => {
+    global.__expoConfig = {
       extra: {
         liteStore: {
           chunkSize: 888888,
@@ -81,7 +93,6 @@ describe('ConfigManager Integration with Expo Constants', () => {
       },
     };
 
-    // Reset and reload to pick up global config
     jest.resetModules();
     const mod = await import('../../core/config/ConfigManager');
     const FreshConfigManager = mod.ConfigManager;
@@ -89,34 +100,26 @@ describe('ConfigManager Integration with Expo Constants', () => {
     const config = FreshConfigManager.getInstance().getConfig();
 
     expect(config.chunkSize).toBe(888888);
-
-    // Cleanup
-    if (originalExpoConfig) {
-      (global as any).__expoConfig = originalExpoConfig;
-    } else {
-      delete (global as any).__expoConfig;
-    }
   });
 
-  it('should propagate Expo config into adapter runtime consumers', async () => {
+  it('propagates Expo configuration to adapter runtime consumers', async () => {
     const { FileSystemStorageAdapter } = await import('../../core/adapter/FileSystemStorageAdapter');
 
     const adapter = new FileSystemStorageAdapter();
-    const dataWriter = (adapter as any).dataWriter;
-    const autoSyncService = (adapter as any).autoSyncService;
 
-    expect(dataWriter.chunkSize).toBe(999999);
-    expect(dataWriter.maxConcurrentOperations).toBe(11);
-    expect(autoSyncService.getConfig()).toMatchObject({
-      enabled: false,
-      interval: 12000,
-      minItems: 3,
-      batchSize: 55,
-    });
+    try {
+      const { autoSyncService, dataWriter } = getAdapterRuntimeAccess(adapter);
 
-    const cacheManager = (adapter as any).cacheManager;
-    if (cacheManager && typeof cacheManager.cleanup === 'function') {
-      cacheManager.cleanup();
+      expect(dataWriter.chunkSize).toBe(999999);
+      expect(dataWriter.maxConcurrentOperations).toBe(11);
+      expect(autoSyncService.getConfig()).toMatchObject({
+        enabled: false,
+        interval: 12000,
+        minItems: 3,
+        batchSize: 55,
+      });
+    } finally {
+      await adapter.cleanup();
     }
   });
 });

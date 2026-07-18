@@ -1,11 +1,4 @@
-/**
- * Expo Lite Data Store Main API Export File
- * Provides all public interfaces for database operations, including table management, data read/write, queries, transactions, etc.
- *
- * @module expo-lite-data-store
- * @since 2025-11-19
- * @version 3.0.0
- */
+/** Public Expo Lite Data Store API. */
 import { plainStorage, dbManager } from './core/db';
 import { configManager, ConfigManager } from './core/config/ConfigManager';
 import { performanceMonitor } from './core/monitor/PerformanceMonitor';
@@ -19,7 +12,21 @@ import {
   getKeyCacheStats,
   resetMasterKey,
 } from './utils/crypto';
-import type { CommonOptions, CreateTableOptions, ReadOptions, WriteOptions, WriteResult, TableOptions } from './types/storageTypes';
+import type {
+  BulkOperation,
+  CommonOptions,
+  CreateTableOptions,
+  FilterCondition,
+  FindOptions,
+  NonInfer,
+  ReadOptions,
+  StorageInput,
+  StorageRecord,
+  TableOptions,
+  UpdatePayload,
+  WriteOptions,
+  WriteResult,
+} from './types/storageTypes';
 import type { PerformanceStats, HealthCheckResult } from './core/monitor/PerformanceMonitor';
 import type { KeyCacheStats } from './utils/crypto';
 import { StorageError } from './types/storageErrorInfc';
@@ -35,6 +42,18 @@ const normalizeSecurity = (opts?: { encrypted?: boolean; requireAuthOnAccess?: b
 
 type TransactionSecurity = ReturnType<typeof normalizeSecurity>;
 type ResolvedStorageAdapter = ReturnType<typeof resolveStorageAdapter>;
+
+export type FindOneOptions<T extends object = StorageRecord> = CommonOptions & {
+  where: FilterCondition<NonInfer<T>>;
+};
+
+export type FindManyOptions<T extends object = StorageRecord> = FindOptions<NonInfer<T>> & {
+  where?: FilterCondition<NonInfer<T>>;
+};
+
+export type UpdateOptions<T extends object = StorageRecord> = CommonOptions & {
+  where: FilterCondition<NonInfer<T>>;
+};
 
 let activeTransactionSecurity: TransactionSecurity | null = null;
 const tablePolicyLocks = new Map<string, Promise<void>>();
@@ -111,27 +130,19 @@ const assertTableAccessPolicy = async (tableName: string, security: TransactionS
   const tableMeta = inspector.getTableMeta?.(tableName);
 
   if (tableMeta?.encrypted === true && !security.encrypted) {
-    throw new StorageError(
-      `Table '${tableName}' requires encrypted storage access`,
-      'PERMISSION_DENIED',
-      {
-        details: 'The table is encrypted and cannot be accessed through the plain storage facade.',
-        suggestion: 'Repeat the operation with encrypted: true.',
-        tableName,
-      }
-    );
+    throw new StorageError(`Table '${tableName}' requires encrypted storage access`, 'PERMISSION_DENIED', {
+      details: 'The table is encrypted and cannot be accessed through the plain storage facade.',
+      suggestion: 'Repeat the operation with encrypted: true.',
+      tableName,
+    });
   }
 
   if (tableMeta?.requireAuthOnAccess === true && !security.requireAuthOnAccess) {
-    throw new StorageError(
-      `Table '${tableName}' requires strict access authentication`,
-      'PERMISSION_DENIED',
-      {
-        details: 'The table is bound to the requireAuthOnAccess key scope.',
-        suggestion: 'Repeat the operation with encrypted: true and requireAuthOnAccess: true.',
-        tableName,
-      }
-    );
+    throw new StorageError(`Table '${tableName}' requires strict access authentication`, 'PERMISSION_DENIED', {
+      details: 'The table is bound to the requireAuthOnAccess key scope.',
+      suggestion: 'Repeat the operation with encrypted: true and requireAuthOnAccess: true.',
+      tableName,
+    });
   }
 };
 
@@ -145,7 +156,8 @@ const runTableOperation = async <T>(
   tableName: string,
   options: CommonOptions | undefined,
   operation: (resolved: ResolvedStorageAdapter) => Promise<T>
-): Promise<T> => withTablePolicyLock(tableName, async () => operation(await resolveTableStorageAdapter(tableName, options)));
+): Promise<T> =>
+  withTablePolicyLock(tableName, async () => operation(await resolveTableStorageAdapter(tableName, options)));
 
 const assertListAccessPolicy = (
   tableNames: string[],
@@ -156,7 +168,9 @@ const assertListAccessPolicy = (
     return;
   }
 
-  const hasStrictTable = tableNames.some(tableName => inspector.getTableMeta?.(tableName)?.requireAuthOnAccess === true);
+  const hasStrictTable = tableNames.some(
+    tableName => inspector.getTableMeta?.(tableName)?.requireAuthOnAccess === true
+  );
   if (hasStrictTable) {
     throw new StorageError('Listing tables requires strict access authentication', 'PERMISSION_DENIED', {
       details: 'At least one table is bound to the requireAuthOnAccess key scope.',
@@ -185,20 +199,9 @@ const clearTransactionSecurityIfSettled = (operationCompleted: boolean): void =>
   }
 };
 
-/**
- * Configuration management
- */
 export { configManager, ConfigManager };
-
-/**
- * Performance monitoring
- */
 export { performanceMonitor };
 export type { PerformanceStats, HealthCheckResult };
-
-/**
- * Encryption performance monitoring
- */
 export { getKeyCacheStats, getKeyCacheHitRate };
 export type { KeyCacheStats };
 export { CryptoService };
@@ -215,16 +218,13 @@ export const init = async (options: TableOptions = {}): Promise<void> => {
   await adapter.listTables?.(options);
 };
 
-/**
- * Create table
- * @param tableName Table name
- * @param options Create table options, including common options and table-specific options
- * @returns Promise<void>
- */
-export const createTable = async (tableName: string, options: CreateTableOptions = {}): Promise<void> => {
+export const createTable = async <T extends object = StorageRecord>(
+  tableName: string,
+  options: CreateTableOptions<NonInfer<T>> = {}
+): Promise<void> => {
   return runTableOperation(tableName, options, async ({ encrypted, requireAuthOnAccess, adapter }) => {
     const { encryptedFields = [], encryptFullTable = false, ...tableOptions } = options ?? {};
-    return adapter.createTable(tableName, {
+    return adapter.createTable<T>(tableName, {
       ...tableOptions,
       encrypted,
       requireAuthOnAccess,
@@ -234,31 +234,14 @@ export const createTable = async (tableName: string, options: CreateTableOptions
   });
 };
 
-/**
- * Delete table
- * @param tableName Table name
- * @param options Operation options, including common options
- * @returns Promise<void>
- */
 export const deleteTable = async (tableName: string, options: TableOptions = {}): Promise<void> => {
   return runTableOperation(tableName, options, ({ adapter }) => adapter.deleteTable(tableName, options));
 };
 
-/**
- * Check if table exists
- * @param tableName Table name
- * @param options Operation options, including common options
- * @returns Promise<boolean>
- */
 export const hasTable = async (tableName: string, options: TableOptions = {}): Promise<boolean> => {
   return runTableOperation(tableName, options, ({ adapter }) => adapter.hasTable(tableName, options));
 };
 
-/**
- * List all tables
- * @param options Operation options, including common options
- * @returns Promise<string[]>
- */
 export const listTables = async (options: TableOptions = {}): Promise<string[]> => {
   const resolved = await resolveListStorageAdapter(options);
   const tableNames = await resolved.adapter.listTables(options);
@@ -270,135 +253,52 @@ export const listTables = async (options: TableOptions = {}): Promise<string[]> 
   return tableNames;
 };
 
-/**
- * Insert data (always uses append mode)
- *
- * 功能定位：专门用于向表中追加新数据，不支持覆盖
- *
- * 使用场景：
- *   - 初始化数据导入
- *   - 日志记录
- *   - 事件追踪
- *   - 需要保证数据不被覆盖的场景
- *
- * 与write的区别：
- *   - insert：固定为追加模式，不支持覆盖
- *   - write：支持追加和覆盖两种模式
- *
- * @param tableName Table name
- * @param data Data to insert (single record or array of records)
- * @param options Write options, including common options
- * @returns Promise<WriteResult> Write result with written bytes, total bytes, and chunking info
- */
-export const insert = async (
+/** Appends records without replacing existing table contents. */
+export const insert = async <T extends object = StorageRecord>(
   tableName: string,
-  data: Record<string, any> | Record<string, any>[],
+  data: StorageInput<NonInfer<T>>,
   options: WriteOptions = {}
 ): Promise<WriteResult> => {
   return runTableOperation(tableName, options, async ({ adapter }) => {
-    const { ...finalWriteOptions } = options ?? {};
-    return adapter.insert(tableName, data, finalWriteOptions);
+    return adapter.insert<T>(tableName, data, options);
   });
 };
 
-/**
- * Overwrite data (always uses overwrite mode)
- *
- * 功能定位：专门用于覆盖表中的数据
- *
- * 使用场景：
- *   - 完全替换表数据
- *   - 数据同步
- *   - 缓存刷新
- *   - 批量数据更新
- *   - 初始化表数据
- *
- * 与insert的区别：
- *   - insert：追加模式，保留现有数据
- *   - overwrite：覆盖模式，替换所有数据
- *
- * @param tableName Table name
- * @param data Data to overwrite (single record or array of records)
- * @param options Write options, excluding mode (always uses overwrite mode), and common options
- * @returns Promise<WriteResult> Write result with written bytes, total bytes, and chunking info
- */
-export const overwrite = async (
+/** Replaces all records in a table. */
+export const overwrite = async <T extends object = StorageRecord>(
   tableName: string,
-  data: Record<string, any> | Record<string, any>[],
+  data: StorageInput<NonInfer<T>>,
   options: Omit<WriteOptions, 'mode'> = {}
 ): Promise<WriteResult> => {
   return runTableOperation(tableName, options, async ({ adapter }) => {
-    const { ...finalWriteOptions } = options ?? {};
-    return adapter.overwrite(tableName, data, finalWriteOptions);
+    return adapter.overwrite<T>(tableName, data, options);
   });
 };
 
-/**
- * Read all data from table
- *
- * 功能定位：直接从表中读取所有数据，不处理查询条件、排序和分页
- *
- * 使用场景：
- *   - 需要获取表中所有数据的场景
- *   - 简单的数据读取操作
- *   - 作为底层API被其他查询方法调用
- *   - 对性能要求较高的场景
- *
- * 与findMany的区别：
- *   - read：直接调用底层存储读取数据，性能更高，不支持查询条件、排序和分页
- *   - findMany：先读取所有数据，然后在内存中处理查询条件、排序和分页，功能更全面但性能相对较低
- *
- * @param tableName Table name
- * @param options Read options, including common options
- * @returns Promise<Record<string, any>[]> Array of records
- */
-export const read = async (tableName: string, options: ReadOptions = {}): Promise<Record<string, any>[]> => {
+/** Reads all records and ignores query-specific options. */
+export const read = async <T extends object = StorageRecord>(
+  tableName: string,
+  options: ReadOptions<NonInfer<T>> = {}
+): Promise<T[]> => {
   return runTableOperation(tableName, options, async ({ adapter }) => {
-    const { ...readOptions } = options ?? {};
-    delete readOptions.filter;
-    delete readOptions.skip;
-    delete readOptions.limit;
-    delete readOptions.sortBy;
-    delete readOptions.order;
-    delete readOptions.sortAlgorithm;
-    return adapter.read(tableName, readOptions);
+    const {
+      filter: _filter,
+      skip: _skip,
+      limit: _limit,
+      sortBy: _sortBy,
+      order: _order,
+      sortAlgorithm: _sortAlgorithm,
+      ...readOptions
+    } = options;
+    return adapter.read<T>(tableName, readOptions);
   });
 };
 
-/**
- * Count table data rows
- * @param tableName Table name
- * @param options Operation options, including common options
- * @returns Promise<number>
- */
 export const countTable = async (tableName: string, options: TableOptions = {}): Promise<number> => {
   return runTableOperation(tableName, options, ({ adapter }) => adapter.count(tableName));
 };
 
-/**
- * Verify table count accuracy
- *
- * 功能定位：数据一致性诊断工具
- *
- * 使用场景：
- *   - 数据一致性诊断：验证元数据与实际数据是否一致
- *   - 故障排查：诊断数据不一致问题
- *   - 数据修复：自动修复元数据中的计数错误
- *   - 元数据同步：定期检查和维护数据一致性
- *
- * 与countTable的区别：
- *   - countTable：获取当前记录数（快速，直接从元数据读取）
- *   - verifyCountTable：验证并修复数据一致性（较慢，需要扫描实际数据）
- *
- * 最佳实践：
- *   - 仅在诊断数据问题时使用
- *   - 定期维护任务中使用（如每天检查一次）
- *   - 不在常规业务流程中使用，以避免性能开销
- *
- * @param tableName Table name
- * @param options Operation options, including common options
- * @returns Promise<{ metadata: number; actual: number; match: boolean }> Comparison result with metadata count, actual count, and match status
- */
+/** Reconciles metadata count with stored records and returns both values. */
 export const verifyCountTable = async (
   tableName: string,
   options: TableOptions = {}
@@ -406,78 +306,25 @@ export const verifyCountTable = async (
   return runTableOperation(tableName, options, ({ adapter }) => adapter.verifyCount(tableName));
 };
 
-/**
- * Find a single record that matches the specified criteria.
- *
- * @param tableName Table name to search in
- * @param options Query options including filter criteria and security settings
- * @param options.where Filter condition to match records against
- * @param options.encrypted Whether to use encrypted storage (defaults to false)
- * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
- * @returns Promise<Record<string, any> | null> Found record or null if no match
- *
- * @example
- * ```typescript
- * const user = await findOne('users', {
- *   where: { id: '123' },
- *   encrypted: true
- * });
- * ```
- */
-export const findOne = async (
+/** Returns the first record matching the supplied filter. */
+export const findOne = async <T extends object = StorageRecord>(
   tableName: string,
-  options: { where: Record<string, any>; encrypted?: boolean; requireAuthOnAccess?: boolean }
-): Promise<Record<string, any> | null> => {
+  options: FindOneOptions<T>
+): Promise<T | null> => {
   return runTableOperation(tableName, options, async ({ adapter }) => {
-    const { where } = options ?? {};
-    return adapter.findOne(tableName, where, options);
+    return adapter.findOne<T>(tableName, options.where, options);
   });
 };
 
-/**
- * Find multiple records that match the specified criteria.
- *
- * @param tableName Table name to search in
- * @param options Query options including filter criteria, pagination, sorting, and security settings
- * @param options.where Filter condition to match records against (defaults to {})
- * @param options.skip Number of records to skip for pagination (defaults to 0)
- * @param options.limit Maximum number of records to return (defaults to unlimited)
- * @param options.sortBy Field or fields to sort by
- * @param options.order Sort order (asc/desc) for each sort field
- * @param options.sortAlgorithm Custom sort algorithm to use
- * @param options.encrypted Whether to use encrypted storage (defaults to false)
- * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
- * @returns Promise<Record<string, any>[]> Array of matching records
- *
- * @example
- * ```typescript
- * const users = await findMany('users', {
- *   where: { age: { $gt: 18 } },
- *   skip: 10,
- *   limit: 20,
- *   sortBy: 'createdAt',
- *   order: 'desc',
- *   encrypted: true
- * });
- * ```
- */
-export const findMany = async (
+/** Returns records matching an optional filter, with sorting and pagination. */
+export const findMany = async <T extends object = StorageRecord>(
   tableName: string,
-  options?: {
-    where?: Record<string, any>;
-    skip?: number;
-    limit?: number;
-    sortBy?: string | string[];
-    order?: 'asc' | 'desc' | Array<'asc' | 'desc'>;
-    sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
-    encrypted?: boolean;
-    requireAuthOnAccess?: boolean;
-  }
-): Promise<Record<string, any>[]> => {
+  options?: FindManyOptions<T>
+): Promise<T[]> => {
   return runTableOperation(tableName, options, async ({ adapter }) => {
     const { where = {}, skip, limit, sortBy, order, sortAlgorithm } = options ?? {};
 
-    // Extract query-specific options, exclude common options
+    // Adapters receive query controls separately from security options.
     const finalFindOptions = {
       skip,
       limit,
@@ -486,86 +333,29 @@ export const findMany = async (
       sortAlgorithm,
     };
 
-    return adapter.findMany(tableName, where, finalFindOptions, options);
+    return adapter.findMany<T>(tableName, where, finalFindOptions, options);
   });
 };
 
-/**
- * Delete records that match the specified criteria.
- *
- * @param tableName Table name to delete records from
- * @param options Delete options including filter criteria and security settings
- * @param options.where Filter condition to match records for deletion
- * @param options.encrypted Whether to use encrypted storage (defaults to false)
- * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
- * @returns Promise<number> Number of records deleted
- *
- * @example
- * ```typescript
- * const deletedCount = await remove('users', {
- *   where: { id: '123' },
- *   encrypted: true
- * });
- * ```
- */
-export const remove = async (
+/** Deletes every record matching the supplied filter. */
+export const remove = async <T extends object = StorageRecord>(
   tableName: string,
-  options: { where: Record<string, any>; encrypted?: boolean; requireAuthOnAccess?: boolean }
+  options: FindOneOptions<T>
 ): Promise<number> => {
   return runTableOperation(tableName, options, async ({ adapter }) => {
-    const { where } = options ?? {};
-    return adapter.delete(tableName, where, options);
+    return adapter.delete<T>(tableName, options.where, options);
   });
 };
 
-/**
- * Bulk operations
- *
- * 功能定位：批量执行多个操作（插入、更新、删除）
- *
- * 使用场景：
- *   - 批量数据导入
- *   - 批量数据更新
- *   - 批量数据删除
- *   - 复杂的数据处理流程
- *
- * 操作类型说明：
- *   - insert: 插入数据，只需要data参数
- *   - update: 更新数据，需要data和where参数
- *   - delete: 删除数据，只需要where参数
- *
- * @param tableName Table name
- * @param operations Array of operations, using union types for type safety
- * @param options Operation options, including common options
- * @returns Promise<WriteResult> Write result with written bytes, total bytes, and chunking info
- */
-export const bulkWrite = async (
+/** Applies typed insert, update, and delete operations as one write. */
+export const bulkWrite = async <T extends object = StorageRecord>(
   tableName: string,
-  operations: Array<
-    | {
-        type: 'insert';
-        data: Record<string, any> | Record<string, any>[];
-      }
-    | {
-        type: 'update';
-        data: Record<string, any>;
-        where: Record<string, any>;
-      }
-    | {
-        type: 'delete';
-        where: Record<string, any>;
-      }
-  >,
+  operations: BulkOperation<NonInfer<T>>[],
   options: TableOptions = {}
 ): Promise<WriteResult> => {
-  return runTableOperation(tableName, options, ({ adapter }) => adapter.bulkWrite(tableName, operations));
+  return runTableOperation(tableName, options, ({ adapter }) => adapter.bulkWrite<T>(tableName, operations, options));
 };
 
-/**
- * Begin transaction
- * @param options Operation options, including common options
- * @returns Promise<void>
- */
 export const beginTransaction = async (options: TableOptions = {}): Promise<void> => {
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
@@ -573,11 +363,6 @@ export const beginTransaction = async (options: TableOptions = {}): Promise<void
   activeTransactionSecurity = { encrypted, requireAuthOnAccess };
 };
 
-/**
- * Commit transaction
- * @param options Operation options, including common options
- * @returns Promise<void>
- */
 export const commit = async (options: TableOptions = {}): Promise<void> => {
   const { adapter } = resolveStorageAdapter(options);
   let operationCompleted = false;
@@ -590,11 +375,6 @@ export const commit = async (options: TableOptions = {}): Promise<void> => {
   }
 };
 
-/**
- * Rollback transaction
- * @param options Operation options, including common options
- * @returns Promise<void>
- */
 export const rollback = async (options: TableOptions = {}): Promise<void> => {
   const { adapter } = resolveStorageAdapter(options);
   let operationCompleted = false;
@@ -607,66 +387,21 @@ export const rollback = async (options: TableOptions = {}): Promise<void> => {
   }
 };
 
-/**
- * Migrate table to chunked mode
- * @param tableName Table name
- * @param options Operation options, including common options
- * @returns Promise<void>
- */
 export const migrateToChunked = async (tableName: string, options: TableOptions = {}): Promise<void> => {
   return runTableOperation(tableName, options, ({ adapter }) => adapter.migrateToChunked(tableName));
 };
 
-/**
- * Update records that match the specified criteria.
- *
- * @param tableName Table name to update records in
- * @param data Update data to apply to matching records
- * @param options Update options including filter criteria and security settings
- * @param options.where Filter condition to match records for updating
- * @param options.encrypted Whether to use encrypted storage (defaults to false)
- * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
- * @returns Promise<number> Number of records updated
- *
- * @example
- * ```typescript
- * const updatedCount = await update('users', {
- *   name: 'Updated Name',
- *   email: 'updated@example.com'
- * }, {
- *   where: { id: '123' },
- *   encrypted: true
- * });
- * ```
- */
-export const update = async (
+/** Updates every record matching the supplied filter. */
+export const update = async <T extends object = StorageRecord>(
   tableName: string,
-  data: Record<string, any>,
-  options: { where: Record<string, any>; encrypted?: boolean; requireAuthOnAccess?: boolean }
+  data: UpdatePayload<NonInfer<T>>,
+  options: UpdateOptions<T>
 ): Promise<number> => {
   return runTableOperation(tableName, options, async ({ adapter }) => {
-    const { where } = options ?? {};
-    return adapter.update(tableName, data, where, options);
+    return adapter.update<T>(tableName, data, options.where, options);
   });
 };
 
-/**
- * Clear all data from the specified table.
- *
- * @param tableName Table name to clear
- * @param options Clear options including security settings
- * @param options.encrypted Whether to use encrypted storage (defaults to false)
- * @param options.requireAuthOnAccess Whether biometric authentication is required for access (defaults to false)
- * @returns Promise<void>
- *
- * @example
- * ```typescript
- * await clearTable('users', {
- *   encrypted: true,
- *   requireAuthOnAccess: true
- * });
- * ```
- */
 export const clearTable = async (tableName: string, options: TableOptions = {}): Promise<void> => {
   return runTableOperation(tableName, options, ({ adapter }) => adapter.clearTable(tableName));
 };
@@ -694,7 +429,6 @@ export const db = {
   update,
 } as const;
 
-// Export types
 export type {
   CreateTableOptions,
   ReadOptions,
@@ -704,6 +438,10 @@ export type {
   TableOptions,
   FindOptions,
   FilterCondition,
+  BulkOperation,
+  StorageInput,
+  StorageRecord,
+  UpdatePayload,
 } from './types/storageTypes';
 
 export { StorageError } from './types/storageErrorInfc';

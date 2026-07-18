@@ -1,10 +1,3 @@
-/**
- * @module cryptoProvider
- * @description Cryptographic primitives provider with Expo Go compatibility
- * @since 2025-11-17
- * @version 3.0.0
- */
-
 import { bytesToHex, hexToBytes } from './byteEncoding';
 import { hashBytesSync, hashHexSync, hkdfBytesSync, hmacBytesSync, pbkdf2BytesSync } from './cryptoPrimitives';
 import { loadOptionalExpoModule } from './expoModuleLoader';
@@ -96,7 +89,8 @@ const normalizeNativeCryptoModule = (moduleValue: unknown): NativeCryptoModule |
 
 const hasNativeCryptoPrimitives = (
   moduleValue: NativeCryptoModule | undefined
-): moduleValue is NativeCryptoModule & Required<Pick<NativeCryptoModule, 'pbkdf2Sync' | 'randomBytes' | 'createHash'>> =>
+): moduleValue is NativeCryptoModule &
+  Required<Pick<NativeCryptoModule, 'pbkdf2Sync' | 'randomBytes' | 'createHash'>> =>
   !!moduleValue &&
   typeof moduleValue.pbkdf2Sync === 'function' &&
   typeof moduleValue.randomBytes === 'function' &&
@@ -185,7 +179,9 @@ const tryLoadNative = () => {
     nativeEnabled = false;
     return false;
   }
-  const reqFn = (typeof getGlobalScope()?.require === 'function' ? getGlobalScope()?.require : require) as GlobalRequire;
+  const reqFn = (
+    typeof getGlobalScope()?.require === 'function' ? getGlobalScope()?.require : require
+  ) as GlobalRequire;
   try {
     const moduleName = ['react-native-quick-crypto'].join('');
     const qcrypto = reqFn(moduleName);

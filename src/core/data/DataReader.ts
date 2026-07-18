@@ -1,13 +1,12 @@
-/**
- * @module DataReader
- * @description Data reader handling file system read and data processing
- * @since 2025-11-28
- * @version 3.0.0
- */
-
 import { configManager } from '../config/ConfigManager';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
-import type { ReadOptions } from '../../types/storageTypes';
+import {
+  isStorageRecord,
+  type FilterCondition,
+  type FindOptions,
+  type ReadOptions,
+  type StorageRecord,
+} from '../../types/storageTypes';
 import { ErrorHandler as StorageErrorHandler } from '../../utils/StorageErrorHandler';
 import { getFileSystem } from '../../utils/fileSystemCompat';
 import { getRootPathSync } from '../../utils/ROOTPath';
@@ -153,7 +152,7 @@ export class DataReader {
     });
   }
 
-  private generateCacheKey(options?: ReadOptions & { bypassCache?: boolean }): string | undefined {
+  private generateCacheKey(options?: ReadOptions<StorageRecord> & { bypassCache?: boolean }): string | undefined {
     if (!options) {
       return '{}';
     }
@@ -186,11 +185,18 @@ export class DataReader {
    * Records originate from JSON-backed storage, so a JSON clone preserves the
    * public data contract while keeping cache-owned state private.
    */
-  private cloneRecords(records: Record<string, any>[]): Record<string, any>[] {
-    return JSON.parse(JSON.stringify(records)) as Record<string, any>[];
+  private cloneRecords(records: StorageRecord[]): StorageRecord[] {
+    const cloned: unknown = JSON.parse(JSON.stringify(records));
+    if (!Array.isArray(cloned) || !cloned.every(isStorageRecord)) {
+      throw StorageErrorHandler.createGeneralError('Stored records could not be cloned safely', 'FILE_CONTENT_INVALID');
+    }
+    return cloned;
   }
 
-  async read(tableName: string, options?: ReadOptions & { bypassCache?: boolean }): Promise<Record<string, any>[]> {
+  async read(
+    tableName: string,
+    options?: ReadOptions<StorageRecord> & { bypassCache?: boolean }
+  ): Promise<StorageRecord[]> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
         const tableMeta = this.metadataManager.get(tableName) ?? (await this.recoverMissingTableMetadata(tableName));
@@ -203,27 +209,26 @@ export class DataReader {
         const serializedOptions = shouldBypassCache ? undefined : this.generateCacheKey(options);
         const cacheKey = serializedOptions === undefined ? undefined : `${tableName}_${serializedOptions}`;
 
-        let data: Record<string, any>[] = [];
+        let data: StorageRecord[] = [];
         let indexedIdSet: Set<string | number> | undefined;
 
         if (cacheKey !== undefined) {
-          const cachedData = this.cacheManager.get(cacheKey);
+          const cachedData = this.cacheManager.get<StorageRecord[]>(cacheKey);
           if (cachedData) {
-            return this.cloneRecords(cachedData as Record<string, any>[]);
+            return this.cloneRecords(cachedData);
           }
         }
 
         if (options?.filter) {
-          if (
-            typeof options.filter === 'object' &&
-            options.filter !== null &&
-            !('$or' in options.filter) &&
-            !('$and' in options.filter)
-          ) {
-            const filterKeys = Object.keys(options.filter);
+          if (isStorageRecord(options.filter) && !('$or' in options.filter) && !('$and' in options.filter)) {
+            const filterRecord = options.filter as StorageRecord;
+            const filterKeys = Object.keys(filterRecord);
             for (const key of filterKeys) {
               if (this.indexManager.hasIndex(tableName, key)) {
-                const value = (options.filter as Record<string, any>)[key];
+                const value = filterRecord[key];
+                if (typeof value !== 'string' && typeof value !== 'number') {
+                  continue;
+                }
                 const indexedIds = this.indexManager.queryIndex(tableName, key, value);
                 if (indexedIds.length > 0) {
                   indexedIdSet = new Set<string | number>(indexedIds);
@@ -243,7 +248,10 @@ export class DataReader {
         }
 
         if (indexedIdSet) {
-          data = data.filter(item => indexedIdSet.has(item['id']));
+          data = data.filter(item => {
+            const id = item['id'];
+            return (typeof id === 'string' || typeof id === 'number') && indexedIdSet.has(id);
+          });
         }
 
         if (options?.filter) {
@@ -261,7 +269,7 @@ export class DataReader {
           this.cacheManager.set(cacheKey, this.cloneRecords(data));
 
           const tableCacheKeysKey = `${tableName}_cache_keys`;
-          const tableCacheKeys = (this.cacheManager.get(tableCacheKeysKey) as string[]) || [];
+          const tableCacheKeys = this.cacheManager.get<string[]>(tableCacheKeysKey) ?? [];
           if (!tableCacheKeys.includes(cacheKey)) {
             tableCacheKeys.push(cacheKey);
             this.cacheManager.set(tableCacheKeysKey, tableCacheKeys);
@@ -274,7 +282,7 @@ export class DataReader {
     );
   }
 
-  async findOne(tableName: string, filter: Record<string, any>): Promise<Record<string, any> | null> {
+  async findOne(tableName: string, filter: FilterCondition<StorageRecord>): Promise<StorageRecord | null> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
         const results = await this.read(tableName, { filter, limit: 1 });
@@ -286,15 +294,9 @@ export class DataReader {
 
   async findMany(
     tableName: string,
-    filter?: Record<string, any>,
-    options?: {
-      skip?: number;
-      limit?: number;
-      sortBy?: string | string[];
-      order?: 'asc' | 'desc' | ('asc' | 'desc')[];
-      sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
-    }
-  ): Promise<Record<string, any>[]> {
+    filter?: FilterCondition<StorageRecord>,
+    options?: FindOptions<StorageRecord>
+  ): Promise<StorageRecord[]> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
         return await this.read(tableName, { filter, ...options });

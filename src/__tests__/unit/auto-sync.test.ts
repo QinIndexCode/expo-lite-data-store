@@ -1,123 +1,211 @@
-// src/__tests__/unit/auto-sync.test.ts
 import { FileSystemStorageAdapter } from '../../core/adapter/FileSystemStorageAdapter';
-import { AutoSyncService } from '../../core/service/AutoSyncService';
+import { CacheManager } from '../../core/cache/CacheManager';
+import {
+  AUTO_SYNC_EVENTS,
+  AutoSyncService,
+  type AutoSyncEvent,
+  type AutoSyncEventData,
+} from '../../core/service/AutoSyncService';
+import logger from '../../utils/logger';
 
-describe('AutoSyncService Tests', () => {
+type AdapterTestAccess = {
+  autoSyncService: AutoSyncService;
+  cacheManager: CacheManager;
+};
+
+type AutoSyncPrivateAccess = {
+  emit: (event: AutoSyncEvent, data: Omit<AutoSyncEventData, 'event'>) => void;
+};
+
+type AutoSyncRecord = {
+  id: number;
+  name: string;
+  value: string;
+};
+
+const getAdapterTestAccess = (adapter: FileSystemStorageAdapter): AdapterTestAccess =>
+  adapter as unknown as AdapterTestAccess;
+const getAutoSyncPrivateAccess = (service: AutoSyncService): AutoSyncPrivateAccess =>
+  service as unknown as AutoSyncPrivateAccess;
+
+describe('AutoSyncService', () => {
   let storageAdapter: FileSystemStorageAdapter;
   let autoSyncService: AutoSyncService;
 
-  beforeEach(async () => {
-    // 创建新的存储适配器实例
+  beforeEach(() => {
     storageAdapter = new FileSystemStorageAdapter();
-    // 获取自动同步服务实例
-    autoSyncService = (storageAdapter as any).autoSyncService;
+    autoSyncService = getAdapterTestAccess(storageAdapter).autoSyncService;
   });
 
   afterEach(async () => {
-    // 清理测试数据
-    try {
+    if (await storageAdapter.hasTable('test_auto_sync')) {
       await storageAdapter.deleteTable('test_auto_sync');
-    } catch (error) {
-      // 忽略表不存在的错误
     }
-    // 清理自动同步服务
+    await storageAdapter.cleanup();
     await AutoSyncService.cleanupInstance();
-    // 清理缓存管理器，停止定时器
-    const cacheManager = (storageAdapter as any).cacheManager;
-    if (cacheManager && typeof cacheManager.cleanup === 'function') {
-      cacheManager.cleanup();
-    }
   });
 
-  it('should keep auto-sync disabled by default', async () => {
-    // 自动同步默认关闭，避免库初始化时启动后台定时器
+  it('keeps auto-sync disabled by default', () => {
     const config = autoSyncService.getConfig();
     expect(config.enabled).toBe(false);
   });
 
-  it('should detect dirty data and sync when minItems is reached', async () => {
-    // 创建测试表
+  it('removes a throwing once listener before a subsequent event', () => {
+    const listener = jest.fn(() => {
+      throw new Error('listener failed');
+    });
+    const loggerErrorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const service = getAutoSyncPrivateAccess(autoSyncService);
+
+    try {
+      autoSyncService.once(AUTO_SYNC_EVENTS.SYNC_START, listener);
+
+      service.emit(AUTO_SYNC_EVENTS.SYNC_START, { itemsCount: 1 });
+      service.emit(AUTO_SYNC_EVENTS.SYNC_START, { itemsCount: 1 });
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      loggerErrorSpy.mockRestore();
+    }
+  });
+
+  it('syncs dirty data when the minimum item count is reached', async () => {
     await storageAdapter.createTable('test_auto_sync', { mode: 'single' });
-    
-    // 写入初始数据
+
     await storageAdapter.write('test_auto_sync', { id: 1, name: 'Test Item 1', value: 'Initial value' });
-    
-    // 直接操作缓存，将数据标记为脏
-    const cacheManager = (storageAdapter as any).cacheManager;
-    
-    // 先将minItems设置为1，确保单个脏数据就能触发同步
+
+    const cacheManager = getAdapterTestAccess(storageAdapter).cacheManager;
+
     await autoSyncService.updateConfig({ minItems: 1 });
-    
-    // 手动更新缓存并标记为脏（注意参数顺序：key, data, expiry, dirty）
+
+    // The fourth argument marks the cache entry dirty.
     cacheManager.set('test_auto_sync_1', { id: 1, name: 'Test Item 1', value: 'Updated value 1' }, undefined, true);
-    
-    // 检查脏数据
+
     const dirtyData = cacheManager.getDirtyData();
     expect(dirtyData.size).toBe(1);
-    
-    // 手动触发同步
+
     await autoSyncService.sync();
-    
-    // 检查同步后的数据
+
     const syncedData = await storageAdapter.findMany('test_auto_sync');
     expect(syncedData).toHaveLength(1);
     expect(syncedData[0].value).toBe('Updated value 1');
-    
-    // 再次检查脏数据，应该已经清空
+
     const dirtyDataAfterSync = cacheManager.getDirtyData();
     expect(dirtyDataAfterSync.size).toBe(0);
   });
 
-  it('should skip sync when dirty item count is below minItems', async () => {
-    // 更新配置，将minItems设为2
+  it('limits each table to batchSize dirty entries and drains the deferred entry below minItems', async () => {
+    await storageAdapter.createTable('test_auto_sync', {
+      mode: 'single',
+      initialData: [
+        { id: 1, name: 'first', value: 'persisted-first' },
+        { id: 3, name: 'unchanged', value: 'persisted-unchanged' },
+      ],
+    });
+    await autoSyncService.updateConfig({ minItems: 2, batchSize: 1 });
+
+    const cacheManager = getAdapterTestAccess(storageAdapter).cacheManager;
+    cacheManager.set('test_auto_sync_first', { id: 1, name: 'first', value: 'dirty-first' }, undefined, true);
+    cacheManager.set('test_auto_sync_second', { id: 2, name: 'second', value: 'dirty-second' }, undefined, true);
+
+    await autoSyncService.sync();
+
+    await expect(storageAdapter.read<AutoSyncRecord>('test_auto_sync', { bypassCache: true })).resolves.toEqual([
+      { id: 1, name: 'first', value: 'dirty-first' },
+      { id: 3, name: 'unchanged', value: 'persisted-unchanged' },
+    ]);
+    expect(Array.from(cacheManager.getDirtyData().keys())).toEqual(['test_auto_sync_second']);
+
+    await autoSyncService.sync();
+
+    await expect(storageAdapter.read<AutoSyncRecord>('test_auto_sync', { bypassCache: true })).resolves.toEqual([
+      { id: 1, name: 'first', value: 'dirty-first' },
+      { id: 3, name: 'unchanged', value: 'persisted-unchanged' },
+      { id: 2, name: 'second', value: 'dirty-second' },
+    ]);
+    expect(cacheManager.getDirtyData().size).toBe(0);
+  });
+
+  it('writes a dirty full-table snapshot without identifiers as a replacement', async () => {
+    await storageAdapter.createTable('test_auto_sync', {
+      mode: 'single',
+      initialData: [
+        { name: 'persisted-first', value: 'old-first' },
+        { name: 'persisted-second', value: 'old-second' },
+      ],
+    });
+    await autoSyncService.updateConfig({ minItems: 1 });
+
+    const cacheManager = getAdapterTestAccess(storageAdapter).cacheManager;
+    const snapshot = [
+      { name: 'snapshot-first', value: 'new-first' },
+      { name: 'snapshot-second', value: 'new-second' },
+    ];
+    cacheManager.set('test_auto_sync_{}', snapshot, undefined, true);
+
+    await autoSyncService.sync();
+
+    await expect(storageAdapter.read('test_auto_sync', { bypassCache: true })).resolves.toEqual(snapshot);
+    expect(cacheManager.getDirtyData().size).toBe(0);
+  });
+
+  it('allows an empty dirty full-table snapshot to clear a table', async () => {
+    await storageAdapter.createTable('test_auto_sync', {
+      mode: 'single',
+      initialData: [{ name: 'persisted', value: 'old' }],
+    });
+    await autoSyncService.updateConfig({ minItems: 1 });
+
+    const cacheManager = getAdapterTestAccess(storageAdapter).cacheManager;
+    cacheManager.set('test_auto_sync_{}', [], undefined, true);
+
+    await autoSyncService.sync();
+
+    await expect(storageAdapter.read('test_auto_sync', { bypassCache: true })).resolves.toEqual([]);
+    expect(cacheManager.getDirtyData().size).toBe(0);
+  });
+
+  it('keeps dirty data when the item count is below the sync threshold', async () => {
     await autoSyncService.updateConfig({ minItems: 2 });
-    
-    // 创建测试表
+
     await storageAdapter.createTable('test_auto_sync', { mode: 'single' });
-    
-    // 写入初始数据
+
     await storageAdapter.write('test_auto_sync', { id: 1, name: 'Test Item 1', value: 'Initial value' });
-    
-    // 直接操作缓存，将数据标记为脏
-    const cacheManager = (storageAdapter as any).cacheManager;
-    
-    // 手动更新缓存并标记为脏（注意参数顺序：key, data, expiry, dirty）
+
+    const cacheManager = getAdapterTestAccess(storageAdapter).cacheManager;
+
+    // The fourth argument marks the cache entry dirty.
     cacheManager.set('test_auto_sync_1', { id: 1, name: 'Test Item 1', value: 'Updated value 1' }, undefined, true);
-    
-    // 检查脏数据
+
     const dirtyData = cacheManager.getDirtyData();
     expect(dirtyData.size).toBe(1);
-    
-    // 手动触发同步，应该被跳过
+
     await autoSyncService.sync();
-    
-    // 检查脏数据，应该仍然存在（因为同步被跳过）
+
     const dirtyDataAfterSync = cacheManager.getDirtyData();
     expect(dirtyDataAfterSync.size).toBe(1);
-    
-    // 恢复默认配置
+
     await autoSyncService.updateConfig({ minItems: 1 });
   });
 
-  it('should correctly update config when updateConfig is called', async () => {
-    // 更新配置
-    await autoSyncService.updateConfig({ 
-      interval: 10000, 
-      minItems: 5, 
-      batchSize: 200 
-    });
-    
-    // 检查配置是否已更新
-    const config = autoSyncService.getConfig();
-    expect(config.interval).toBe(10000);
-    expect(config.minItems).toBe(5);
-    expect(config.batchSize).toBe(200);
-    
-    // 恢复默认配置
-    await autoSyncService.updateConfig({ 
-      interval: 30000, 
-      minItems: 1, 
-      batchSize: 100 
-    });
+  it('updates its configuration', async () => {
+    try {
+      await autoSyncService.updateConfig({
+        interval: 10000,
+        minItems: 5,
+        batchSize: 200,
+      });
+
+      const config = autoSyncService.getConfig();
+      expect(config.interval).toBe(10000);
+      expect(config.minItems).toBe(5);
+      expect(config.batchSize).toBe(200);
+    } finally {
+      await autoSyncService.updateConfig({
+        interval: 30000,
+        minItems: 1,
+        batchSize: 100,
+      });
+    }
   });
 });

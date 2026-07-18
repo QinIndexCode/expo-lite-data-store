@@ -1,6 +1,3 @@
-// jest.performance.config.js
-// Jest configuration for running performance optimization tests
-
 module.exports = {
   transform: {
     '^.+\.(ts|tsx)$': [
@@ -20,10 +17,9 @@ module.exports = {
   testEnvironment: 'node',
   moduleNameMapper: {},
   setupFilesAfterEnv: ['<rootDir>/jest.setup.cjs'],
-  // 性能测试可能需要更长的超时时间
-  testTimeout: 120000, // 2分钟
-  // 性能测试适合串行执行，避免资源竞争影响测试结果
+  clearMocks: true,
+  restoreMocks: true,
+  testTimeout: 120000,
   maxWorkers: 1,
-  // 启用测试结果缓存
   cache: true,
 };

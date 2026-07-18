@@ -1,11 +1,5 @@
-/**
- * @module SingleFileHandler
- * @description Single file handler for small data storage with atomic writes
- * @since 2025-11-28
- * @version 3.0.0
- */
-
 import { StorageError } from '../../types/storageErrorInfc';
+import { isStorageRecord, type StorageRecord } from '../../types/storageTypes';
 import { getEncodingType, getFileSystem } from '../../utils/fileSystemCompat';
 import withTimeout from '../../utils/withTimeout';
 import { FileHandlerBase } from './FileHandlerBase';
@@ -19,7 +13,7 @@ export class SingleFileHandler extends FileHandlerBase {
     super();
   }
 
-  async write(data: Record<string, any>[]) {
+  async write(data: StorageRecord[]): Promise<void> {
     try {
       this.validateArrayData(data);
 
@@ -47,11 +41,12 @@ export class SingleFileHandler extends FileHandlerBase {
 
           this.clearFileInfoCache(this.filePath);
           return;
-        } catch (error: any) {
+        } catch (error) {
           lastError = error;
           retries--;
 
-          if (error?.message && (error.message.includes('locked') || error.message.includes('busy'))) {
+          const message = error instanceof Error ? error.message : '';
+          if (message.includes('locked') || message.includes('busy')) {
             await new Promise(resolve => setTimeout(resolve, 100));
           } else {
             throw error;
@@ -59,13 +54,13 @@ export class SingleFileHandler extends FileHandlerBase {
         }
       }
 
-      throw lastError;
+      throw lastError ?? new Error(`Unable to write ${this.filePath}`);
     } catch (error) {
       throw this.formatWriteError(`FILE_WRITE_ERROR: ${this.filePath}:`, error);
     }
   }
 
-  async read(): Promise<Record<string, any>[]> {
+  async read(): Promise<StorageRecord[]> {
     try {
       const info = await super.getFileInfo(this.filePath);
       if (!info.exists) return [];
@@ -75,23 +70,24 @@ export class SingleFileHandler extends FileHandlerBase {
         10000,
         `read ${this.filePath} content`
       );
-      const parsed = JSON.parse(text);
+      const parsed: unknown = JSON.parse(text);
 
-      if (!parsed || typeof parsed !== 'object') {
+      if (!isStorageRecord(parsed)) {
         throw new StorageError('FILE_CONTENT_INVALID: corrupted data', 'CORRUPTED_DATA', {
           details: `File content is not a valid JSON object`,
           suggestion: 'The file may be corrupted, try recreating it',
         });
       }
 
-      if (!Array.isArray(parsed.data) || parsed.hash === undefined) {
+      const { data, hash } = parsed;
+      if (!Array.isArray(data) || !data.every(isStorageRecord) || typeof hash !== 'string') {
         throw new StorageError('FILE_FORMAT_ERROR: missing valid data array or hash field', 'CORRUPTED_DATA', {
           details: `File missing data array or hash field`,
           suggestion: 'The file format is invalid, try recreating it',
         });
       }
 
-      if (!(await this.verifyHash(parsed.data, parsed.hash))) {
+      if (!(await this.verifyHash(data, hash))) {
         throw new StorageError(
           'FILE_INTEGRITY_ERROR: data may have been tampered with or corrupted',
           'CORRUPTED_DATA',
@@ -102,7 +98,7 @@ export class SingleFileHandler extends FileHandlerBase {
         );
       }
 
-      return parsed.data;
+      return data;
     } catch (error) {
       logger.warn(`READ_FILE_ERROR: ${this.filePath}:`, error);
       if (error instanceof StorageError) {

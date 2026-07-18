@@ -1,6 +1,3 @@
-// src/core/query/__tests__/QueryEngineSorting.test.ts
-// QueryEngine 排序功能测试
-
 import { QueryEngine } from '../QueryEngine';
 
 describe('QueryEngine Sorting', () => {
@@ -13,7 +10,7 @@ describe('QueryEngine Sorting', () => {
   ];
 
   describe('Basic Sorting', () => {
-    it('should sort by single field ascending', () => {
+    it('sorts records by one field in ascending order', () => {
       const result = QueryEngine.sort(testData, 'age', 'asc');
       expect(result[0].age).toBe(20);
       expect(result[1].age).toBe(25);
@@ -22,7 +19,7 @@ describe('QueryEngine Sorting', () => {
       expect(result[4].age).toBe(35);
     });
 
-    it('should sort by single field descending', () => {
+    it('sorts records by one field in descending order', () => {
       const result = QueryEngine.sort(testData, 'age', 'desc');
       expect(result[0].age).toBe(35);
       expect(result[1].age).toBe(30);
@@ -31,7 +28,7 @@ describe('QueryEngine Sorting', () => {
       expect(result[4].age).toBe(20);
     });
 
-    it('should sort by string field', () => {
+    it('sorts records by a string field', () => {
       const result = QueryEngine.sort(testData, 'name', 'asc');
       expect(result[0].name).toBe('Alice');
       expect(result[1].name).toBe('Bob');
@@ -40,7 +37,7 @@ describe('QueryEngine Sorting', () => {
       expect(result[4].name).toBe('Eve');
     });
 
-    it('should sort by number field', () => {
+    it('sorts records by a numeric field', () => {
       const result = QueryEngine.sort(testData, 'score', 'desc');
       expect(result[0].score).toBe(92.0);
       expect(result[1].score).toBe(91.2);
@@ -49,9 +46,8 @@ describe('QueryEngine Sorting', () => {
       expect(result[4].score).toBe(78.3);
     });
 
-    it('should sort by boolean field', () => {
+    it('sorts records by a boolean field', () => {
       const result = QueryEngine.sort(testData, 'active', 'asc');
-      // false values come first
       expect(result[0].active).toBe(false);
       expect(result[1].active).toBe(false);
       expect(result.slice(2).every(item => item.active === true)).toBe(true);
@@ -59,7 +55,7 @@ describe('QueryEngine Sorting', () => {
   });
 
   describe('Multi-field Sorting', () => {
-    it('should sort by multiple fields', () => {
+    it('sorts records by multiple fields', () => {
       const data = [
         { name: 'Alice', age: 25, score: 85 },
         { name: 'Bob', age: 30, score: 90 },
@@ -69,14 +65,13 @@ describe('QueryEngine Sorting', () => {
 
       const result = QueryEngine.sort(data, ['name', 'age'], ['asc', 'asc']);
 
-      // First by name asc, then by age asc
       expect(result[0]).toEqual({ name: 'Alice', age: 20, score: 95 });
       expect(result[1]).toEqual({ name: 'Alice', age: 25, score: 85 });
       expect(result[2]).toEqual({ name: 'Bob', age: 25, score: 80 });
       expect(result[3]).toEqual({ name: 'Bob', age: 30, score: 90 });
     });
 
-    it('should handle mixed sort orders', () => {
+    it('applies mixed sort orders', () => {
       const data = [
         { category: 'A', score: 80 },
         { category: 'A', score: 90 },
@@ -86,7 +81,6 @@ describe('QueryEngine Sorting', () => {
 
       const result = QueryEngine.sort(data, ['category', 'score'], ['asc', 'desc']);
 
-      // Category asc, then score desc within each category
       expect(result[0]).toEqual({ category: 'A', score: 90 });
       expect(result[1]).toEqual({ category: 'A', score: 80 });
       expect(result[2]).toEqual({ category: 'B', score: 85 });
@@ -95,31 +89,31 @@ describe('QueryEngine Sorting', () => {
   });
 
   describe('Algorithm Selection', () => {
-    it('should use default algorithm when not specified', () => {
+    it('uses the default algorithm when none is specified', () => {
       const result = QueryEngine.sort(testData, 'age');
       expect(result[0].age).toBe(20);
       expect(result[4].age).toBe(35);
     });
 
-    it('should use specified algorithm', () => {
+    it('uses a specified algorithm', () => {
       const result = QueryEngine.sort(testData, 'age', 'asc', 'merge');
       expect(result[0].age).toBe(20);
       expect(result[4].age).toBe(35);
     });
 
-    it('should handle empty data', () => {
+    it('returns empty data unchanged', () => {
       const result = QueryEngine.sort([], 'age');
       expect(result).toEqual([]);
     });
 
-    it('should handle undefined sortBy', () => {
+    it('returns data unchanged when no sort field is provided', () => {
       const result = QueryEngine.sort(testData);
       expect(result).toEqual(testData);
     });
   });
 
   describe('Edge Cases', () => {
-    it('should handle null and undefined values', () => {
+    it('orders null and undefined values consistently', () => {
       const dataWithNulls = [
         { name: 'Alice', age: null },
         { name: 'Bob', age: 25 },
@@ -128,16 +122,14 @@ describe('QueryEngine Sorting', () => {
       ];
 
       const result = QueryEngine.sort(dataWithNulls, 'age', 'asc');
-      // null/undefined should be treated consistently
-      expect(result[0].name).toBe('Diana'); // age: 20
-      expect(result[1].name).toBe('Bob'); // age: 25
+      expect(result[0].name).toBe('Diana');
+      expect(result[1].name).toBe('Bob');
     });
 
-    it('should handle mixed data types', () => {
+    it('sorts mixed data types consistently', () => {
       const mixedData = [{ value: 'text' }, { value: 100 }, { value: null }, { value: 'abc' }];
 
       const result = QueryEngine.sort(mixedData, 'value', 'asc');
-      // Should sort consistently without errors
       expect(result).toHaveLength(4);
     });
   });

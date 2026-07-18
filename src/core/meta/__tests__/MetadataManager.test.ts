@@ -1,4 +1,5 @@
-// src/core/meta/__tests__/MetadataManager.test.ts
+/// <reference path="../../../__tests__/test-globals.d.ts" />
+
 import { MetadataManager } from '../MetadataManager';
 import { getFileSystem } from '../../../utils/fileSystemCompat';
 
@@ -7,21 +8,18 @@ describe('MetadataManager', () => {
   const testTableName = 'test_table';
 
   beforeEach(() => {
-    // 创建新的MetadataManager实例
     metadataManager = new MetadataManager();
 
-    // 清除测试表元数据
     metadataManager.delete(testTableName);
   });
 
   describe('get', () => {
-    it('should be able to get metadata for non-existent table, return undefined', () => {
+    it('returns undefined for a nonexistent table', () => {
       const result = metadataManager.get('non_existent_table');
       expect(result).toBeUndefined();
     });
 
-    it('should be able to get metadata for existing table', () => {
-      // Create table metadata first
+    it('returns metadata for an existing table', () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -43,8 +41,7 @@ describe('MetadataManager', () => {
   });
 
   describe('getPath', () => {
-    it('should be able to get table path', () => {
-      // Create table metadata first
+    it('returns a table path', () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -61,14 +58,14 @@ describe('MetadataManager', () => {
       expect(result).toBe(`${testTableName}.ldb`);
     });
 
-    it('should be able to get default path for non-existent table', () => {
+    it('returns a default path for a nonexistent table', () => {
       const result = metadataManager.getPath('non_existent_table');
       expect(result).toBe('non_existent_table.ldb');
     });
   });
 
   describe('update', () => {
-    it('should be able to create metadata for new table', () => {
+    it('creates metadata for a new table', () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -91,8 +88,7 @@ describe('MetadataManager', () => {
       });
     });
 
-    it('should be able to update metadata for existing table', () => {
-      // Create table metadata first
+    it('updates metadata for an existing table', () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -105,7 +101,6 @@ describe('MetadataManager', () => {
         },
       });
 
-      // Update table metadata
       metadataManager.update(testTableName, {
         count: 10,
         mode: 'chunked',
@@ -125,8 +120,7 @@ describe('MetadataManager', () => {
   });
 
   describe('delete', () => {
-    it('should be able to delete table metadata', () => {
-      // Create table metadata first
+    it('deletes table metadata', () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -139,22 +133,19 @@ describe('MetadataManager', () => {
         },
       });
 
-      // Delete table metadata
       metadataManager.delete(testTableName);
 
       const result = metadataManager.get(testTableName);
       expect(result).toBeUndefined();
     });
 
-    it('should be able to safely delete metadata for non-existent table', () => {
-      // Directly delete non-existent table, should not throw error
+    it('does not throw when deleting metadata for a nonexistent table', () => {
       expect(() => metadataManager.delete('non_existent_table')).not.toThrow();
     });
   });
 
   describe('allTables', () => {
-    it('should be able to get all table names', () => {
-      // Create multiple table metadata
+    it('returns all table names', () => {
       metadataManager.update('table1', {
         mode: 'single',
         path: 'table1.ldb',
@@ -193,8 +184,7 @@ describe('MetadataManager', () => {
       expect(result.length).toBe(3);
     });
 
-    it('should return empty array when no tables exist', () => {
-      // Ensure no table metadata exists
+    it('returns an empty array when no tables exist', () => {
       metadataManager.delete(testTableName);
 
       const result = metadataManager.allTables();
@@ -203,8 +193,7 @@ describe('MetadataManager', () => {
   });
 
   describe('count', () => {
-    it('should be able to get table record count', () => {
-      // Create table metadata first
+    it('returns a table record count', () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -221,15 +210,14 @@ describe('MetadataManager', () => {
       expect(result).toBe(5);
     });
 
-    it('should be able to get record count for non-existent table, return 0', () => {
+    it('returns zero records for a nonexistent table', () => {
       const result = metadataManager.count('non_existent_table');
       expect(result).toBe(0);
     });
   });
 
   describe('debugDump_checkMetaCache', () => {
-    it('should be able to get complete metadata cache', () => {
-      // Create table metadata first
+    it('returns the complete metadata cache', () => {
       metadataManager.update(testTableName, {
         mode: 'single',
         path: `${testTableName}.ldb`,
@@ -251,9 +239,9 @@ describe('MetadataManager', () => {
     });
   });
 
-  it('should reject corrupted existing metadata without overwriting it', async () => {
+  it('rejects corrupted existing metadata without overwriting it', async () => {
     const metaPath = '/mock/documents/lite-data-store/meta.ldb';
-    const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+    const fileSystem = global.__expo_file_system_mock__.mockFileSystem;
     fileSystem[metaPath] = 'not-valid-json';
 
     const manager = new MetadataManager();
@@ -313,15 +301,16 @@ describe('MetadataManager', () => {
       releaseFirstWrite?.();
       await Promise.all([firstFlush, secondFlush]);
 
-      const persistedText = (global as any).__expo_file_system_mock__.mockFileSystem[
-        '/mock/documents/lite-data-store/meta.ldb'
-      ];
+      const persistedText = global.__expo_file_system_mock__.mockFileSystem['/mock/documents/lite-data-store/meta.ldb'];
+      if (typeof persistedText !== 'string') {
+        throw new Error('Expected metadata persistence to create a file');
+      }
       const persisted = JSON.parse(persistedText);
       expect(persisted.tables.concurrent_a.count).toBe(1);
       expect(persisted.tables.concurrent_b.count).toBe(2);
       expect(metadataWriteCount).toBe(2);
       expect(
-        (global as any).__expo_file_system_mock__.mockFileSystem['/mock/documents/lite-data-store/meta.ldb.tmp']
+        global.__expo_file_system_mock__.mockFileSystem['/mock/documents/lite-data-store/meta.ldb.tmp']
       ).toBeUndefined();
     } finally {
       releaseFirstWrite?.();

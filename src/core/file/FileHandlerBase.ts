@@ -1,49 +1,25 @@
-/**
- * @module FileHandlerBase
- * @description Abstract base class for file handlers with common functionality
- * @since 2025-11-28
- * @version 3.0.0
- */
-
 import { StorageError } from '../../types/storageErrorInfc';
+import { type StorageRecord } from '../../types/storageTypes';
 import { hashHexSync } from '../../utils/cryptoPrimitives';
 import logger from '../../utils/logger';
-import { getFileSystem } from '../../utils/fileSystemCompat';
+import { type FileInfoCompat, getFileSystem } from '../../utils/fileSystemCompat';
 
-/**
- * 文件处理器抽象基类，包含公共方法
- */
 export abstract class FileHandlerBase {
-  /**
-   * 文件信息缓存
-   */
   protected fileInfoCache = new Map<
     string,
     {
-      info: any;
+      info: FileInfoCompat;
       timestamp: number;
     }
   >();
 
-  /**
-   * 缓存过期时间（毫秒）
-   */
-  protected readonly CACHE_EXPIRY = 5000; // 5秒
+  protected readonly CACHE_EXPIRY = 5000;
 
-  /**
-   * 内存使用监控阈值（字节）
-   */
-  protected readonly MAX_MEMORY_PER_CHUNK = 50 * 1024 * 1024; // 50MB per chunk
+  protected readonly MAX_MEMORY_PER_CHUNK = 50 * 1024 * 1024;
 
-  /**
-   * 批量处理大小
-   */
-  protected readonly BATCH_SIZE = 100; // Process 100 records per batch
+  protected readonly BATCH_SIZE = 100;
 
-  /**
-   * 验证数据是否为数组
-   */
-  protected validateArrayData(data: any): asserts data is Record<string, any>[] {
+  protected validateArrayData(data: unknown): asserts data is StorageRecord[] {
     if (!Array.isArray(data)) {
       throw new StorageError(`DATA_TYPE_ERROR: expected array, received ${typeof data}`, 'FILE_CONTENT_INVALID', {
         details: `Invalid data type: ${typeof data}`,
@@ -52,37 +28,25 @@ export abstract class FileHandlerBase {
     }
   }
 
-  /**
-   * 验证单个数据项是否为对象
-   */
-  protected validateDataItem(item: any): boolean {
-    if (typeof item !== 'object' || item === null) {
+  protected validateDataItem(item: unknown): item is StorageRecord {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
       logger.warn(`skip invalid data item:`, item);
       return false;
     }
     return true;
   }
 
-  /**
-   * 计算数据的哈希值
-   */
-  protected async computeHash(data: any): Promise<string> {
+  protected async computeHash(data: unknown): Promise<string> {
     const content = JSON.stringify(data);
     return hashHexSync(content, 'SHA-256');
   }
 
-  /**
-   * 验证数据的哈希值
-   */
-  protected async verifyHash(data: any, expectedHash: string): Promise<boolean> {
+  protected async verifyHash(data: unknown, expectedHash: string): Promise<boolean> {
     const actualHash = await this.computeHash(data);
     return actualHash === expectedHash;
   }
 
-  /**
-   * 获取文件信息，优先从缓存中获取
-   */
-  protected async getFileInfo(path: string): Promise<any> {
+  protected async getFileInfo(path: string): Promise<FileInfoCompat> {
     const key = path;
     const cached = this.fileInfoCache.get(key);
     if (cached && Date.now() - cached.timestamp < this.CACHE_EXPIRY) {
@@ -102,21 +66,14 @@ export abstract class FileHandlerBase {
     }
   }
 
-  /**
-   * 清除文件信息缓存
-   */
-  protected clearFileInfoCache(path?: any): void {
+  protected clearFileInfoCache(path?: string): void {
     if (path) {
-      const key = typeof path === 'string' ? path : path.name;
-      this.fileInfoCache.delete(key);
+      this.fileInfoCache.delete(path);
     } else {
       this.fileInfoCache.clear();
     }
   }
 
-  /**
-   * 格式化文件写入错误
-   */
   protected formatWriteError(message: string, cause?: unknown): StorageError {
     return new StorageError(message, 'FILE_WRITE_FAILED', {
       cause,
@@ -125,9 +82,6 @@ export abstract class FileHandlerBase {
     });
   }
 
-  /**
-   * 格式化文件读取错误
-   */
   protected formatReadError(message: string, cause?: unknown): StorageError {
     return new StorageError(message, 'FILE_READ_FAILED', {
       cause,
@@ -136,9 +90,6 @@ export abstract class FileHandlerBase {
     });
   }
 
-  /**
-   * 格式化文件删除错误
-   */
   protected formatDeleteError(message: string, cause?: unknown): StorageError {
     return new StorageError(message, 'FILE_DELETE_FAILED', {
       cause,
@@ -147,18 +98,9 @@ export abstract class FileHandlerBase {
     });
   }
 
-  /**
-   * 抽象方法：写入数据
-   */
-  public abstract write(data: Record<string, any>[]): Promise<void>;
+  public abstract write(data: StorageRecord[]): Promise<void>;
 
-  /**
-   * 抽象方法：读取数据
-   */
-  public abstract read(): Promise<Record<string, any>[]>;
+  public abstract read(): Promise<StorageRecord[]>;
 
-  /**
-   * 抽象方法：删除数据
-   */
   public abstract delete(): Promise<void>;
 }

@@ -1,12 +1,3 @@
-/**
- * Database Instance Management
- * Responsible for creating and exporting database instances with configurable encryption.
- * 
- * @module db
- * @since 2025-11-23
- * @version 3.0.0
- */
-
 import storage from './adapter/FileSystemStorageAdapter';
 import { EncryptedStorageAdapter } from './EncryptedStorageAdapter';
 import type { IStorageAdapter } from '../types/storageAdapterInfc';
@@ -23,7 +14,7 @@ export class DbInstanceManager {
 
   /**
    * Gets the singleton instance of the DbInstanceManager.
-   * 
+   *
    * @returns DbInstanceManager Singleton instance
    */
   public static getInstance(): DbInstanceManager {
@@ -32,7 +23,7 @@ export class DbInstanceManager {
 
   /**
    * Gets the storage instance based on encryption requirements.
-   * 
+   *
    * @param encrypted Whether to enable encrypted storage (defaults to false)
    * @param requireAuthOnAccess Whether biometric authentication is required (defaults to false)
    * @returns IStorageAdapter Storage instance matching the specified requirements
@@ -53,7 +44,7 @@ export class DbInstanceManager {
 
   /**
    * Gets the default database instance (for backward compatibility).
-   * 
+   *
    * @returns IStorageAdapter Default non-encrypted storage instance
    */
   public getDefaultInstance(): IStorageAdapter {

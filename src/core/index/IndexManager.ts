@@ -1,11 +1,13 @@
-/**
- * @module IndexManager
- * @description Index manager for unique and non-unique field indexing
- * @since 2025-11-28
- * @version 3.0.0
- */
-import { IMetadataManager } from '../../types/metadataManagerInfc';
+import { isStorageRecord, type StorageRecord } from '../../types/storageTypes';
+import type { IMetadataManager } from '../../types/metadataManagerInfc';
 import { StorageError } from '../../types/storageErrorInfc';
+
+type IndexId = string | number;
+
+const getIndexId = (record: StorageRecord): IndexId | undefined => {
+  const id = record.id;
+  return typeof id === 'string' || typeof id === 'number' ? id : undefined;
+};
 /**
  * Index type enum
  */
@@ -18,8 +20,8 @@ export enum IndexType {
  * Index item interface
  */
 export interface IndexItem {
-  value: any;
-  id: string | number;
+  value: unknown;
+  id: IndexId;
 }
 
 /**
@@ -163,22 +165,26 @@ export class IndexManager {
   /**
    * Generate composite index key
    */
-  private generateCompositeKey(values: any[]): string {
+  private generateCompositeKey(values: readonly unknown[]): string {
     return JSON.stringify(values);
   }
 
   /**
    * Add data to indexes
    */
-  addToIndex(tableName: string, data: Record<string, any>): void {
+  addToIndex<T extends object>(tableName: string, data: T): void {
     if (!this.indexCache.has(tableName)) {
       return;
     }
 
-    const tableIndexes = this.indexCache.get(tableName)!;
-    const id = data['id'];
+    if (!isStorageRecord(data)) {
+      return;
+    }
 
-    if (!id) {
+    const tableIndexes = this.indexCache.get(tableName)!;
+    const id = getIndexId(data);
+
+    if (id === undefined) {
       return;
     }
 
@@ -220,15 +226,19 @@ export class IndexManager {
   /**
    * Remove data from indexes
    */
-  removeFromIndex(tableName: string, data: Record<string, any>): void {
+  removeFromIndex<T extends object>(tableName: string, data: T): void {
     if (!this.indexCache.has(tableName)) {
       return;
     }
 
-    const tableIndexes = this.indexCache.get(tableName)!;
-    const id = data['id'];
+    if (!isStorageRecord(data)) {
+      return;
+    }
 
-    if (!id) {
+    const tableIndexes = this.indexCache.get(tableName)!;
+    const id = getIndexId(data);
+
+    if (id === undefined) {
       return;
     }
 
@@ -261,7 +271,7 @@ export class IndexManager {
   /**
    * Update index (remove old, add new)
    */
-  updateIndex(tableName: string, oldData: Record<string, any>, newData: Record<string, any>): void {
+  updateIndex<T extends object>(tableName: string, oldData: T, newData: T): void {
     this.removeFromIndex(tableName, oldData);
     this.addToIndex(tableName, newData);
   }
@@ -269,7 +279,7 @@ export class IndexManager {
   /**
    * Batch rebuild indexes (3-5x faster than adding items one by one)
    */
-  rebuildIndexes(tableName: string, data: Record<string, any>[]): void {
+  rebuildIndexes<T extends object>(tableName: string, data: T[]): void {
     if (!this.indexCache.has(tableName)) {
       return;
     }
@@ -283,7 +293,11 @@ export class IndexManager {
       index.data = new Map();
 
       for (const item of data) {
-        const id = item['id'];
+        if (!isStorageRecord(item)) {
+          continue;
+        }
+
+        const id = getIndexId(item);
         if (id === undefined) continue;
 
         const fieldValues = index.fields.map(field => item[field]);
@@ -319,7 +333,7 @@ export class IndexManager {
   /**
    * Query index for matching data IDs
    */
-  queryIndex(tableName: string, fields: string | string[], values: any | any[]): string[] | number[] {
+  queryIndex(tableName: string, fields: string | string[], values: unknown | unknown[]): IndexId[] {
     if (!this.indexCache.has(tableName)) {
       return [];
     }
@@ -350,12 +364,7 @@ export class IndexManager {
       return [];
     }
 
-    const firstId = indexItems[0]?.['id'];
-    if (typeof firstId === 'string') {
-      return indexItems.map(item => item['id'] as string);
-    } else {
-      return indexItems.map(item => item['id'] as number);
-    }
+    return indexItems.map(item => item.id);
   }
 
   /**

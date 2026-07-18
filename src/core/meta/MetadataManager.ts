@@ -1,10 +1,3 @@
-/**
- * @module MetadataManager
- * @description Metadata manager for table schema and data tracking
- * @since 2025-11-19
- * @version 3.0.0
- */
-
 import { StorageError } from '../../types/storageErrorInfc';
 import { getEncodingType, getFileSystem } from '../../utils/fileSystemCompat';
 import { ensureStorageRootReady } from '../../utils/ROOTPath';

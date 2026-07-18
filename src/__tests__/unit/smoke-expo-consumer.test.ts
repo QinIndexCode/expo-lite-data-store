@@ -9,6 +9,8 @@ jest.mock('child_process', () => ({
 describe('smoke expo consumer helpers', () => {
   const scriptPath = path.resolve(__dirname, '../../../scripts/smoke-expo-consumer.cjs');
   const temporaryRoots: string[] = [];
+  let originalNpmConfigDryRun: string | undefined;
+  let originalNpmConfigDryRunUppercase: string | undefined;
 
   const createTempRepo = () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'expo-lite-data-store-smoke-helper-'));
@@ -27,6 +29,8 @@ describe('smoke expo consumer helpers', () => {
   };
 
   beforeEach(() => {
+    originalNpmConfigDryRun = process.env.npm_config_dry_run;
+    originalNpmConfigDryRunUppercase = process.env.NPM_CONFIG_DRY_RUN;
     jest.resetModules();
     const { spawnSync } = require('child_process') as { spawnSync: jest.Mock };
     spawnSync.mockReset();
@@ -40,6 +44,16 @@ describe('smoke expo consumer helpers', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+    if (originalNpmConfigDryRun === undefined) {
+      delete process.env.npm_config_dry_run;
+    } else {
+      process.env.npm_config_dry_run = originalNpmConfigDryRun;
+    }
+    if (originalNpmConfigDryRunUppercase === undefined) {
+      delete process.env.NPM_CONFIG_DRY_RUN;
+    } else {
+      process.env.NPM_CONFIG_DRY_RUN = originalNpmConfigDryRunUppercase;
+    }
     for (const root of temporaryRoots.splice(0)) {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -155,16 +169,15 @@ describe('smoke expo consumer helpers', () => {
 
     expect(commandEnv.npm_config_dry_run).toBeUndefined();
     expect(commandEnv.NPM_CONFIG_DRY_RUN).toBeUndefined();
-
-    delete process.env.npm_config_dry_run;
-    delete process.env.NPM_CONFIG_DRY_RUN;
   });
 
   it('cleans managed temporary directories after a successful smoke run', () => {
     const { spawnSync } = require('child_process') as { spawnSync: jest.Mock };
     const originalMkdtempSync = fs.mkdtempSync;
     const createdDirectories: string[] = [];
-    const packagedFiles = ['dist/js/index.js', 'dist/cjs/index.js', 'dist/types/index.d.ts'].map(file => ({ path: file }));
+    const packagedFiles = ['dist/js/index.js', 'dist/cjs/index.js', 'dist/types/index.d.ts'].map(file => ({
+      path: file,
+    }));
 
     jest.spyOn(fs, 'mkdtempSync').mockImplementation(prefix => {
       const directory = originalMkdtempSync(prefix);

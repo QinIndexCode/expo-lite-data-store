@@ -1,6 +1,3 @@
-// src/core/data/__tests__/DataWriter.test.ts
-// DataWriter 单元测试
-
 import { CacheManager, CacheStrategy } from '../../cache/CacheManager';
 import { FileOperationManager } from '../../FileOperationManager';
 import { ChunkedFileHandler } from '../../file/ChunkedFileHandler';
@@ -10,12 +7,27 @@ import { MetadataManager } from '../../meta/MetadataManager';
 import { getFileSystem } from '../../../utils/fileSystemCompat';
 import { getRootPathSync } from '../../../utils/ROOTPath';
 import logger from '../../../utils/logger';
+import type { StorageRecord } from '../../../types/storageTypes';
 import { DataWriter } from '../DataWriter';
 
+type DataWriterPrivateAccess = {
+  countValidationInFlight: Map<string, Promise<void>>;
+};
+
+type ChunkedFileHandlerPrivateAccess = {
+  writeOverwriteJournal: (previousData: StorageRecord[], targetData: StorageRecord[]) => Promise<void>;
+};
+
+const getDataWriterPrivateAccess = (writer: DataWriter): DataWriterPrivateAccess =>
+  writer as unknown as DataWriterPrivateAccess;
+
+const getChunkedFileHandlerPrivateAccess = (handler: ChunkedFileHandler): ChunkedFileHandlerPrivateAccess =>
+  handler as unknown as ChunkedFileHandlerPrivateAccess;
+
 const mockPendingSingleFileRead = () => {
-  let resolveRead!: (data: Record<string, any>[]) => void;
+  let resolveRead!: (data: StorageRecord[]) => void;
   let signalReadStarted!: () => void;
-  const pendingRead = new Promise<Record<string, any>[]>(resolve => {
+  const pendingRead = new Promise<StorageRecord[]>(resolve => {
     resolveRead = resolve;
   });
   const readStarted = new Promise<void>(resolve => {
@@ -43,7 +55,6 @@ describe('DataWriter', () => {
   const testTableName = 'test_table';
 
   beforeEach(() => {
-    // 创建新的实例用于每个测试
     metadataManager = new MetadataManager();
     cacheManager = new CacheManager({
       strategy: CacheStrategy.LRU,
@@ -58,26 +69,16 @@ describe('DataWriter', () => {
 
     dataWriter = new DataWriter(metadataManager, indexManager, fileOperationManager);
 
-    // 清除测试表元数据
     metadataManager.delete(testTableName);
   });
 
-  afterEach(done => {
-    // 清理定时器，防止测试挂起
-    if (cacheManager) {
-      cacheManager.cleanup();
-    }
-    if (metadataManager) {
-      metadataManager.cleanup();
-    }
-    // 使用 process.nextTick 而不是 setTimeout，避免阻塞
-    process.nextTick(() => {
-      done();
-    });
+  afterEach(() => {
+    cacheManager.cleanup();
+    metadataManager.cleanup();
   });
 
   describe('createTable', () => {
-    it('should be able to create new table', async () => {
+    it('creates a new table', async () => {
       await dataWriter.createTable(testTableName, {
         mode: 'single',
         columns: {
@@ -91,14 +92,13 @@ describe('DataWriter', () => {
         ],
       });
 
-      // Check if table was created successfully
       const tableMeta = metadataManager.get(testTableName);
       expect(tableMeta).toBeDefined();
       expect(tableMeta?.mode).toBe('single');
       expect(tableMeta?.count).toBe(2);
     });
 
-    it('should be able to create chunked table', async () => {
+    it('creates a chunked table', async () => {
       await dataWriter.createTable(testTableName, {
         mode: 'chunked',
         columns: {
@@ -108,7 +108,6 @@ describe('DataWriter', () => {
         },
       });
 
-      // Check if table was created successfully
       const tableMeta = metadataManager.get(testTableName);
       expect(tableMeta).toBeDefined();
       expect(tableMeta?.mode).toBe('chunked');
@@ -116,8 +115,7 @@ describe('DataWriter', () => {
   });
 
   describe('write', () => {
-    it('should be able to write data to existing table', async () => {
-      // Create table first
+    it('writes data to an existing table', async () => {
       await dataWriter.createTable(testTableName, {
         mode: 'single',
         columns: {
@@ -127,21 +125,18 @@ describe('DataWriter', () => {
         },
       });
 
-      // Write data
       const result = await dataWriter.write(testTableName, {
         id: '1',
         name: 'test',
         age: 20,
       });
 
-      // Check write result
       expect(result).toBeDefined();
       expect(result.written).toBe(1);
       expect(result.totalAfterWrite).toBe(1);
     });
 
-    it('should be able to batch write data to existing table', async () => {
-      // Create table first
+    it('batch writes data to an existing table', async () => {
       await dataWriter.createTable(testTableName, {
         mode: 'single',
         columns: {
@@ -151,20 +146,18 @@ describe('DataWriter', () => {
         },
       });
 
-      // Batch write data
       const result = await dataWriter.write(testTableName, [
         { id: '1', name: 'test1', age: 20 },
         { id: '2', name: 'test2', age: 25 },
         { id: '3', name: 'test3', age: 30 },
       ]);
 
-      // Check write result
       expect(result).toBeDefined();
       expect(result.written).toBe(3);
       expect(result.totalAfterWrite).toBe(3);
     });
 
-    it('should serialize concurrent writes to the same table without losing records', async () => {
+    it('serializes concurrent writes to the same table without losing records', async () => {
       await dataWriter.createTable(testTableName, {
         mode: 'single',
         columns: {
@@ -197,7 +190,7 @@ describe('DataWriter', () => {
       expect(count).toBe(25);
     });
 
-    it('should append to a chunked table without reading the entire table first', async () => {
+    it('appends to a chunked table without reading the entire table first', async () => {
       await dataWriter.createTable(testTableName, {
         mode: 'chunked',
         columns: {
@@ -275,7 +268,9 @@ describe('DataWriter', () => {
       });
 
       try {
-        await expect(dataWriter.write(tableName, { id: 'new', value: 'not-published' }, { forceChunked: true })).rejects.toMatchObject({
+        await expect(
+          dataWriter.write(tableName, { id: 'new', value: 'not-published' }, { forceChunked: true })
+        ).rejects.toMatchObject({
           code: 'FILE_WRITE_FAILED',
         });
         expect(metadataManager.get(tableName)).toMatchObject({ mode: 'single', count: 1 });
@@ -290,8 +285,7 @@ describe('DataWriter', () => {
   });
 
   describe('delete', () => {
-    it('should be able to delete data from table', async () => {
-      // Create table and write data first
+    it('deletes matching data from a table', async () => {
       await dataWriter.createTable(testTableName, {
         mode: 'single',
         columns: {
@@ -306,15 +300,12 @@ describe('DataWriter', () => {
         ],
       });
 
-      // Delete data
       const result = await dataWriter.delete(testTableName, { age: { $gt: 25 } });
 
-      // Check delete result
       expect(result).toBe(1);
     });
 
-    it('should be able to delete all matching data', async () => {
-      // Create table and write data first
+    it('deletes all matching data', async () => {
       await dataWriter.createTable(testTableName, {
         mode: 'single',
         columns: {
@@ -329,17 +320,14 @@ describe('DataWriter', () => {
         ],
       });
 
-      // Delete all data
       const result = await dataWriter.delete(testTableName, {});
 
-      // Check delete result
       expect(result).toBe(3);
     });
   });
 
   describe('count', () => {
-    it('should be able to get table record count', async () => {
-      // Create table and write data first
+    it('returns a table record count', async () => {
       await dataWriter.createTable(testTableName, {
         mode: 'single',
         columns: {
@@ -353,14 +341,12 @@ describe('DataWriter', () => {
         ],
       });
 
-      // Get table record count
       const count = await dataWriter.count(testTableName);
 
-      // Check result
       expect(count).toBe(2);
     });
 
-    it('should return metadata count before its background validation completes', async () => {
+    it('returns the metadata count before background validation completes', async () => {
       const records = [
         { id: '1', name: 'test1', age: 20 },
         { id: '2', name: 'test2', age: 25 },
@@ -385,8 +371,7 @@ describe('DataWriter', () => {
 
         expect(countResult).toBe(2);
 
-        const validations = (dataWriter as unknown as { countValidationInFlight: Map<string, Promise<void>> })
-          .countValidationInFlight;
+        const validations = getDataWriterPrivateAccess(dataWriter).countValidationInFlight;
         const validation = validations.get(testTableName);
         expect(validation).toBeDefined();
 
@@ -399,7 +384,7 @@ describe('DataWriter', () => {
       }
     });
 
-    it('should deduplicate concurrent background count validations per table', async () => {
+    it('deduplicates concurrent background count validations per table', async () => {
       const records = [
         { id: '1', name: 'test1', age: 20 },
         { id: '2', name: 'test2', age: 25 },
@@ -423,8 +408,7 @@ describe('DataWriter', () => {
         expect(pendingRead.getCallCount()).toBe(1);
         await expect(Promise.all(countPromises)).resolves.toEqual([2, 2, 2]);
 
-        const validations = (dataWriter as unknown as { countValidationInFlight: Map<string, Promise<void>> })
-          .countValidationInFlight;
+        const validations = getDataWriterPrivateAccess(dataWriter).countValidationInFlight;
         const validation = validations.get(testTableName);
         expect(validation).toBeDefined();
 
@@ -436,17 +420,15 @@ describe('DataWriter', () => {
       }
     });
 
-    it('should be able to get record count for non-existent table, return 0', async () => {
-      // Get record count for non-existent table
+    it('returns zero records for a nonexistent table', async () => {
       const count = await dataWriter.count('non_existent_table');
 
-      // Check result
       expect(count).toBe(0);
     });
   });
 
   describe('verifyCount', () => {
-    it('should return metadata and actual counts separately and repair metadata drift', async () => {
+    it('returns metadata and actual counts separately and repairs metadata drift', async () => {
       await dataWriter.createTable(testTableName, {
         mode: 'single',
         columns: {
@@ -474,8 +456,7 @@ describe('DataWriter', () => {
   });
 
   describe('deleteTable', () => {
-    it('should be able to delete existing table', async () => {
-      // Create table first
+    it('deletes an existing table', async () => {
       await dataWriter.createTable(testTableName, {
         mode: 'single',
         columns: {
@@ -485,16 +466,13 @@ describe('DataWriter', () => {
         },
       });
 
-      // Delete table
       await dataWriter.deleteTable(testTableName);
 
-      // Check if table was deleted successfully
       const tableMeta = metadataManager.get(testTableName);
       expect(tableMeta).toBeUndefined();
     });
 
-    it('should be able to safely delete non-existent table', async () => {
-      // Directly delete non-existent table, should not throw error
+    it('does not throw when deleting a nonexistent table', async () => {
       await expect(dataWriter.deleteTable('non_existent_table')).resolves.not.toThrow();
     });
 
@@ -548,7 +526,10 @@ describe('DataWriter', () => {
         mode: 'chunked',
         initialData: [{ id: 'deleted', value: 'old-data' }],
       });
-      await (handler as any).writeOverwriteJournal([{ id: 'deleted', value: 'old-data' }], [{ id: 'next' }]);
+      await getChunkedFileHandlerPrivateAccess(handler).writeOverwriteJournal(
+        [{ id: 'deleted', value: 'old-data' }],
+        [{ id: 'next' }]
+      );
 
       try {
         await dataWriter.deleteTable(tableName);
@@ -571,8 +552,7 @@ describe('DataWriter', () => {
   });
 
   describe('hasTable', () => {
-    it('should be able to check existing table, return true', async () => {
-      // Create table first
+    it('returns true for an existing table', async () => {
       await dataWriter.createTable(testTableName, {
         mode: 'single',
         columns: {
@@ -582,18 +562,14 @@ describe('DataWriter', () => {
         },
       });
 
-      // Check if table exists
       const result = await dataWriter.hasTable(testTableName);
 
-      // Check result
       expect(result).toBe(true);
     });
 
-    it('should be able to check non-existent table, return false', async () => {
-      // Check non-existent table
+    it('returns false for a nonexistent table', async () => {
       const result = await dataWriter.hasTable('non_existent_table');
 
-      // Check result
       expect(result).toBe(false);
     });
   });

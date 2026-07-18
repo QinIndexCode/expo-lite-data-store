@@ -1,6 +1,3 @@
-// jest.crypto.config.js
-// Jest configuration for running crypto security assessment tests
-
 module.exports = {
   transform: {
     '^.+\.(ts|tsx)$': [
@@ -20,10 +17,9 @@ module.exports = {
   testEnvironment: 'node',
   moduleNameMapper: {},
   setupFilesAfterEnv: ['<rootDir>/jest.setup.cjs'],
-  // 加密测试可能需要更长的超时时间
-  testTimeout: 300000, // 5分钟
-  // 加密测试适合串行执行，避免资源竞争
+  clearMocks: true,
+  restoreMocks: true,
+  testTimeout: 300000,
   maxWorkers: 1,
-  // 启用测试结果缓存
   cache: true,
 };

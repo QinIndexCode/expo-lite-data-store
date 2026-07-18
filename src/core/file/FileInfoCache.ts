@@ -1,38 +1,17 @@
-/**
- * @module FileInfoCache
- * @description File info cache reducing file system calls
- * @since 2025-11-28
- * @version 3.0.0
- */
+import { type FileInfoCompat, getFileSystem } from '../../utils/fileSystemCompat';
 
-import { getFileSystem } from '../../utils/fileSystemCompat';
-
-/**
- * 文件信息缓存类，用于缓存文件信息，减少对文件系统的调用
- */
 export class FileInfoCache {
-  /**
-   * 文件信息缓存，key为文件名，value为文件信息和缓存时间
-   */
   private fileInfoCache = new Map<
     string,
     {
-      info: any;
+      info: FileInfoCompat;
       timestamp: number;
     }
   >();
 
-  /**
-   * 缓存过期时间（毫秒）
-   */
-  private readonly CACHE_EXPIRY = 5000; // 5秒
+  private readonly CACHE_EXPIRY = 5000;
 
-  /**
-   * 获取文件信息，优先从缓存中获取
-   * @param path 文件路径
-   * @returns 文件信息
-   */
-  async getFileInfo(path: string): Promise<any> {
+  async getFileInfo(path: string): Promise<FileInfoCompat> {
     const key = path;
     const cached = this.fileInfoCache.get(key);
     if (cached && Date.now() - cached.timestamp < this.CACHE_EXPIRY) {
@@ -52,10 +31,6 @@ export class FileInfoCache {
     }
   }
 
-  /**
-   * 清除文件信息缓存
-   * @param path 文件路径（可选），如果不提供则清除所有缓存
-   */
   clearFileInfoCache(path?: string): void {
     if (path) {
       this.fileInfoCache.delete(path);

@@ -1,64 +1,38 @@
 /**
- * @module StorageStrategy
- * @description Storage strategy for single-file vs chunked storage selection
- * @since 2025-11-28
- * @version 3.0.0
- */
-
-// Define storage record type
-type RecordType = Record<string, any>;
-
-/**
- * 存储策略接口
+ * Storage strategy contract.
  *
- * 设计模式：策略模式
- * 用途：定义不同存储策略的统一接口，允许在运行时切换不同的存储策略
- * 优势：
- * - 封装了不同的存储算法
- * - 允许在运行时动态切换策略
- * - 便于扩展新的存储策略
- * - 提高了代码的灵活性和可维护性
+ * Strategies select a storage layout without inspecting individual fields.
  */
 export interface StorageStrategy {
   /**
-   * 策略名称
+   * Stable strategy identifier.
    */
   name: string;
 
   /**
-   * 检查数据是否适合使用该策略
-   *
-   * @param data - 要检查的数据
-   * @returns 是否适合使用该策略
+   * Determines whether a collection is suitable for this strategy.
    */
-  isSuitable(data: RecordType[]): boolean;
+  isSuitable(data: readonly object[]): boolean;
 
   /**
-   * 获取策略的优先级
-   *
-   * @returns 优先级，数值越大优先级越高
+   * Returns a priority where larger values are preferred.
    */
   getPriority(): number;
 }
 
 /**
- * 单文件存储策略
- *
- * 适用场景：小数据量，读写速度快
- * 特点：所有数据存储在单个文件中
+ * Stores small collections in one file.
  */
 export class SingleFileStrategy implements StorageStrategy {
   name = 'single_file';
 
   /**
-   * 单文件策略的最大数据大小（字节）
-   * 默认1MB
+   * Maximum estimated payload size in bytes.
    */
   private readonly MAX_SIZE = 1024 * 1024;
 
-  isSuitable(data: RecordType[]): boolean {
-    // Estimate data size
-    const estimatedSize = data.reduce((acc, item) => acc + JSON.stringify(item).length, 0);
+  isSuitable(data: readonly object[]): boolean {
+    const estimatedSize = data.reduce((acc, item) => acc + (JSON.stringify(item)?.length ?? 0), 0);
 
     // Use single file strategy when data < 1MB
     return estimatedSize < this.MAX_SIZE;
@@ -70,23 +44,18 @@ export class SingleFileStrategy implements StorageStrategy {
 }
 
 /**
- * 分片存储策略
- *
- * 适用场景：大数据量，减少内存占用
- * 特点：数据被分成多个文件存储
+ * Stores large collections across chunk files.
  */
 export class ChunkedFileStrategy implements StorageStrategy {
   name = 'chunked_file';
 
   /**
-   * 分片策略的最小数据大小（字节）
-   * 默认512KB
+   * Minimum estimated payload size in bytes.
    */
   private readonly MIN_SIZE = 512 * 1024;
 
-  isSuitable(data: RecordType[]): boolean {
-    // Estimate data size
-    const estimatedSize = data.reduce((acc, item) => acc + JSON.stringify(item).length, 0);
+  isSuitable(data: readonly object[]): boolean {
+    const estimatedSize = data.reduce((acc, item) => acc + (JSON.stringify(item)?.length ?? 0), 0);
 
     // Use chunked strategy when data > 512KB
     return estimatedSize >= this.MIN_SIZE;
@@ -98,13 +67,11 @@ export class ChunkedFileStrategy implements StorageStrategy {
 }
 
 /**
- * 存储策略管理器
- *
- * 用途：管理和选择合适的存储策略
+ * Registers and selects storage strategies.
  */
 export class StorageStrategyManager {
   /**
-   * 可用的存储策略列表
+   * Registered strategies ordered by priority.
    */
   private strategies: StorageStrategy[] = [];
 
@@ -115,9 +82,7 @@ export class StorageStrategyManager {
   }
 
   /**
-   * 注册存储策略
-   *
-   * @param strategy - 要注册的存储策略
+   * Registers a strategy and keeps the preferred strategy first.
    */
   registerStrategy(strategy: StorageStrategy): void {
     this.strategies.push(strategy);
@@ -126,13 +91,9 @@ export class StorageStrategyManager {
   }
 
   /**
-   * 选择合适的存储策略
-   *
-   * @param data - 要存储的数据
-   * @returns 合适的存储策略，如果没有合适的策略则返回null
+   * Selects the first compatible strategy for a collection.
    */
-  selectStrategy(data: RecordType[]): StorageStrategy | null {
-    // Iterate所有策略，返回第一个适合的策略
+  selectStrategy<T extends object>(data: readonly T[]): StorageStrategy | null {
     for (const strategy of this.strategies) {
       if (strategy.isSuitable(data)) {
         return strategy;
@@ -144,19 +105,14 @@ export class StorageStrategyManager {
   }
 
   /**
-   * 获取所有可用的存储策略
-   *
-   * @returns 所有可用的存储策略列表
+   * Returns registered strategies in selection order.
    */
   getAllStrategies(): StorageStrategy[] {
     return [...this.strategies];
   }
 
   /**
-   * 根据名称获取存储策略
-   *
-   * @param name - 策略名称
-   * @returns 对应的存储策略，如果找不到则返回null
+   * Finds a strategy by its stable identifier.
    */
   getStrategy(name: string): StorageStrategy | null {
     return this.strategies.find(strategy => strategy.name === name) || null;

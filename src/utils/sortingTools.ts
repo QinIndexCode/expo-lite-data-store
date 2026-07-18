@@ -1,56 +1,75 @@
-/**
- * @module sortingTools
- * @description Multiple sorting algorithms for different use cases
- * @since 2025-11-19
- * @version 3.0.0
- */
+const isRecord = (value: object): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const getSortValue = (record: object, column: string): unknown => (isRecord(record) ? record[column] : undefined);
+
+const compareSortValues = (left: unknown, right: unknown): number => {
+  if (left === right) {
+    return 0;
+  }
+
+  if (left === null || left === undefined) {
+    return 1;
+  }
+
+  if (right === null || right === undefined) {
+    return -1;
+  }
+
+  if (typeof left === 'number' && typeof right === 'number') {
+    if (Number.isNaN(left)) return Number.isNaN(right) ? 0 : 1;
+    if (Number.isNaN(right)) return -1;
+    return left < right ? -1 : 1;
+  }
+
+  if (typeof left === 'bigint' && typeof right === 'bigint') {
+    return left < right ? -1 : 1;
+  }
+
+  if (left instanceof Date && right instanceof Date) {
+    return compareSortValues(left.getTime(), right.getTime());
+  }
+
+  if (typeof left === 'string' && typeof right === 'string') {
+    return left.localeCompare(right);
+  }
+
+  return String(left).localeCompare(String(right));
+};
 
 /**
- * Native slice + sort (default implementation, stable)
- * @param data 要排序的数据数组
- * @param column 排序的列名
- * @param order 排序顺序（asc 升序，desc 降序），默认升序
- * @returns T[] 排序后的新数组（原数组不变）
+ * Native slice and sort implementation.
  * @example
  * // Sort user array by age ascending
  * const sortedUsers = sortByColumn(users, 'age', 'asc');
  */
-export function sortByColumn<T>(data: T[], column: keyof T, order: 'asc' | 'desc' = 'asc'): T[] {
+export function sortByColumn<T extends object>(data: T[], column: string, order: 'asc' | 'desc' = 'asc'): T[] {
   if (!data || data.length === 0) return [];
 
   const asc = order === 'asc' ? 1 : -1;
 
   return data.slice().sort((a, b) => {
-    const va = a[column];
-    const vb = b[column];
+    const va = getSortValue(a, column);
+    const vb = getSortValue(b, column);
 
-    // Handle null/undefined values - they should be at the end
-    if (va === null || va === undefined) return 1;
-    if (vb === null || vb === undefined) return -1;
-
-    return va < vb ? -asc : va > vb ? asc : 0;
+    return compareSortValues(va, vb) * asc;
   });
 }
 
 /**
- * 2. 极简比较（不做 null/undefined 特殊处理，纯字符串比较，最快但最粗糙）
- * 适合已知无脏数据、追求极限速度的场景
- * @param data 要排序的数据数组
- * @param column 排序的列名
- * @param order 排序顺序（asc 升序，desc 降序），默认升序
- * @returns T[] 排序后的新数组（原数组不变）
+ * String-comparison sort for clean, homogeneous data.
  * @example
  * // Fast sort clean array by name
  * const sortedItems = sortByColumnFast(items, 'name', 'desc');
  */
-export function sortByColumnFast<T>(data: T[], column: keyof T, order: 'asc' | 'desc' = 'asc'): T[] {
+export function sortByColumnFast<T extends object>(data: T[], column: string, order: 'asc' | 'desc' = 'asc'): T[] {
   if (!data || data.length === 0) return [];
 
   const asc = order === 'asc' ? 1 : -1;
 
   return data.slice().sort((a, b) => {
-    const va = a[column];
-    const vb = b[column];
+    const va = getSortValue(a, column);
+    const vb = getSortValue(b, column);
 
     // Handle null/undefined values - they should be at the end
     if (va === null || va === undefined) return 1;
@@ -63,31 +82,22 @@ export function sortByColumnFast<T>(data: T[], column: keyof T, order: 'asc' | '
 }
 
 /**
- * 3. 稳定计数排序（仅适用于取值范围有限且可枚举的列，如状态码、星级等）
- * 时间复杂度 O(n + k)，空间换时间，大数据量优势明显
- * @param data 要排序的数据数组
- * @param column 排序的列名
- * @param order 排序顺序（asc 升序，desc 降序），默认升序
- * @returns T[] 排序后的新数组（原数组不变）
+ * Stable bucket sort for columns with a small value domain.
  * @example
  * // Sort order array by status code (limited range)
  * const sortedOrders = sortByColumnCounting(orders, 'status', 'asc');
  */
-export function sortByColumnCounting<T>(data: T[], column: keyof T, order: 'asc' | 'desc' = 'asc'): T[] {
+export function sortByColumnCounting<T extends object>(data: T[], column: string, order: 'asc' | 'desc' = 'asc'): T[] {
   if (!data || data.length === 0) return [];
 
-  const map = new Map<any, T[]>();
+  const map = new Map<unknown, T[]>();
   for (const item of data) {
-    const key = item[column];
+    const key = getSortValue(item, column);
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(item);
   }
 
-  const keys = Array.from(map.keys()).sort((a, b) => {
-    if (a === null) return -1;
-    if (b === null) return 1;
-    return a < b ? -1 : a > b ? 1 : 0;
-  });
+  const keys = Array.from(map.keys()).sort(compareSortValues);
 
   if (order === 'desc') keys.reverse();
 
@@ -106,45 +116,25 @@ export function sortByColumnCounting<T>(data: T[], column: keyof T, order: 'asc'
 }
 
 /**
- * 4. 归并排序（自实现，稳定，适合链式结构或需稳定顺序的大数组）
- * @param data 要排序的数据数组
- * @param column 排序的列名
- * @param order 排序顺序（asc 升序，desc 降序），默认升序
- * @returns T[] 排序后的新数组（原数组不变）
+ * Stable merge sort for larger collections.
  * @example
  * // Sort large array by date, maintain stable order
  * const sortedLogs = sortByColumnMerge(logs, 'timestamp', 'desc');
  */
-export function sortByColumnMerge<T>(data: T[], column: keyof T, order: 'asc' | 'desc' = 'asc'): T[] {
+export function sortByColumnMerge<T extends object>(data: T[], column: string, order: 'asc' | 'desc' = 'asc'): T[] {
   if (!data || data.length === 0) return [];
 
   const asc = order === 'asc' ? 1 : -1;
 
-  /**
-   * 合并两个已排序的数组
-   * @param left 左侧已排序数组
-   * @param right 右侧已排序数组
-   * @returns T[] 合并后的已排序数组
-   */
   function merge(left: T[], right: T[]): T[] {
     const res: T[] = [];
     let i = 0,
       j = 0;
     while (i < left.length && j < right.length) {
-      const a = left[i]![column];
-      const b = right[j]![column];
+      const a = getSortValue(left[i]!, column);
+      const b = getSortValue(right[j]!, column);
 
-      // Handle null/undefined values - they should be at the end
-      let cmp: number;
-      if ((a === null || a === undefined) && (b === null || b === undefined)) {
-        cmp = 0;
-      } else if (a === null || a === undefined) {
-        cmp = 1; // a is null/undefined, should come after b
-      } else if (b === null || b === undefined) {
-        cmp = -1; // b is null/undefined, a should come before b
-      } else {
-        cmp = a < b ? -1 : a > b ? 1 : 0;
-      }
+      const cmp = compareSortValues(a, b);
 
       if (cmp * asc <= 0) res.push(left[i++]!);
       else res.push(right[j++]!);
@@ -152,11 +142,6 @@ export function sortByColumnMerge<T>(data: T[], column: keyof T, order: 'asc' | 
     return res.concat(left.slice(i)).concat(right.slice(j));
   }
 
-  /**
-   * 递归执行归并排序
-   * @param arr 要排序的数组
-   * @returns T[] 排序后的数组
-   */
   function mergeSort(arr: T[]): T[] {
     if (arr.length <= 1) return arr;
     const mid = Math.floor(arr.length / 2);
@@ -167,23 +152,19 @@ export function sortByColumnMerge<T>(data: T[], column: keyof T, order: 'asc' | 
 }
 
 /**
- * 5. 慢速兜底（完整 localeCompare，支持中文、特殊符号，性能最低但最通用）
- * @param data 要排序的数据数组
- * @param column 排序的列名
- * @param order 排序顺序（asc 升序，desc 降序），默认升序
- * @returns T[] 排序后的新数组（原数组不变）
+ * Locale-aware fallback sort for user-facing text.
  * @example
  * // Sort array with Chinese names
  * const sortedProducts = sortByColumnSlow(products, 'name', 'asc');
  */
-export function sortByColumnSlow<T>(data: T[], column: keyof T, order: 'asc' | 'desc' = 'asc'): T[] {
+export function sortByColumnSlow<T extends object>(data: T[], column: string, order: 'asc' | 'desc' = 'asc'): T[] {
   if (!data || data.length === 0) return [];
 
   const asc = order === 'asc' ? 1 : -1;
 
   return data.slice().sort((a, b) => {
-    const va = a[column];
-    const vb = b[column];
+    const va = getSortValue(a, column);
+    const vb = getSortValue(b, column);
 
     // Handle null/undefined values - they should be at the end
     if (va === null || va === undefined) return 1;

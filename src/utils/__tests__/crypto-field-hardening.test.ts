@@ -13,7 +13,10 @@ import {
   clearKeyCache,
   decrypt,
   decryptFields,
+  decryptFieldsBulk,
   encrypt,
+  encryptFields,
+  encryptFieldsBulk,
   getMasterKey,
   getMasterKeyGeneration,
   resetMasterKey,
@@ -22,6 +25,19 @@ import { normalizePbkdf2Iterations } from '../cryptoIterations';
 import logger from '../logger';
 
 const bytesToBase64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
+
+type SecureStoreOptions = {
+  authenticationPrompt?: string;
+  requireAuthentication?: boolean;
+};
+
+type SecureStoreMock = {
+  deleteItemAsync: (key: string, options?: SecureStoreOptions) => Promise<void>;
+  getItemAsync: (key: string, options?: SecureStoreOptions) => Promise<string | null>;
+  setItemAsync: (key: string, value: string, options?: SecureStoreOptions) => Promise<void>;
+};
+
+const getSecureStoreMock = (): SecureStoreMock => require('expo-secure-store') as SecureStoreMock;
 
 const createLegacyCtrPayload = (plainText: string, masterKey: string): string => {
   const salt = Uint8Array.from({ length: 16 }, (_, index) => index + 1);
@@ -64,19 +80,66 @@ describe('field encryption failure handling', () => {
     ).rejects.toBeDefined();
   });
 
+  it('preserves JSON-looking strings through single and bulk field encryption round trips', async () => {
+    const fieldConfig = {
+      fields: ['booleanLike', 'numberLike', 'nullLike'],
+      masterKey: 'field-literal-round-trip-master-key',
+    };
+    const record = {
+      id: 'literal-values',
+      booleanLike: 'true',
+      numberLike: '123',
+      nullLike: 'null',
+    };
+
+    const encryptedRecord = await encryptFields(record, fieldConfig);
+    await expect(decryptFields(encryptedRecord, fieldConfig)).resolves.toEqual(record);
+
+    const encryptedRecords = await encryptFieldsBulk([record], fieldConfig);
+    await expect(decryptFieldsBulk(encryptedRecords, fieldConfig)).resolves.toEqual([record]);
+  });
+
+  it('rejects unsafe field names with operation-specific crypto errors', async () => {
+    const unsafeFieldConfig = {
+      fields: ['__proto__'],
+      masterKey: 'unsafe-field-name-master-key',
+    };
+    const record = { id: 'unsafe-field', secret: 'value' };
+
+    await expect(encryptFields(record, unsafeFieldConfig)).rejects.toMatchObject({
+      name: 'CryptoError',
+      code: 'ENCRYPT_FAILED',
+    });
+    await expect(encryptFieldsBulk([record], unsafeFieldConfig)).rejects.toMatchObject({
+      name: 'CryptoError',
+      code: 'ENCRYPT_FAILED',
+    });
+    await expect(decryptFields(record, unsafeFieldConfig)).rejects.toMatchObject({
+      name: 'CryptoError',
+      code: 'DECRYPT_FAILED',
+    });
+    await expect(decryptFieldsBulk([record], unsafeFieldConfig)).rejects.toMatchObject({
+      name: 'CryptoError',
+      code: 'DECRYPT_FAILED',
+    });
+  });
+
   it('refuses an in-memory master key fallback outside tests', async () => {
     const originalNodeEnv = process.env.NODE_ENV;
-    const mutableEnv = process.env as Record<string, string | undefined>;
-    const secureStore = require('expo-secure-store') as any;
+    const secureStore = getSecureStoreMock();
     const originalGetItemAsync = secureStore.getItemAsync;
     const loggerErrorSpy = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
     secureStore.getItemAsync = jest.fn().mockRejectedValueOnce(new Error('secure store down'));
 
-    mutableEnv.NODE_ENV = 'production';
+    process.env.NODE_ENV = 'production';
     try {
       await expect(getMasterKey(false)).rejects.toMatchObject({ code: 'KEY_DERIVE_FAILED' });
     } finally {
-      mutableEnv.NODE_ENV = originalNodeEnv;
+      if (originalNodeEnv === undefined) {
+        Reflect.deleteProperty(process.env, 'NODE_ENV');
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
       secureStore.getItemAsync = originalGetItemAsync;
       loggerErrorSpy.mockRestore();
     }
@@ -99,7 +162,7 @@ describe('field encryption failure handling', () => {
   });
 
   it('does not reuse an unauthenticated legacy key for strict access', async () => {
-    const secureStore = require('expo-secure-store') as any;
+    const secureStore = getSecureStoreMock();
     const constants = require('expo-constants');
     const originalGetItemAsync = secureStore.getItemAsync;
     const originalSetItemAsync = secureStore.setItemAsync;
@@ -107,8 +170,12 @@ describe('field encryption failure handling', () => {
     const originalAppOwnership = constants.appOwnership;
     const values = new Map<string, string>([['expo_litedb_master_key_v2025', 'legacy-key']]);
     const getItemAsync = jest.fn(async (key: string) => values.get(key) ?? null);
-    const setItemAsync = jest.fn(async (key: string, value: string) => values.set(key, value));
-    const deleteItemAsync = jest.fn(async (key: string) => values.delete(key));
+    const setItemAsync = jest.fn(async (key: string, value: string) => {
+      values.set(key, value);
+    });
+    const deleteItemAsync = jest.fn(async (key: string) => {
+      values.delete(key);
+    });
 
     constants.appOwnership = 'standalone';
     secureStore.getItemAsync = getItemAsync;
@@ -131,7 +198,7 @@ describe('field encryption failure handling', () => {
   });
 
   it('serializes first strict master-key provisioning without caching the resolved key', async () => {
-    const secureStore = require('expo-secure-store') as any;
+    const secureStore = getSecureStoreMock();
     const constants = require('expo-constants');
     const originalGetItemAsync = secureStore.getItemAsync;
     const originalSetItemAsync = secureStore.setItemAsync;
@@ -182,13 +249,15 @@ describe('field encryption failure handling', () => {
   });
 
   it('removes both master-key aliases and advances the adapter invalidation generation', async () => {
-    const secureStore = require('expo-secure-store') as any;
+    const secureStore = getSecureStoreMock();
     const originalDeleteItemAsync = secureStore.deleteItemAsync;
     const values = new Map<string, string>([
       ['expo_litedb_master_key_v2025', 'regular-key'],
       ['expo_litedb_master_key_auth_v2026', 'strict-key'],
     ]);
-    const deleteItemAsync = jest.fn(async (key: string) => values.delete(key));
+    const deleteItemAsync = jest.fn(async (key: string) => {
+      values.delete(key);
+    });
     secureStore.deleteItemAsync = deleteItemAsync;
     const generationBeforeReset = getMasterKeyGeneration();
 
@@ -205,7 +274,7 @@ describe('field encryption failure handling', () => {
   });
 
   it('does not report a partial SecureStore master-key reset as successful', async () => {
-    const secureStore = require('expo-secure-store') as any;
+    const secureStore = getSecureStoreMock();
     const originalDeleteItemAsync = secureStore.deleteItemAsync;
     const deleteItemAsync = jest.fn(async (key: string) => {
       if (key === 'expo_litedb_master_key_auth_v2026') {
@@ -236,8 +305,13 @@ describe('field encryption failure handling', () => {
     configManager.updateConfig({ encryption: { keyIterations: 100000 } });
     __resetNativeCryptoForTest();
     registerNativeCryptoModule({
-      pbkdf2Sync: (password: string, salt: Uint8Array, iterations: number, dkLen: number, digest: 'sha256' | 'sha512') =>
-        pbkdf2Sync(password, salt, iterations, dkLen, digest),
+      pbkdf2Sync: (
+        password: string,
+        salt: Uint8Array,
+        iterations: number,
+        dkLen: number,
+        digest: 'sha256' | 'sha512'
+      ) => pbkdf2Sync(password, salt, iterations, dkLen, digest),
       randomBytes: (length: number) => Buffer.alloc(length, 7),
       createHash: (algorithm: 'sha256' | 'sha512') => createHash(algorithm),
     });
@@ -258,8 +332,8 @@ describe('field encryption failure handling', () => {
   });
 
   it('bounds the CTR root-key cache and evicts the least recently used key', async () => {
-    const nativePbkdf2 = jest.fn(
-      (password: string, _salt: Uint8Array, _iterations: number, dkLen: number) => new Uint8Array(dkLen).fill(password.length)
+    const nativePbkdf2 = jest.fn((password: string, _salt: Uint8Array, _iterations: number, dkLen: number) =>
+      new Uint8Array(dkLen).fill(password.length)
     );
     configManager.updateConfig({ encryption: { algorithm: 'AES-CTR', keyIterations: 10000 } });
     registerNativeCryptoModule({

@@ -1,24 +1,41 @@
-import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
+const sharedTypeScriptRules = {
+  'no-case-declarations': 'off',
+  'no-useless-escape': 'off',
+  'prefer-const': 'off',
+  '@typescript-eslint/no-unsafe-function-type': 'off',
+  '@typescript-eslint/no-unused-vars': [
+    'error',
+    {
+      argsIgnorePattern: '^_',
+      caughtErrorsIgnorePattern: '^_',
+      varsIgnorePattern: '^_',
+    },
+  ],
+  '@typescript-eslint/no-explicit-any': 'error',
+  'no-unused-vars': 'off',
+  'no-console': 'off',
+};
+
 export default tseslint.config(
-  // Ignore all files that should not be checked
   {
     ignores: [
       'dist/**',
+      'coverage/**',
+      'artifacts/**',
       '**/*.d.ts',
-      '**/*.test.ts',
-      '**/*.test.tsx',
       '**/*.js',
-      '__mocks__/**',
-      'jest.*.js',
       'liteStore.config.ts',
       'test-install/**',
       'NexSyncNew/**',
     ],
   },
-
-  // Only check actual source files
+  {
+    linterOptions: {
+      reportUnusedDisableDirectives: 'error',
+    },
+  },
   {
     files: ['src/**/*.ts', 'src/**/*.tsx'],
     plugins: {
@@ -28,16 +45,17 @@ export default tseslint.config(
       parser: tseslint.parser,
       parserOptions: { project: true, tsconfigRootDir: import.meta.dirname },
     },
-    rules: {
-      // Disable rules that cause issues
-      'no-case-declarations': 'off',
-      'no-useless-escape': 'off',
-      'prefer-const': 'off',
-      '@typescript-eslint/no-unsafe-function-type': 'off',
-      '@typescript-eslint/no-unused-vars': 'warn',
-      '@typescript-eslint/no-explicit-any': 'warn',
-      'no-unused-vars': 'off',
-      'no-console': 'off',
+    rules: sharedTypeScriptRules,
+  },
+  {
+    // Root mocks are intentionally outside tsconfig.json but must obey the same syntax rules.
+    files: ['__mocks__/**/*.ts', '__mocks__/**/*.tsx'],
+    plugins: {
+      '@typescript-eslint': tseslint.plugin,
     },
+    languageOptions: {
+      parser: tseslint.parser,
+    },
+    rules: sharedTypeScriptRules,
   }
 );

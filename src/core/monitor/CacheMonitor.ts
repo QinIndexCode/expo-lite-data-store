@@ -1,51 +1,18 @@
-/**
- * @module CacheMonitor
- * @description Cache monitor tracking cache statistics and health
- * @since 2025-11-28
- * @version 3.0.0
- */
-import { CacheManager, CacheStats } from '../cache/CacheManager';
+import { CacheManager } from '../cache/CacheManager';
+import type { CacheStats } from '../cache/CacheManager';
 
-/**
- * 缓存监控器类
- * 用于监控缓存的使用情况和性能
- */
+/** Collects bounded cache statistics and reports simple health signals. */
 export class CacheMonitor {
-  /**
-   * 缓存管理器实例
-   */
   private cacheManager: CacheManager;
-
-  /**
-   * 历史统计记录
-   */
   private history: CacheStats[] = [];
-
-  /**
-   * 最大保留记录数
-   */
   private readonly maxHistoryRecords = 100;
-
-  /**
-   * 监控间隔（毫秒）
-   */
   private monitoringInterval: ReturnType<typeof setInterval> | null = null;
+  private enabled = true;
 
-  /**
-   * 是否启用监控
-   */
-  private enabled: boolean = true;
-
-  /**
-   * 构造函数
-   */
   constructor(cacheManager: CacheManager) {
     this.cacheManager = cacheManager;
   }
 
-  /**
-   * 开始监控
-   */
   startMonitoring(intervalMs: number = 60000): void {
     if (this.monitoringInterval) {
       this.stopMonitoring();
@@ -57,51 +24,33 @@ export class CacheMonitor {
       }
     }, intervalMs);
 
-    // Record immediately once
     this.recordStats();
   }
 
-  /**
-   * 停止监控
-   */
   stopMonitoring(): void {
     if (this.monitoringInterval) {
       clearInterval(this.monitoringInterval);
       this.monitoringInterval = null;
-      // Monitor已停止
     }
   }
 
-  /**
-   * 记录统计信息
-   */
   recordStats(): void {
     const stats = this.cacheManager.getStats();
     this.history.push({ ...stats });
 
-    // Limit history record count
     if (this.history.length > this.maxHistoryRecords) {
       this.history.shift();
     }
   }
 
-  /**
-   * 获取当前统计信息
-   */
   getCurrentStats(): CacheStats {
     return this.cacheManager.getStats();
   }
 
-  /**
-   * 获取历史统计信息
-   */
   getHistory(): CacheStats[] {
     return [...this.history];
   }
 
-  /**
-   * 获取平均命中率
-   */
   getAverageHitRate(): number {
     if (this.history.length === 0) {
       return 0;
@@ -111,19 +60,14 @@ export class CacheMonitor {
     return totalHitRate / this.history.length;
   }
 
-  /**
-   * 获取内存使用趋势
-   */
   getMemoryUsageTrend(): { timestamp: number; memoryUsage: number }[] {
     return this.history.map((stats, index) => ({
-      timestamp: Date.now() - (this.history.length - index) * 60000, // Estimated timestamp
+      // CacheStats has no timestamp, so historical times use the sampling interval.
+      timestamp: Date.now() - (this.history.length - index) * 60000,
       memoryUsage: stats.memoryUsage,
     }));
   }
 
-  /**
-   * 检查缓存健康状态
-   */
   checkHealth(): {
     healthy: boolean;
     issues: string[];
@@ -133,19 +77,16 @@ export class CacheMonitor {
     const issues: string[] = [];
     const recommendations: string[] = [];
 
-    // Check命中率
     if (stats.hitRate < 0.5) {
       issues.push(`缓存命中率较低: ${(stats.hitRate * 100).toFixed(2)}%`);
       recommendations.push('考虑增加缓存大小或调整缓存策略');
     }
 
-    // Check内存使用
     if (stats.maxMemoryUsage > 0 && stats.memoryUsage > stats.maxMemoryUsage * 0.9) {
       issues.push(`内存使用率较高: ${((stats.memoryUsage / stats.maxMemoryUsage) * 100).toFixed(2)}%`);
       recommendations.push('考虑增加最大内存限制或优化缓存清理策略');
     }
 
-    // Check淘汰次数
     if (stats.evictions > stats.writes * 0.5) {
       issues.push(`缓存淘汰频繁: ${stats.evictions} 次淘汰，${stats.writes} 次写入`);
       recommendations.push('考虑增加缓存容量');
@@ -158,23 +99,14 @@ export class CacheMonitor {
     };
   }
 
-  /**
-   * 启用/禁用监控
-   */
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
   }
 
-  /**
-   * 是否启用监控
-   */
   isEnabled(): boolean {
     return this.enabled;
   }
 
-  /**
-   * 清除历史记录
-   */
   clearHistory(): void {
     this.history = [];
   }

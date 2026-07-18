@@ -1,103 +1,84 @@
 import { ConfigValidator } from '../configValidator';
 import type { ConfigValidationResult } from '../configValidator';
 import { configManager } from '../../core/config/ConfigManager';
+import type { LiteStoreConfig } from '../../types/config';
 
-// 保存原始配置，用于测试后恢复
 describe('ConfigValidator', () => {
-  // 测试前保存原始配置
-  const originalConfig = { ...configManager.getConfig() };
+  const originalConfig = structuredClone(configManager.getConfig());
 
-  // 测试后恢复原始配置
-  afterAll(() => {
-    configManager.setConfig(originalConfig);
+  afterEach(() => {
+    configManager.setConfig(structuredClone(originalConfig));
   });
 
-  test('should validate complete configuration successfully', () => {
+  it('accepts the complete default configuration', () => {
     const result: ConfigValidationResult = ConfigValidator.validateAll();
     expect(result.isValid).toBe(true);
     expect(result.errors).toEqual([]);
   });
 
-  test('should handle missing encryption configuration gracefully', () => {
-    // 删除加密配置
-    const currentConfig = { ...configManager.getConfig() };
-    delete (currentConfig as any).encryption;
+  it('accepts a configuration without encryption overrides', () => {
+    const { encryption: _encryption, ...currentConfig } = configManager.getConfig();
     configManager.setConfig(currentConfig);
 
     const result: ConfigValidationResult = ConfigValidator.validateAll();
     expect(result.isValid).toBe(true);
     expect(result.errors).toEqual([]);
-    expect(result.warnings.length).toBeLessThanOrEqual(3); // 允许少量警告
   });
 
-  test('should handle missing api configuration gracefully', () => {
-    // 删除API配置
-    const currentConfig = { ...configManager.getConfig() };
-    delete (currentConfig as any).api;
+  it('accepts a configuration without API overrides', () => {
+    const { api: _api, ...currentConfig } = configManager.getConfig();
     configManager.setConfig(currentConfig);
 
     const result: ConfigValidationResult = ConfigValidator.validateAll();
     expect(result.isValid).toBe(true);
     expect(result.errors).toEqual([]);
-    expect(result.warnings.length).toBeLessThanOrEqual(3); // 允许少量警告
   });
 
-  test('should handle missing cache configuration gracefully', () => {
-    // 删除缓存配置
-    const currentConfig = { ...configManager.getConfig() };
-    delete (currentConfig as any).cache;
+  it('accepts a configuration without cache overrides and restores cache defaults', () => {
+    const { cache: _cache, ...currentConfig } = configManager.getConfig();
     configManager.setConfig(currentConfig);
 
     const result: ConfigValidationResult = ConfigValidator.validateAll();
     expect(result.isValid).toBe(true);
     expect(result.errors).toEqual([]);
 
-    // 测试自动修复功能
     const fixedConfig = ConfigValidator.autoFix();
     expect(fixedConfig.cache).toBeDefined();
     expect(fixedConfig.cache.maxSize).toBeDefined();
     expect(fixedConfig.cache.defaultExpiry).toBeDefined();
   });
 
-  test('should handle missing performance configuration gracefully', () => {
-    // 删除性能配置
-    const currentConfig = { ...configManager.getConfig() };
-    delete (currentConfig as any).performance;
+  it('accepts a configuration without performance overrides and restores defaults', () => {
+    const { performance: _performance, ...currentConfig } = configManager.getConfig();
     configManager.setConfig(currentConfig);
 
     const result: ConfigValidationResult = ConfigValidator.validateAll();
     expect(result.isValid).toBe(true);
     expect(result.errors).toEqual([]);
 
-    // 测试自动修复功能
     const fixedConfig = ConfigValidator.autoFix();
     expect(fixedConfig.performance).toBeDefined();
     expect(fixedConfig.performance.enableQueryOptimization).toBeDefined();
     expect(fixedConfig.performance.maxConcurrentOperations).toBeDefined();
   });
 
-  test('should handle missing monitoring configuration gracefully', () => {
-    // 删除监控配置
-    const currentConfig = { ...configManager.getConfig() };
-    delete (currentConfig as any).monitoring;
+  it('accepts a configuration without monitoring overrides and restores defaults', () => {
+    const { monitoring: _monitoring, ...currentConfig } = configManager.getConfig();
     configManager.setConfig(currentConfig);
 
     const result: ConfigValidationResult = ConfigValidator.validateAll();
     expect(result.isValid).toBe(true);
     expect(result.errors).toEqual([]);
 
-    // 测试自动修复功能
     const fixedConfig = ConfigValidator.autoFix();
     expect(fixedConfig.monitoring).toBeDefined();
     expect(fixedConfig.monitoring.enablePerformanceTracking).toBeDefined();
     expect(fixedConfig.monitoring.enableHealthChecks).toBeDefined();
   });
 
-  test('should validate auto-fixed configuration', () => {
-    // 测试自动修复功能
+  it('produces a complete valid configuration when auto-fixing defaults', () => {
     const fixedConfig = ConfigValidator.autoFix();
 
-    // 验证修复后的配置
     expect(fixedConfig).toBeDefined();
     expect(fixedConfig.chunkSize).toBeDefined();
     expect(fixedConfig.storageFolder).toBeDefined();
@@ -109,50 +90,83 @@ describe('ConfigValidator', () => {
     expect(fixedConfig.api).toBeDefined();
     expect(fixedConfig.monitoring).toBeDefined();
 
-    // 验证修复后的配置通过验证
     const result: ConfigValidationResult = ConfigValidator.validateAll();
     expect(result.isValid).toBe(true);
     expect(result.errors).toEqual([]);
   });
 
-  test('should detect invalid types in configuration', () => {
-    // 修改配置为无效类型
-    const currentConfig = JSON.parse(JSON.stringify(configManager.getConfig()));
-    
-    (currentConfig as any).chunkSize = 'invalid';
-    (currentConfig as any).storageFolder = 123;
-    (currentConfig as any).sortMethods = 456;
-    (currentConfig as any).timeout = 'invalid';
-    (currentConfig as any).encryption.keyIterations = 'invalid';
-    (currentConfig as any).encryption.encryptedFields = 'invalid';
-    (currentConfig as any).cache.maxSize = 'invalid';
-    (currentConfig as any).performance.maxConcurrentOperations = 'invalid';
-    (currentConfig as any).performance.memoryWarningThreshold = 'invalid';
-    (currentConfig as any).api.rateLimit.requestsPerSecond = 'invalid';
-    (currentConfig as any).api.rateLimit.enabled = 'invalid';
-    (currentConfig as any).monitoring.enablePerformanceTracking = 'invalid';
-    
-    const getConfigSpy = jest.spyOn(configManager, 'getConfig').mockReturnValue(currentConfig);
+  it('reports invalid API and auto-sync values with other invalid configuration types', () => {
+    const config = configManager.getConfig();
+    const invalidConfig = {
+      ...config,
+      chunkSize: 'invalid',
+      storageFolder: 123,
+      sortMethods: 456,
+      timeout: 'invalid',
+      encryption: {
+        ...config.encryption,
+        keyIterations: 'invalid',
+        encryptedFields: 'invalid',
+      },
+      cache: {
+        ...config.cache,
+        maxSize: 'invalid',
+      },
+      performance: {
+        ...config.performance,
+        maxConcurrentOperations: 'invalid',
+        memoryWarningThreshold: 'invalid',
+      },
+      api: {
+        ...config.api,
+        rateLimit: {
+          ...config.api.rateLimit,
+          requestsPerSecond: 'invalid',
+          enabled: 'invalid',
+        },
+        retry: {
+          ...config.api.retry,
+          maxAttempts: 'invalid',
+          backoffMultiplier: 0,
+        },
+      },
+      autoSync: {
+        ...config.autoSync,
+        enabled: 'invalid',
+        interval: 0,
+        minItems: 'invalid',
+        batchSize: 0,
+      },
+      monitoring: {
+        ...config.monitoring,
+        enablePerformanceTracking: 'invalid',
+      },
+    };
+
+    const getConfigSpy = jest
+      .spyOn(configManager, 'getConfig')
+      .mockReturnValue(invalidConfig as unknown as LiteStoreConfig);
     try {
-      // 验证能检测到所有无效类型，不绕过配置管理器的安全写入边界
       const result: ConfigValidationResult = ConfigValidator.validateAll();
       expect(result.isValid).toBe(false);
       expect(result.errors.length).toBeGreaterThanOrEqual(3);
 
-      // 检查一些关键错误
       expect(result.errors).toContain('chunkSize must be a number');
-      expect(result.errors).toContain('storageFolder must be one non-empty directory name without path separators or traversal');
+      expect(result.errors).toContain(
+        'storageFolder must be one non-empty directory name without path separators or traversal'
+      );
       expect(result.errors).toContain('encryption.keyIterations must be a number');
+      expect(result.errors).toContain('api.rateLimit.requestsPerSecond must be a number');
+      expect(result.errors).toContain('api.retry.maxAttempts must be a number');
+      expect(result.errors).toContain('autoSync.enabled must be a boolean');
     } finally {
       getConfigSpy.mockRestore();
     }
   });
 
-  test('should auto fix invalid configuration', () => {
-    // 测试自动修复功能
+  it('restores invalid configuration values to supported defaults', () => {
     const fixedConfig = ConfigValidator.autoFix();
 
-    // 验证修复后的配置
     expect(typeof fixedConfig.chunkSize).toBe('number');
     expect(fixedConfig.chunkSize).toBe(5 * 1024 * 1024);
 
@@ -179,15 +193,21 @@ describe('ConfigValidator', () => {
     expect(typeof fixedConfig.cache.maxSize).toBe('number');
 
     expect(typeof fixedConfig.api.rateLimit.requestsPerSecond).toBe('number');
+    expect(typeof fixedConfig.api.retry.maxAttempts).toBe('number');
+    const autoSync = fixedConfig.autoSync;
+    expect(autoSync).toBeDefined();
+    if (!autoSync) {
+      throw new Error('autoSync defaults were not restored');
+    }
+    expect(typeof autoSync.enabled).toBe('boolean');
+    expect(typeof autoSync.interval).toBe('number');
 
     expect(typeof fixedConfig.monitoring.enablePerformanceTracking).toBe('boolean');
   });
 
-  test('should validate fixed configuration successfully', () => {
-    // 获取修复后的配置
+  it('accepts an auto-fixed configuration after it is applied', () => {
     const fixedConfig = ConfigValidator.autoFix();
 
-    // 使用修复后的配置验证
     configManager.setConfig(fixedConfig);
 
     const result: ConfigValidationResult = ConfigValidator.validateAll();

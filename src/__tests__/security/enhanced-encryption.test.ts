@@ -1,22 +1,28 @@
-// src/__tests__/security/enhanced-encryption.test.ts
-// 增强的加密模式测试
+import {
+  createTable,
+  insert,
+  findOne,
+  findMany,
+  update,
+  remove,
+  deleteTable,
+  hasTable,
+  beginTransaction,
+  commit,
+  rollback,
+} from '../../expo-lite-data-store';
 
-import { createTable, insert, findOne, findMany, update, remove, deleteTable, hasTable, beginTransaction, commit, rollback } from '../../expo-lite-data-store';
-
-// 模拟 expo-secure-store
 const mockGetItemAsync = jest.fn().mockResolvedValue('mock-encrypted-key');
 const mockSetItemAsync = jest.fn().mockResolvedValue(undefined);
 const mockDeleteItemAsync = jest.fn().mockResolvedValue(undefined);
 
 jest.mock('expo-secure-store', () => ({
   getItemAsync: () => mockGetItemAsync(),
-  setItemAsync: (key: any, value: any) => mockSetItemAsync(key, value),
-  deleteItemAsync: (key: any) => mockDeleteItemAsync(key),
+  setItemAsync: (key: string, value: string) => mockSetItemAsync(key, value),
+  deleteItemAsync: (key: string) => mockDeleteItemAsync(key),
 }));
 
-// 不再需要模拟配置，因为字段级加密配置现在是通过表创建时的 options 参数来设置的
-
-describe('Enhanced Encryption Tests', () => {
+describe('enhanced encryption', () => {
   const ENCRYPTED_TABLE = 'enhanced_encrypted_table';
   const ENCRYPTED_OPTIONS = { encrypted: true } as const;
   const TEST_DATA = [
@@ -37,7 +43,7 @@ describe('Enhanced Encryption Tests', () => {
     }
   });
 
-  describe('Encrypted Table CRUD with Complex Queries', () => {
+  describe('encrypted table queries', () => {
     beforeEach(async () => {
       await createTable(ENCRYPTED_TABLE, {
         encrypted: true,
@@ -45,111 +51,117 @@ describe('Enhanced Encryption Tests', () => {
       await insert(ENCRYPTED_TABLE, TEST_DATA, { encrypted: true });
     });
 
-    it('should support findMany with complex where conditions on encrypted table', async () => {
+    it('filters records with compound conditions', async () => {
       const users = await findMany(ENCRYPTED_TABLE, {
         where: { $and: [{ active: true }, { age: { $gt: 25 } }] },
-        encrypted: true
+        encrypted: true,
       });
       expect(users.length).toBe(1);
       expect(users[0].id).toBe(3);
     });
 
-    it('should support sorting and pagination on encrypted table', async () => {
+    it('sorts and paginates records', async () => {
       const users = await findMany(ENCRYPTED_TABLE, {
         where: {},
         sortBy: 'age',
         order: 'desc',
         limit: 2,
-        encrypted: true
+        encrypted: true,
       });
       expect(users.length).toBe(2);
       expect(users[0].age).toBe(35);
       expect(users[1].age).toBe(30);
     });
 
-    it('should support update with complex where conditions on encrypted table', async () => {
-      const updatedCount = await update(ENCRYPTED_TABLE, { age: 40 }, {
-        where: { $or: [{ id: 1 }, { id: 3 }] },
-        encrypted: true
-      });
+    it('updates records selected by compound conditions', async () => {
+      const updatedCount = await update(
+        ENCRYPTED_TABLE,
+        { age: 40 },
+        {
+          where: { $or: [{ id: 1 }, { id: 3 }] },
+          encrypted: true,
+        }
+      );
       expect(updatedCount).toBe(2);
 
       const updatedUsers = await findMany(ENCRYPTED_TABLE, {
         where: { id: { $in: [1, 3] } },
-        encrypted: true
+        encrypted: true,
       });
       expect(updatedUsers.every(user => user.age === 40)).toBe(true);
     });
 
-    it('should support remove with complex where conditions on encrypted table', async () => {
+    it('removes records selected by compound conditions', async () => {
       const removedCount = await remove(ENCRYPTED_TABLE, {
         where: { active: false },
-        encrypted: true
+        encrypted: true,
       });
       expect(removedCount).toBe(1);
 
       const remainingUsers = await findMany(ENCRYPTED_TABLE, {
         where: {},
-        encrypted: true
+        encrypted: true,
       });
       expect(remainingUsers.length).toBe(2);
       expect(remainingUsers.every(user => user.active === true)).toBe(true);
     });
   });
 
-
-
-  describe('Encrypted Transactions Tests', () => {
-    it('should support transactions on encrypted tables', async () => {
+  describe('encrypted transactions', () => {
+    it('commits writes on encrypted tables', async () => {
       await createTable(ENCRYPTED_TABLE, {
-        encrypted: true
+        encrypted: true,
       });
 
-      // 开始事务
       await beginTransaction(ENCRYPTED_OPTIONS);
-      // 使用insert方法一次性插入多条记录
-      await insert(ENCRYPTED_TABLE, [
-        { id: 1, name: 'Transaction User 1' },
-        { id: 2, name: 'Transaction User 2' }
-      ], { encrypted: true });
+      await insert(
+        ENCRYPTED_TABLE,
+        [
+          { id: 1, name: 'Transaction User 1' },
+          { id: 2, name: 'Transaction User 2' },
+        ],
+        { encrypted: true }
+      );
       await commit(ENCRYPTED_OPTIONS);
 
       const users = await findMany(ENCRYPTED_TABLE, {
         where: {},
-        encrypted: true
+        encrypted: true,
       });
       expect(users.length).toBe(2);
     });
 
-    it('should rollback transactions on encrypted tables', async () => {
+    it('rolls back writes on encrypted tables', async () => {
       await createTable(ENCRYPTED_TABLE, {
-        encrypted: true
+        encrypted: true,
       });
       await insert(ENCRYPTED_TABLE, { id: 1, name: 'Initial User' }, { encrypted: true });
 
-      // 开始事务
       await beginTransaction(ENCRYPTED_OPTIONS);
-      await update(ENCRYPTED_TABLE, { name: 'Updated User' }, {
-        where: { id: 1 },
-        encrypted: true
-      });
+      await update(
+        ENCRYPTED_TABLE,
+        { name: 'Updated User' },
+        {
+          where: { id: 1 },
+          encrypted: true,
+        }
+      );
       await insert(ENCRYPTED_TABLE, { id: 2, name: 'New User' }, { encrypted: true });
       await rollback(ENCRYPTED_OPTIONS);
 
-      // 验证回滚后数据未改变
       const users = await findMany(ENCRYPTED_TABLE, {
         where: {},
-        encrypted: true
+        encrypted: true,
       });
       expect(users.length).toBe(1);
       expect(users[0].name).toBe('Initial User');
     });
   });
 
-  describe('Error Handling in Encryption', () => {
-    it('should reject an explicit plain-surface request for an encrypted table', async () => {
+  describe('encryption failures', () => {
+    it('rejects an explicit plain-surface request for an encrypted table', async () => {
       await createTable(ENCRYPTED_TABLE, {
-        encrypted: true
+        encrypted: true,
       });
 
       await expect(
@@ -160,21 +172,22 @@ describe('Enhanced Encryption Tests', () => {
       ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
     });
 
-    it('should handle missing encryption key gracefully', async () => {
-      // 模拟密钥获取失败
+    it('allows encrypted table setup when the stored key is unavailable', async () => {
       mockGetItemAsync.mockResolvedValue(null);
 
-      // 尝试创建加密表时应该成功但可能无法使用
-      await expect(createTable(ENCRYPTED_TABLE, {
-        encrypted: true
-      })).resolves.not.toThrow();
-
-      // 恢复模拟
-      mockGetItemAsync.mockResolvedValue('mock-encrypted-key');
+      try {
+        await expect(
+          createTable(ENCRYPTED_TABLE, {
+            encrypted: true,
+          })
+        ).resolves.not.toThrow();
+      } finally {
+        mockGetItemAsync.mockResolvedValue('mock-encrypted-key');
+      }
     });
   });
 
-  describe('Full Table Encryption Tests', () => {
+  describe('full-table encryption', () => {
     const FULL_ENCRYPTION_TABLE = 'full_table_encryption_table';
 
     beforeEach(async () => {
@@ -189,28 +202,25 @@ describe('Enhanced Encryption Tests', () => {
       }
     });
 
-    it('should support full table encryption', async () => {
-      // 创建表
+    it('round-trips a record encrypted as a full table', async () => {
       await createTable(FULL_ENCRYPTION_TABLE, {
-        encrypted: true
+        encrypted: true,
       });
 
-      // 插入数据，启用整表加密
       const testData = {
         id: 1,
         name: 'Test User',
-        data: 'sensitive information'
+        data: 'sensitive information',
       };
 
       await insert(FULL_ENCRYPTION_TABLE, testData, {
         encrypted: true,
-        encryptFullTable: true
+        encryptFullTable: true,
       });
 
-      // 查询数据，验证整表加密功能正常
       const result = await findOne(FULL_ENCRYPTION_TABLE, {
         where: { id: 1 },
-        encrypted: true
+        encrypted: true,
       });
 
       expect(result).not.toBeNull();
@@ -219,27 +229,25 @@ describe('Enhanced Encryption Tests', () => {
       expect(result?.data).toBe('sensitive information');
     });
 
-    it('should support findMany with full table encryption', async () => {
+    it('queries multiple records encrypted as a full table', async () => {
       await createTable(FULL_ENCRYPTION_TABLE, {
-        encrypted: true
+        encrypted: true,
       });
 
-      // 插入多条数据，启用整表加密
       const users = [
         { id: 1, name: 'User 1', email: 'user1@example.com', age: 25 },
         { id: 2, name: 'User 2', email: 'user2@example.com', age: 30 },
-        { id: 3, name: 'User 3', email: 'user3@example.com', age: 35 }
+        { id: 3, name: 'User 3', email: 'user3@example.com', age: 35 },
       ];
 
       await insert(FULL_ENCRYPTION_TABLE, users, {
         encrypted: true,
-        encryptFullTable: true
+        encryptFullTable: true,
       });
 
-      // 查询数据，验证查询功能正常
       const result = await findMany(FULL_ENCRYPTION_TABLE, {
         where: { age: { $gt: 25 } },
-        encrypted: true
+        encrypted: true,
       });
 
       expect(result.length).toBe(2);
@@ -248,9 +256,7 @@ describe('Enhanced Encryption Tests', () => {
     });
   });
 
-  describe('Encryption Mode Conflict Tests', () => {
-    // 注意：由于我们在全局模拟配置中禁用了字段级加密，
-    // 这个测试用例的测试场景已经不适用，我们将其修改为测试其他重要的加密功能
+  describe('encryption mode changes', () => {
     const CONFLICT_TABLE = 'encryption_conflict_table';
 
     beforeEach(async () => {
@@ -265,44 +271,47 @@ describe('Enhanced Encryption Tests', () => {
       }
     });
 
-    it('should handle encryption mode transitions correctly', async () => {
-      // 创建加密表
+    it('updates a full-table encrypted record through the encrypted surface', async () => {
       await createTable(CONFLICT_TABLE, {
-        encrypted: true
-      });
-
-      // 首先使用整表加密插入数据
-      await insert(CONFLICT_TABLE, {
-        id: 1,
-        name: 'Test User',
-        email: 'test@example.com',
-        password: 'secret123'
-      }, {
         encrypted: true,
-        encryptFullTable: true
       });
 
-      // 验证数据插入成功
+      await insert(
+        CONFLICT_TABLE,
+        {
+          id: 1,
+          name: 'Test User',
+          email: 'test@example.com',
+          password: 'secret123',
+        },
+        {
+          encrypted: true,
+          encryptFullTable: true,
+        }
+      );
+
       const user = await findOne(CONFLICT_TABLE, {
         where: { id: 1 },
-        encrypted: true
+        encrypted: true,
       });
 
       expect(user).not.toBeNull();
       expect(user?.name).toBe('Test User');
 
-      // 更新数据，不使用整表加密（验证模式转换）
-      await update(CONFLICT_TABLE, {
-        name: 'Updated User'
-      }, {
-        where: { id: 1 },
-        encrypted: true
-      });
+      await update(
+        CONFLICT_TABLE,
+        {
+          name: 'Updated User',
+        },
+        {
+          where: { id: 1 },
+          encrypted: true,
+        }
+      );
 
-      // 验证更新成功
       const updatedUser = await findOne(CONFLICT_TABLE, {
         where: { id: 1 },
-        encrypted: true
+        encrypted: true,
       });
 
       expect(updatedUser).not.toBeNull();
@@ -310,7 +319,7 @@ describe('Enhanced Encryption Tests', () => {
     });
   });
 
-  describe('Field Level Encryption Integration Tests', () => {
+  describe('encrypted field reads', () => {
     const FIELD_ENCRYPTION_TABLE = 'field_level_encryption_integration';
 
     beforeEach(async () => {
@@ -325,30 +334,27 @@ describe('Enhanced Encryption Tests', () => {
       }
     });
 
-    it('should integrate with field level encryption from global config', async () => {
-      // 创建加密表
+    it('returns encrypted record fields through findOne', async () => {
       await createTable(FIELD_ENCRYPTION_TABLE, {
-        encrypted: true
+        encrypted: true,
       });
 
-      // 插入包含敏感字段的数据（email和password会被字段级加密）
       const testUser = {
         id: 1,
         name: 'John Doe',
         email: 'john@example.com',
         password: 'secret123',
         age: 30,
-        active: true
+        active: true,
       };
 
       await insert(FIELD_ENCRYPTION_TABLE, testUser, {
-        encrypted: true
+        encrypted: true,
       });
 
-      // 查询数据，验证所有字段都能正确返回
       const user = await findOne(FIELD_ENCRYPTION_TABLE, {
         where: { id: 1 },
-        encrypted: true
+        encrypted: true,
       });
 
       expect(user).not.toBeNull();
@@ -359,26 +365,24 @@ describe('Enhanced Encryption Tests', () => {
       expect(user?.active).toBe(true);
     });
 
-    it('should support field level encryption with findMany', async () => {
+    it('returns encrypted record fields through findMany', async () => {
       await createTable(FIELD_ENCRYPTION_TABLE, {
-        encrypted: true
+        encrypted: true,
       });
 
-      // 插入多条包含敏感字段的数据
       const users = [
         { id: 1, name: 'User 1', email: 'user1@example.com', password: 'pass1', age: 25 },
         { id: 2, name: 'User 2', email: 'user2@example.com', password: 'pass2', age: 30 },
-        { id: 3, name: 'User 3', email: 'user3@example.com', password: 'pass3', age: 35 }
+        { id: 3, name: 'User 3', email: 'user3@example.com', password: 'pass3', age: 35 },
       ];
 
       await insert(FIELD_ENCRYPTION_TABLE, users, {
-        encrypted: true
+        encrypted: true,
       });
 
-      // 查询数据，验证查询功能正常
       const result = await findMany(FIELD_ENCRYPTION_TABLE, {
         where: { age: { $gt: 25 } },
-        encrypted: true
+        encrypted: true,
       });
 
       expect(result.length).toBe(2);

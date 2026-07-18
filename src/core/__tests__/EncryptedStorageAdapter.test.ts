@@ -1,9 +1,50 @@
-// src/core/__tests__/EncryptedStorageAdapter.test.ts
 import { EncryptedStorageAdapter } from '../EncryptedStorageAdapter';
 import { MetadataManager } from '../meta/MetadataManager';
 import storage, { FileSystemStorageAdapter } from '../adapter/FileSystemStorageAdapter';
 import { configManager } from '../config/ConfigManager';
+import { DataWriter } from '../data/DataWriter';
 import { resetMasterKey } from '../../utils/crypto';
+import type { ReadOptions, StorageRecord } from '../../types/storageTypes';
+
+type EncryptedAdapterPrivateAccess = {
+  getOrInitKey: () => Promise<string>;
+  key: () => Promise<string>;
+};
+
+type StoragePrivateAccess = {
+  dataWriter: DataWriter;
+};
+
+type EncryptedAdapterStaticAccess = {
+  tableWriteLocks: Map<string, Promise<void>>;
+};
+
+type SecureStoreOptions = {
+  authenticationPrompt?: string;
+  requireAuthentication?: boolean;
+};
+
+type SecureStoreMock = {
+  deleteItemAsync: (key: string, options?: SecureStoreOptions) => Promise<void>;
+  getItemAsync: (key: string, options?: SecureStoreOptions) => Promise<string | null>;
+};
+
+const getEncryptedAdapterPrivateAccess = (adapter: EncryptedStorageAdapter): EncryptedAdapterPrivateAccess =>
+  adapter as unknown as EncryptedAdapterPrivateAccess;
+
+const getEncryptedAdapterStaticAccess = (): EncryptedAdapterStaticAccess =>
+  EncryptedStorageAdapter as unknown as EncryptedAdapterStaticAccess;
+
+const getSecureStoreMock = (): SecureStoreMock => require('expo-secure-store') as SecureStoreMock;
+
+const getStoragePrivateAccess = (adapter: FileSystemStorageAdapter): StoragePrivateAccess =>
+  adapter as unknown as StoragePrivateAccess;
+
+const deleteTableIfPresent = async (tableName: string): Promise<void> => {
+  if (await storage.hasTable(tableName)) {
+    await storage.deleteTable(tableName);
+  }
+};
 
 function failFirstLogicalRecordCountPublication(message: string): () => void {
   const originalSetLogicalRecordCount = FileSystemStorageAdapter.prototype.setLogicalRecordCount;
@@ -39,10 +80,8 @@ describe('EncryptedStorageAdapter', () => {
   });
 
   afterEach(async () => {
-    try {
+    if (await adapter.hasTable(tableName)) {
       await adapter.deleteTable(tableName);
-    } catch (e) {
-      // 忽略删除错误
     }
     if (metadataManager) {
       metadataManager.cleanup();
@@ -50,20 +89,20 @@ describe('EncryptedStorageAdapter', () => {
     configManager.resetConfig();
   });
 
-  describe('基本操作', () => {
-    it('应该能够创建和检查表', async () => {
+  describe('basic operations', () => {
+    it('creates and checks encrypted tables', async () => {
       const hasTable = await adapter.hasTable(tableName);
       expect(hasTable).toBe(true);
     });
 
-    it('应该能够列出所有表', async () => {
+    it('lists encrypted tables', async () => {
       const tables = await adapter.listTables();
       expect(tables).toContain(tableName);
     });
   });
 
-  describe('数据读写', () => {
-    it('应该通过加密写入路径持久化 initialData', async () => {
+  describe('encrypted reads and writes', () => {
+    it('persists initial data through the encrypted write path', async () => {
       const initialTable = 'test_encrypted_initial_data';
       const initialData = [{ id: 1, secret: 'plain-secret', visible: 'ok' }];
 
@@ -82,7 +121,7 @@ describe('EncryptedStorageAdapter', () => {
       }
     });
 
-    it('应该在表启用加密且 encryptedFields 为空时加密并解密所有字段', async () => {
+    it('encrypts and decrypts all fields when encrypted fields are unspecified', async () => {
       const encryptedAllFieldsTable = 'test_encrypted_all_fields';
       const testData = [{ id: 1, name: 'Alice', age: 25, active: true }];
 
@@ -109,7 +148,7 @@ describe('EncryptedStorageAdapter', () => {
       }
     });
 
-    it('应该能够写入和读取加密数据', async () => {
+    it('writes and reads an encrypted record', async () => {
       const testData = { id: 1, name: 'Alice', age: 25 };
 
       await adapter.overwrite(tableName, testData);
@@ -119,7 +158,7 @@ describe('EncryptedStorageAdapter', () => {
       expect(result[0]).toEqual(testData);
     });
 
-    it('应该能够写入和读取加密数据数组', async () => {
+    it('writes and reads an encrypted record array', async () => {
       const testData = [
         { id: 1, name: 'Alice', age: 25 },
         { id: 2, name: 'Bob', age: 30 },
@@ -132,9 +171,35 @@ describe('EncryptedStorageAdapter', () => {
       expect(result.length).toBe(3);
       expect(result).toEqual(testData);
     });
+
+    it('applies read options after decrypting field-encrypted records', async () => {
+      const encryptedTable = 'test_encrypted_read_options';
+      type EncryptedRecord = { id: number; category: string; secret: string };
+
+      try {
+        await adapter.createTable(encryptedTable, { encrypted: true, encryptedFields: ['secret'] });
+        await adapter.overwrite(encryptedTable, [
+          { id: 1, category: 'primary', secret: 'first' },
+          { id: 2, category: 'secondary', secret: 'ignored' },
+          { id: 3, category: 'primary', secret: 'latest' },
+        ]);
+
+        await expect(
+          adapter.read<EncryptedRecord>(encryptedTable, {
+            filter: { category: 'primary' },
+            sortBy: 'id',
+            order: 'desc',
+            limit: 1,
+            bypassCache: true,
+          })
+        ).resolves.toEqual([{ id: 3, category: 'primary', secret: 'latest' }]);
+      } finally {
+        await deleteTableIfPresent(encryptedTable);
+      }
+    });
   });
 
-  describe('查询操作', () => {
+  describe('queries', () => {
     beforeEach(async () => {
       const testData = [
         { id: 1, name: 'Alice', age: 25 },
@@ -144,12 +209,12 @@ describe('EncryptedStorageAdapter', () => {
       await adapter.overwrite(tableName, testData);
     });
 
-    it('应该能够通过findOne查找单条数据', async () => {
+    it('finds one encrypted record', async () => {
       const result = await adapter.findOne(tableName, { id: 1 });
       expect(result).toEqual({ id: 1, name: 'Alice', age: 25 });
     });
 
-    it('应该能够通过findMany查找多条数据', async () => {
+    it('finds multiple encrypted records', async () => {
       const result = await adapter.findMany(tableName, { age: { $gt: 25 } });
       expect(result.length).toBe(2);
       expect(result).toEqual([
@@ -158,15 +223,15 @@ describe('EncryptedStorageAdapter', () => {
       ]);
     });
 
-    it('应该能够通过findMany进行分页', async () => {
+    it('paginates encrypted records', async () => {
       const result = await adapter.findMany(tableName, {}, { skip: 1, limit: 1 });
       expect(result.length).toBe(1);
       expect(result[0]).toEqual({ id: 2, name: 'Bob', age: 30 });
     });
   });
 
-  describe('计数操作', () => {
-    it('应该能够正确计数表中的数据', async () => {
+  describe('counts', () => {
+    it('counts records in an encrypted table', async () => {
       const testData = [
         { id: 1, name: 'Alice', age: 25 },
         { id: 2, name: 'Bob', age: 30 },
@@ -178,7 +243,7 @@ describe('EncryptedStorageAdapter', () => {
       expect(count).toBe(2);
     });
 
-    it('整表加密应报告并持久化逻辑记录数，而不是物理密文包数', async () => {
+    it('reports and persists logical record counts for full-table encryption', async () => {
       const fullTable = 'test_full_table_count';
       const testData = [
         { id: 1, secret: 'alpha' },
@@ -203,7 +268,7 @@ describe('EncryptedStorageAdapter', () => {
       }
     });
 
-    it('整表加密追加时覆盖密文包而不是追加第二个密文包', async () => {
+    it('overwrites the ciphertext envelope when appending full-table encrypted records', async () => {
       const fullTable = 'test_full_table_append';
 
       try {
@@ -218,9 +283,9 @@ describe('EncryptedStorageAdapter', () => {
         await expect(storage.read(fullTable, { bypassCache: true })).resolves.toHaveLength(1);
         await expect(adapter.read(fullTable, { bypassCache: true })).resolves.toEqual(
           expect.arrayContaining([
-          { id: 1, secret: 'alpha' },
-          { id: 2, secret: 'beta' },
-          { id: 3, secret: 'gamma' },
+            { id: 1, secret: 'alpha' },
+            { id: 2, secret: 'beta' },
+            { id: 3, secret: 'gamma' },
             { id: 4, secret: 'delta' },
           ])
         );
@@ -294,27 +359,27 @@ describe('EncryptedStorageAdapter', () => {
       try {
         await adapter.createTable(fullTable, { encrypted: true, encryptFullTable: true });
         await adapter.overwrite(fullTable, [{ id: 1, secret: 'alpha' }]);
-        expect((storage as any).getTableMeta(fullTable)?.count).toBe(1);
+        expect(storage.getTableMeta(fullTable)?.count).toBe(1);
 
         await adapter.beginTransaction();
         await adapter.insert(fullTable, { id: 2, secret: 'beta' });
-        expect((storage as any).getTableMeta(fullTable)?.count).toBe(1);
+        expect(storage.getTableMeta(fullTable)?.count).toBe(1);
         await adapter.rollback();
-        expect((storage as any).getTableMeta(fullTable)?.count).toBe(1);
+        expect(storage.getTableMeta(fullTable)?.count).toBe(1);
         await expect(adapter.read(fullTable, { bypassCache: true })).resolves.toEqual([{ id: 1, secret: 'alpha' }]);
 
         await adapter.beginTransaction();
         await adapter.insert(fullTable, { id: 2, secret: 'beta' });
-        expect((storage as any).getTableMeta(fullTable)?.count).toBe(1);
+        expect(storage.getTableMeta(fullTable)?.count).toBe(1);
         await adapter.commit();
 
-        expect((storage as any).getTableMeta(fullTable)?.count).toBe(2);
+        expect(storage.getTableMeta(fullTable)?.count).toBe(2);
         await expect(adapter.read(fullTable, { bypassCache: true })).resolves.toEqual([
           { id: 1, secret: 'alpha' },
           { id: 2, secret: 'beta' },
         ]);
       } finally {
-        if ((storage as any).isInTransaction?.()) {
+        if (storage.isInTransaction()) {
           await adapter.rollback();
         }
         await adapter.deleteTable(fullTable);
@@ -334,16 +399,18 @@ describe('EncryptedStorageAdapter', () => {
         await adapter.beginTransaction();
         await adapter.insert(fullTable, { id: 3, secret: 'gamma' });
 
-        const dataWriter = (storage as any).dataWriter;
+        const dataWriter = getStoragePrivateAccess(storage).dataWriter;
         const originalWrite = dataWriter.write.bind(dataWriter);
         let writeCalls = 0;
-        const writeSpy = jest.spyOn(dataWriter, 'write').mockImplementation(async (...args: any[]) => {
-          writeCalls++;
-          if (writeCalls === 1) {
-            throw new Error('injected full-table commit failure');
-          }
-          return originalWrite(...args);
-        });
+        const writeSpy = jest
+          .spyOn(dataWriter, 'write')
+          .mockImplementation(async (...args: Parameters<DataWriter['write']>) => {
+            writeCalls++;
+            if (writeCalls === 1) {
+              throw new Error('injected full-table commit failure');
+            }
+            return originalWrite(...args);
+          });
 
         try {
           await expect(adapter.commit()).rejects.toBeDefined();
@@ -351,13 +418,13 @@ describe('EncryptedStorageAdapter', () => {
           writeSpy.mockRestore();
         }
 
-        expect((storage as any).getTableMeta(fullTable)?.count).toBe(2);
+        expect(storage.getTableMeta(fullTable)?.count).toBe(2);
         await expect(adapter.read(fullTable, { bypassCache: true })).resolves.toEqual([
           { id: 1, secret: 'alpha' },
           { id: 2, secret: 'beta' },
         ]);
       } finally {
-        if ((storage as any).isInTransaction?.()) {
+        if (storage.isInTransaction()) {
           await adapter.rollback();
         }
         await adapter.deleteTable(fullTable);
@@ -385,7 +452,7 @@ describe('EncryptedStorageAdapter', () => {
           restoreLogicalRecordCountPublication();
         }
 
-        expect((storage as any).getTableMeta(fullTable)?.count).toBe(2);
+        expect(storage.getTableMeta(fullTable)?.count).toBe(2);
         await expect(adapter.read(fullTable, { bypassCache: true })).resolves.toEqual(originalData);
       } finally {
         await adapter.deleteTable(fullTable);
@@ -421,12 +488,12 @@ describe('EncryptedStorageAdapter', () => {
           restoreLogicalRecordCountPublication();
         }
 
-        expect((storage as any).isInTransaction?.()).toBe(false);
-        expect((storage as any).getTableMeta(fullTable)?.count).toBe(2);
+        expect(storage.isInTransaction()).toBe(false);
+        expect(storage.getTableMeta(fullTable)?.count).toBe(2);
         await expect(adapter.read(fullTable, { bypassCache: true })).resolves.toEqual(originalData);
         await expect(adapter.read(fieldTable, { bypassCache: true })).resolves.toEqual(originalFieldData);
       } finally {
-        if ((storage as any).isInTransaction?.()) {
+        if (storage.isInTransaction()) {
           await adapter.rollback();
         }
         await adapter.deleteTable(fullTable);
@@ -484,15 +551,15 @@ describe('EncryptedStorageAdapter', () => {
         expect(cache.cachedData.has(resetTable)).toBe(false);
         expect(cache.queryIndexes.has(resetTable)).toBe(false);
       } finally {
-        await adapter.deleteTable(resetTable).catch(() => undefined);
+        await deleteTableIfPresent(resetTable);
       }
     });
   });
 
-  describe('访问认证', () => {
+  describe('access authentication', () => {
     it('retries a strict key read that overlaps a master-key reset', async () => {
       const authAdapter = new EncryptedStorageAdapter({ requireAuthOnAccess: true });
-      const secureStore = require('expo-secure-store') as any;
+      const secureStore = getSecureStoreMock();
       const constants = require('expo-constants');
       const originalGetItemAsync = secureStore.getItemAsync;
       const originalDeleteItemAsync = secureStore.deleteItemAsync;
@@ -524,7 +591,7 @@ describe('EncryptedStorageAdapter', () => {
       secureStore.deleteItemAsync = jest.fn(async () => undefined);
 
       try {
-        const keyPromise = (authAdapter as any).getOrInitKey() as Promise<string>;
+        const keyPromise = getEncryptedAdapterPrivateAccess(authAdapter).getOrInitKey();
         await oldReadStarted;
         await resetMasterKey();
         releaseOldRead();
@@ -539,10 +606,12 @@ describe('EncryptedStorageAdapter', () => {
       }
     });
 
-    it('在一次加密操作内复用 requireAuthOnAccess 的已授权密钥', async () => {
+    it('reuses an authorized requireAuthOnAccess key within one encrypted operation', async () => {
       const authTable = 'test_auth_single_key_per_operation';
       const authAdapter = new EncryptedStorageAdapter({ requireAuthOnAccess: true });
-      const keySpy = jest.spyOn(authAdapter as any, 'key').mockResolvedValue('authorized-test-key');
+      const keySpy = jest
+        .spyOn(getEncryptedAdapterPrivateAccess(authAdapter), 'key')
+        .mockResolvedValue('authorized-test-key');
       const records = [
         { id: 1, secret: 'alpha' },
         { id: 2, secret: 'beta' },
@@ -554,7 +623,9 @@ describe('EncryptedStorageAdapter', () => {
       };
 
       try {
-        await expectSingleKeyAccess(() => authAdapter.createTable(authTable, { encrypted: true, encryptFullTable: true }));
+        await expectSingleKeyAccess(() =>
+          authAdapter.createTable(authTable, { encrypted: true, encryptFullTable: true })
+        );
         await expectSingleKeyAccess(() => authAdapter.write(authTable, records, { mode: 'overwrite' }));
         await expectSingleKeyAccess(() => authAdapter.read(authTable, { bypassCache: true }));
         await expectSingleKeyAccess(() => authAdapter.count(authTable));
@@ -572,18 +643,16 @@ describe('EncryptedStorageAdapter', () => {
         await expectSingleKeyAccess(() => authAdapter.remove(authTable, { id: 2 }));
       } finally {
         keySpy.mockRestore();
-        try {
-          await storage.deleteTable(authTable);
-        } catch {
-          // The table may not have been created if setup failed.
-        }
+        await deleteTableIfPresent(authTable);
       }
     });
 
-    it('在直接表操作前验证 requireAuthOnAccess 访问权限', async () => {
+    it('validates requireAuthOnAccess before direct table operations', async () => {
       const authTable = 'test_auth_guard_table';
       const authAdapter = new EncryptedStorageAdapter({ requireAuthOnAccess: true });
-      const keySpy = jest.spyOn(authAdapter as any, 'key').mockResolvedValue('authorized-test-key');
+      const keySpy = jest
+        .spyOn(getEncryptedAdapterPrivateAccess(authAdapter), 'key')
+        .mockResolvedValue('authorized-test-key');
 
       try {
         await authAdapter.createTable(authTable);
@@ -602,24 +671,22 @@ describe('EncryptedStorageAdapter', () => {
         expect(keySpy).toHaveBeenCalled();
       } finally {
         keySpy.mockRestore();
-        try {
-          await storage.deleteTable(authTable);
-        } catch {
-          // The assertion path may already have deleted the table.
-        }
+        await deleteTableIfPresent(authTable);
       }
     });
 
     it('rejects a normal encrypted adapter attempting to access a strict table', async () => {
       const strictTable = 'test_strict_table_rejects_normal_adapter';
       const strictAdapter = new EncryptedStorageAdapter({ requireAuthOnAccess: true });
-      const strictKeySpy = jest.spyOn(strictAdapter as any, 'key').mockResolvedValue('strict-test-key');
+      const strictKeySpy = jest
+        .spyOn(getEncryptedAdapterPrivateAccess(strictAdapter), 'key')
+        .mockResolvedValue('strict-test-key');
       const normalAdapter = new EncryptedStorageAdapter();
 
       try {
         await strictAdapter.createTable(strictTable, { encrypted: true });
 
-        expect((storage as any).getTableMeta(strictTable)).toMatchObject({
+        expect(storage.getTableMeta(strictTable)).toMatchObject({
           encrypted: true,
           requireAuthOnAccess: true,
         });
@@ -628,7 +695,7 @@ describe('EncryptedStorageAdapter', () => {
         });
       } finally {
         strictKeySpy.mockRestore();
-        await storage.deleteTable(strictTable).catch(() => undefined);
+        await deleteTableIfPresent(strictTable);
       }
     });
 
@@ -636,12 +703,14 @@ describe('EncryptedStorageAdapter', () => {
       const normalTable = 'test_normal_table_rejects_strict_adapter';
       const normalAdapter = new EncryptedStorageAdapter();
       const strictAdapter = new EncryptedStorageAdapter({ requireAuthOnAccess: true });
-      const strictKeySpy = jest.spyOn(strictAdapter as any, 'key').mockResolvedValue('strict-test-key');
+      const strictKeySpy = jest
+        .spyOn(getEncryptedAdapterPrivateAccess(strictAdapter), 'key')
+        .mockResolvedValue('strict-test-key');
 
       try {
         await normalAdapter.createTable(normalTable, { encrypted: true });
 
-        expect((storage as any).getTableMeta(normalTable)).toMatchObject({
+        expect(storage.getTableMeta(normalTable)).toMatchObject({
           encrypted: true,
           requireAuthOnAccess: false,
         });
@@ -650,12 +719,12 @@ describe('EncryptedStorageAdapter', () => {
         });
       } finally {
         strictKeySpy.mockRestore();
-        await storage.deleteTable(normalTable).catch(() => undefined);
+        await deleteTableIfPresent(normalTable);
       }
     });
   });
 
-  describe('删除操作', () => {
+  describe('deletion operations', () => {
     beforeEach(async () => {
       const testData = [
         { id: 1, name: 'Alice', age: 25 },
@@ -665,7 +734,7 @@ describe('EncryptedStorageAdapter', () => {
       await adapter.overwrite(tableName, testData);
     });
 
-    it('应该能够根据条件删除数据', async () => {
+    it('deletes encrypted records matching a predicate', async () => {
       const deletedCount = await adapter.delete(tableName, { id: 1 });
 
       const remainingData = await adapter.read(tableName, { bypassCache: true });
@@ -686,7 +755,7 @@ describe('EncryptedStorageAdapter', () => {
     });
   });
 
-  describe('并发写入', () => {
+  describe('concurrent writes', () => {
     it('holds the table lock across an update read-modify-write sequence', async () => {
       await adapter.overwrite(tableName, [{ id: 1, name: 'before' }]);
       const originalRead = FileSystemStorageAdapter.prototype.read;
@@ -699,12 +768,12 @@ describe('EncryptedStorageAdapter', () => {
         signalReadStarted = resolve;
       });
       let blockNextRead = true;
-      FileSystemStorageAdapter.prototype.read = async function (
+      FileSystemStorageAdapter.prototype.read = async function <T extends object = StorageRecord>(
         this: FileSystemStorageAdapter,
         currentTableName: string,
-        readOptions?: any
-      ) {
-        const records = await originalRead.call(this, currentTableName, readOptions);
+        readOptions?: ReadOptions<T>
+      ): Promise<T[]> {
+        const records = (await originalRead.call(this, currentTableName, readOptions)) as T[];
         if (blockNextRead && currentTableName === tableName) {
           blockNextRead = false;
           signalReadStarted();
@@ -716,7 +785,7 @@ describe('EncryptedStorageAdapter', () => {
       try {
         const updatePromise = adapter.update(tableName, { name: 'updated' }, { id: 1 });
         await readStarted;
-        expect((EncryptedStorageAdapter as any).tableWriteLocks.has(tableName)).toBe(true);
+        expect(getEncryptedAdapterStaticAccess().tableWriteLocks.has(tableName)).toBe(true);
 
         const insertPromise = adapter.insert(tableName, { id: 2, name: 'inserted' });
         releaseRead();
@@ -733,8 +802,8 @@ describe('EncryptedStorageAdapter', () => {
     });
   });
 
-  describe('批量操作', () => {
-    it('应该能够执行批量插入操作', async () => {
+  describe('bulk operations', () => {
+    it('inserts encrypted records through a bulk write', async () => {
       const operations = [
         { type: 'insert' as const, data: { id: 1, name: 'Alice' } },
         { type: 'insert' as const, data: { id: 2, name: 'Bob' } },
@@ -748,8 +817,7 @@ describe('EncryptedStorageAdapter', () => {
       expect(allData.length).toBe(2);
     });
 
-    it('应该能够执行批量更新操作', async () => {
-      // 先插入初始数据
+    it('updates encrypted records through a bulk write', async () => {
       const initialData = [
         { id: 1, name: 'Alice', age: 25 },
         { id: 2, name: 'Bob', age: 30 },
@@ -770,8 +838,7 @@ describe('EncryptedStorageAdapter', () => {
       expect(updatedData[1]?.['age']).toBe(31);
     });
 
-    it('应该能够执行批量删除操作', async () => {
-      // 先插入初始数据
+    it('deletes encrypted records through a bulk write', async () => {
       const initialData = [
         { id: 1, name: 'Alice' },
         { id: 2, name: 'Bob' },
@@ -794,8 +861,8 @@ describe('EncryptedStorageAdapter', () => {
     });
   });
 
-  describe('模式迁移', () => {
-    it('应该能够迁移到分片模式', async () => {
+  describe('storage mode migration', () => {
+    it('migrates an encrypted table to chunked mode', async () => {
       const testData = [
         { id: 1, name: 'Alice', age: 25 },
         { id: 2, name: 'Bob', age: 30 },
@@ -809,7 +876,7 @@ describe('EncryptedStorageAdapter', () => {
       expect(migratedData).toEqual(testData);
     });
 
-    it('迁移时保留加密与列元数据并避免明文重写窗口', async () => {
+    it('preserves encryption and column metadata without a plaintext rewrite window during migration', async () => {
       const testData = [
         { id: 1, secret: 'alpha', visible: 'one' },
         { id: 2, secret: 'beta', visible: 'two' },
@@ -830,7 +897,7 @@ describe('EncryptedStorageAdapter', () => {
       await expect(adapter.read(tableName, { bypassCache: true })).resolves.toEqual(testData);
       const rawAfterMigration = await storage.read(tableName, { bypassCache: true });
       expect(rawAfterMigration[0]?.secret).toBe(rawBeforeMigration[0]?.secret);
-      expect((storage as any).getTableMeta(tableName)).toMatchObject({
+      expect(storage.getTableMeta(tableName)).toMatchObject({
         mode: 'chunked',
         encrypted: true,
         encryptedFields: ['secret'],

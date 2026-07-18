@@ -1,11 +1,12 @@
-/**
- * @module QueryEngine
- * @description Query engine for data filtering, sorting, pagination, and aggregation
- * @since 2025-11-28
- * @version 3.0.0
- */
-
-import type { FilterCondition } from '../../types/storageTypes';
+import {
+  isStorageRecord,
+  type FilterCondition,
+  type SortAlgorithm,
+  type SortField,
+  type SortOrder,
+  type StorageRecord,
+  type UpdatePayload,
+} from '../../types/storageTypes';
 import {
   sortByColumn,
   sortByColumnCounting,
@@ -18,6 +19,22 @@ import { QUERY } from '../constants';
 import logger from '../../utils/logger';
 
 const MAX_FILTER_DEPTH = 10;
+
+type SortFunction = <T extends object>(data: T[], column: string, order?: SortOrder) => T[];
+
+const getRecordValue = (value: object, key: string): unknown => (isStorageRecord(value) ? value[key] : undefined);
+
+const isFilterCondition = <T extends object>(value: unknown): value is FilterCondition<T> =>
+  typeof value === 'function' || isStorageRecord(value);
+
+const compareValues = (left: unknown, right: unknown): number => {
+  if (left === right) return 0;
+  if (left === undefined || left === null) return -1;
+  if (right === undefined || right === null) return 1;
+  if (typeof left === 'number' && typeof right === 'number') return left < right ? -1 : 1;
+  if (typeof left === 'bigint' && typeof right === 'bigint') return left < right ? -1 : 1;
+  return String(left).localeCompare(String(right));
+};
 
 /**
  * Matches a SQL LIKE pattern without compiling user-controlled regular expressions.
@@ -56,9 +73,9 @@ const matchesLike = (value: string, pattern: string): boolean => {
 };
 
 export class QueryEngine {
-  private static filterWithDepth<T extends Record<string, any>>(
+  private static filterWithDepth<T extends object>(
     data: T[],
-    condition: any,
+    condition: FilterCondition<T> | undefined,
     depth: number
   ): T[] {
     if (!condition) return data;
@@ -74,21 +91,30 @@ export class QueryEngine {
       return data.filter(condition as (value: T, index: number, array: T[]) => unknown);
     }
 
-    if (typeof condition !== 'object' || condition === null) {
+    if (!isStorageRecord(condition)) {
       return [];
     }
 
-    if ('$and' in condition) {
+    const conditionRecord = condition as StorageRecord;
+    const andConditions = conditionRecord.$and;
+    if (Array.isArray(andConditions)) {
       let result = [...data];
-      for (const subCondition of condition.$and!) {
+      for (const subCondition of andConditions) {
+        if (!isFilterCondition<T>(subCondition)) {
+          return [];
+        }
         result = this.filterWithDepth(result, subCondition, depth + 1);
       }
       return result;
     }
 
-    if ('$or' in condition) {
+    const orConditions = conditionRecord.$or;
+    if (Array.isArray(orConditions)) {
       const results = new Set<T>();
-      for (const subCondition of condition.$or!) {
+      for (const subCondition of orConditions) {
+        if (!isFilterCondition<T>(subCondition)) {
+          continue;
+        }
         const filtered = this.filterWithDepth(data, subCondition, depth + 1);
         filtered.forEach(item => results.add(item));
       }
@@ -98,15 +124,13 @@ export class QueryEngine {
     return data.filter(item => {
       let matches = true;
 
-      for (const [key, value] of Object.entries(condition)) {
-        const itemValue = item[key];
+      for (const [key, value] of Object.entries(conditionRecord)) {
+        const itemValue = getRecordValue(item, key);
 
-        // Operator condition
-        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        if (isStorageRecord(value)) {
           for (const [op, opValue] of Object.entries(value)) {
             switch (op) {
               case '$eq':
-                // Processnull和undefined的特殊情况
                 if (itemValue === null || itemValue === undefined) {
                   if (itemValue !== opValue) {
                     matches = false;
@@ -116,7 +140,6 @@ export class QueryEngine {
                 }
                 break;
               case '$ne':
-                // Processnull和undefined的特殊情况
                 if (itemValue === null || itemValue === undefined) {
                   if (itemValue === opValue) {
                     matches = false;
@@ -149,9 +172,7 @@ export class QueryEngine {
                 if (!Array.isArray(opValue)) {
                   matches = false;
                 } else {
-                  // Use Set for performance
                   const opValueSet = new Set(opValue);
-                  // Processnull和undefined的特殊情况
                   if (itemValue === null || itemValue === undefined) {
                     if (!opValueSet.has(itemValue)) {
                       matches = false;
@@ -171,9 +192,7 @@ export class QueryEngine {
                 if (!Array.isArray(opValue)) {
                   matches = false;
                 } else {
-                  // Use Set for performance
                   const opValueSet = new Set(opValue);
-                  // Processnull和undefined的特殊情况
                   if (itemValue === null || itemValue === undefined) {
                     if (opValueSet.has(itemValue)) {
                       matches = false;
@@ -202,23 +221,16 @@ export class QueryEngine {
 
             if (!matches) break;
           }
-        }
-        // Simple value comparison
-        else {
-          // Processnull和undefined的特殊情况
+        } else {
           if (itemValue === null || itemValue === undefined) {
             if (itemValue !== value) {
               matches = false;
             }
-          }
-          // Process数组比较，使用JSON.stringify比较内容
-          else if (Array.isArray(itemValue) && Array.isArray(value)) {
+          } else if (Array.isArray(itemValue) && Array.isArray(value)) {
             if (JSON.stringify(itemValue) !== JSON.stringify(value)) {
               matches = false;
             }
-          }
-          // Ordinary value comparison
-          else if (itemValue !== value) {
+          } else if (itemValue !== value) {
             matches = false;
           }
         }
@@ -230,24 +242,18 @@ export class QueryEngine {
     });
   }
 
-  static filter<T extends Record<string, any>>(data: T[], condition?: FilterCondition): T[] {
+  static filter<T extends object>(data: T[], condition?: FilterCondition<T>): T[] {
     return this.filterWithDepth(data, condition, 0);
   }
 
-  static update<T extends Record<string, any>>(originalData: T, updateData: Record<string, any>): T {
-    // Use centralized update operator handler
+  static update<T extends object>(originalData: T, updateData: UpdatePayload<T>): T {
     return processUpdateOperators(originalData, updateData);
   }
 
   /**
-   * 批量更新数据，支持更新操作符
-   * 调整参数顺序：必需参数在前，可选参数在后
+   * Updates all records that match an optional filter.
    */
-  static bulkUpdate<T extends Record<string, any>>(
-    data: T[],
-    updateData: Record<string, any>,
-    condition?: FilterCondition
-  ): T[] {
+  static bulkUpdate<T extends object>(data: T[], updateData: UpdatePayload<T>, condition?: FilterCondition<T>): T[] {
     if (!updateData || Object.keys(updateData).length === 0) {
       return data;
     }
@@ -255,7 +261,7 @@ export class QueryEngine {
     const filteredData = condition ? this.filter(data, condition) : data;
     const updatedDataRefs = new Set(filteredData);
 
-    // Update数据
+    // Preserve references for records that do not match the optional filter.
     return data.map(item => {
       if (updatedDataRefs.has(item)) {
         return this.update(item, updateData);
@@ -265,7 +271,7 @@ export class QueryEngine {
   }
 
   /**
-   * 分页处理，优化切片操作
+   * Returns a bounded page without allocating when the requested range is empty.
    */
   static paginate<T>(data: T[], skip = 0, limit?: number): T[] {
     // Optimization: If skip >= data length, return empty array
@@ -292,10 +298,9 @@ export class QueryEngine {
   }
 
   /**
-   * 获取排序函数
-   * 根据算法类型返回对应的排序函数
+   * Selects the requested sorting implementation.
    */
-  private static getSortFunction(algorithm: string = 'default'): Function {
+  private static getSortFunction(algorithm: SortAlgorithm = 'default'): SortFunction {
     switch (algorithm) {
       case 'fast':
         return sortByColumnFast;
@@ -312,14 +317,14 @@ export class QueryEngine {
   }
 
   /**
-   * 智能选择排序算法
-   * 根据数据特征自动选择最合适的排序算法
+   * Selects a stable sorting algorithm from the requested configuration and
+   * collection characteristics.
    */
-  private static selectSortAlgorithm(
-    requestedAlgorithm: string | undefined,
-    data: any[],
-    sortBy: string | string[]
-  ): string {
+  private static selectSortAlgorithm<T extends object>(
+    requestedAlgorithm: SortAlgorithm | undefined,
+    data: T[],
+    sortBy: SortField<T> | SortField<T>[]
+  ): SortAlgorithm {
     // If user specified algorithm, use directly
     if (requestedAlgorithm && requestedAlgorithm !== 'default') {
       return requestedAlgorithm;
@@ -339,7 +344,7 @@ export class QueryEngine {
       return 'merge';
     }
 
-    // Check if适合计数排序（字段值范围有限）
+    // Counting sort is only efficient for a small value domain.
     if (sortFields.length === 1 && sortFields[0] !== undefined && this.isSuitableForCountingSort(data, sortFields[0])) {
       return 'counting';
     }
@@ -349,9 +354,9 @@ export class QueryEngine {
   }
 
   /**
-   * 判断字段是否适合计数排序
+   * Checks whether a field has a small enough value domain for bucket sorting.
    */
-  private static isSuitableForCountingSort(data: any[], field: string): boolean {
+  private static isSuitableForCountingSort<T extends object>(data: T[], field: SortField<T>): boolean {
     if (data.length === 0) return false;
 
     const values = new Set();
@@ -360,7 +365,11 @@ export class QueryEngine {
     // Collect unique values, limit check count for performance
     const sampleSize = Math.min(data.length, 1000);
     for (let i = 0; i < sampleSize && uniqueCount < 50; i++) {
-      const value = data[i][field];
+      const item = data[i];
+      if (!item) {
+        continue;
+      }
+      const value = getRecordValue(item, field);
       if (value !== null && value !== undefined) {
         if (!values.has(value)) {
           values.add(value);
@@ -374,14 +383,13 @@ export class QueryEngine {
   }
 
   /**
-   * 排序数据
-   * 支持多种排序算法和多字段排序
+   * Sorts records by one or more fields.
    */
-  static sort<T extends Record<string, any>>(
+  static sort<T extends object>(
     data: T[],
-    sortBy?: string | string[],
-    order?: 'asc' | 'desc' | ('asc' | 'desc')[],
-    algorithm?: string
+    sortBy?: SortField<T> | SortField<T>[],
+    order?: SortOrder | SortOrder[],
+    algorithm?: SortAlgorithm
   ): T[] {
     if (!sortBy || data.length === 0) return data;
 
@@ -389,76 +397,83 @@ export class QueryEngine {
     const selectedAlgorithm = this.selectSortAlgorithm(algorithm, data, sortBy);
     const sortFunction = this.getSortFunction(selectedAlgorithm);
 
-    // Process多字段排序
     if (Array.isArray(sortBy)) {
-      const sortOrders = Array.isArray(order) ? order : new Array(sortBy.length).fill(order || 'asc');
+      const sortOrders: SortOrder[] = Array.isArray(order) ? order : new Array(sortBy.length).fill(order ?? 'asc');
 
-      // Recursive应用排序，从最后一个字段开始向前排序
       let sortedData = [...data];
       for (let i = sortBy.length - 1; i >= 0; i--) {
         const field = sortBy[i];
+        if (field === undefined) {
+          continue;
+        }
         const fieldOrder = sortOrders[i] || 'asc';
         sortedData = sortFunction(sortedData, field, fieldOrder);
       }
       return sortedData;
     } else {
-      // Single field sort
       const sortOrder = Array.isArray(order) ? order[0] : order || 'asc';
-      return sortFunction(data, sortBy, sortOrder);
+      return sortFunction(data, sortBy, sortOrder ?? 'asc');
     }
   }
 
   /**
-   * 聚合查询，计算总和
+   * Sums numeric values in a field.
    */
-  static sum<T extends Record<string, any>>(data: T[], field: string): number {
+  static sum<T extends object>(data: T[], field: SortField<T>): number {
     return data.reduce((acc, item) => {
-      const value = item[field];
+      const value = getRecordValue(item, field);
       return acc + (typeof value === 'number' ? value : 0);
     }, 0);
   }
 
   /**
-   * 聚合查询，计算平均值
+   * Calculates the average of numeric field values.
    */
-  static avg<T extends Record<string, any>>(data: T[], field: string): number {
+  static avg<T extends object>(data: T[], field: SortField<T>): number {
     if (data.length === 0) return 0;
     const sum = this.sum(data, field);
     return sum / data.length;
   }
 
   /**
-   * 聚合查询，计算最大值
+   * Returns the greatest field value, or undefined for an empty collection.
    */
-  static max<T extends Record<string, any>>(data: T[], field: string): any {
+  static max<T extends object>(data: T[], field: SortField<T>): unknown {
     if (data.length === 0) return undefined;
-    return data.reduce((max, item) => {
-      const value = item[field];
-      return max === undefined || value > max ? value : max;
-    }, undefined);
+    let maximum: unknown;
+    for (const item of data) {
+      const value = getRecordValue(item, field);
+      if (maximum === undefined || compareValues(value, maximum) > 0) {
+        maximum = value;
+      }
+    }
+    return maximum;
   }
 
   /**
-   * 聚合查询，计算最小值
+   * Returns the smallest field value, or undefined for an empty collection.
    */
-  static min<T extends Record<string, any>>(data: T[], field: string): any {
+  static min<T extends object>(data: T[], field: SortField<T>): unknown {
     if (data.length === 0) return undefined;
-    return data.reduce((min, item) => {
-      const value = item[field];
-      return min === undefined || value < min ? value : min;
-    }, undefined);
+    let minimum: unknown;
+    for (const item of data) {
+      const value = getRecordValue(item, field);
+      if (minimum === undefined || compareValues(value, minimum) < 0) {
+        minimum = value;
+      }
+    }
+    return minimum;
   }
 
   /**
-   * 分组查询
+   * Groups records by one or more fields.
    */
-  static groupBy<T extends Record<string, any>>(data: T[], groupBy: string | string[]): Record<string, T[]> {
+  static groupBy<T extends object>(data: T[], groupBy: SortField<T> | SortField<T>[]): Record<string, T[]> {
     const groups: Record<string, T[]> = Object.create(null) as Record<string, T[]>;
     const groupFields = Array.isArray(groupBy) ? groupBy : [groupBy];
 
     for (const item of data) {
-      // Generate grouping key
-      const key = groupFields.map(field => item[field]).join('_');
+      const key = groupFields.map(field => getRecordValue(item, field)).join('_');
 
       if (!Object.prototype.hasOwnProperty.call(groups, key)) {
         groups[key] = [];

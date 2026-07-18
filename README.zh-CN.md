@@ -357,22 +357,22 @@ const result = await db.verifyCountTable('users');
 
 ### 常用运行时配置项
 
-| Key                                    | 默认值            | 作用                                           |
-| -------------------------------------- | ----------------- | ---------------------------------------------- |
+| Key                                    | 默认值            | 作用                                                |
+| -------------------------------------- | ----------------- | --------------------------------------------------- |
 | `chunkSize`                            | `5242880`         | 分片目标大小；初始数据自动选 chunked 的门槛为其一半 |
-| `storageFolder`                        | `lite-data-store` | Expo 文件系统下的根目录名                      |
-| `sortMethods`                          | `default`         | 默认排序策略提示                               |
-| `timeout`                              | `10000`           | 部分文件操作的超时时间                         |
-| `encryption.algorithm`                 | `auto`            | 首选加密算法模式                               |
-| `encryption.keyIterations`             | `600000`          | PBKDF2 目标迭代次数，Expo Go 下会自动下调      |
-| `performance.maxConcurrentOperations`  | `5`               | 写入侧最大并发数                               |
-| `cache.maxSize`                        | `1000`            | 缓存项预算                                     |
-| `monitoring.enablePerformanceTracking` | `false`           | 是否开启性能采样                               |
-| `monitoring.enableHealthChecks`        | `true`            | 是否开启健康检查                               |
-| `autoSync.enabled`                     | `false`           | 自动同步服务开关；需要后台脏缓存同步时显式开启 |
-| `autoSync.interval`                    | `30000`           | 自动同步间隔，单位毫秒                         |
-| `autoSync.minItems`                    | `1`               | 触发自动同步前的最小排队项数                   |
-| `autoSync.batchSize`                   | `100`             | 每批自动同步的最大项目数                       |
+| `storageFolder`                        | `lite-data-store` | Expo 文件系统下的根目录名                           |
+| `sortMethods`                          | `default`         | 默认排序策略提示                                    |
+| `timeout`                              | `10000`           | 部分文件操作的超时时间                              |
+| `encryption.algorithm`                 | `auto`            | 首选加密算法模式                                    |
+| `encryption.keyIterations`             | `600000`          | PBKDF2 目标迭代次数，Expo Go 下会自动下调           |
+| `performance.maxConcurrentOperations`  | `5`               | 写入侧最大并发数                                    |
+| `cache.maxSize`                        | `1000`            | 缓存项预算                                          |
+| `monitoring.enablePerformanceTracking` | `false`           | 是否开启性能采样                                    |
+| `monitoring.enableHealthChecks`        | `true`            | 是否开启健康检查                                    |
+| `autoSync.enabled`                     | `false`           | 自动同步服务开关；需要后台脏缓存同步时显式开启      |
+| `autoSync.interval`                    | `30000`           | 自动同步间隔，单位毫秒                              |
+| `autoSync.minItems`                    | `1`               | 触发自动同步前的最小排队项数                        |
+| `autoSync.batchSize`                   | `100`             | 每次自动同步中每张表最多处理的脏缓存条目数          |
 
 `storageFolder` 只能是单一目录名，不能包含路径分隔符、编码后的分隔符或路径穿越名称。请在首次存储操作前完成配置；适配器运行期间修改该值会被明确拒绝，避免不同根目录间混用元数据和缓存状态。
 

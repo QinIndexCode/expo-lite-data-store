@@ -1,3 +1,5 @@
+/// <reference path="../test-globals.d.ts" />
+
 import { configManager } from '../../core/config/ConfigManager';
 import { plainStorage } from '../../core/db';
 import { createTable, db, findOne, insert, read } from '../../expo-lite-data-store';
@@ -8,7 +10,7 @@ describe('legacy folder migration', () => {
   const tableName = 'legacy_folder_users';
 
   beforeEach(async () => {
-    (global as any).__expo_file_system_mock__.mockFileSystem = {};
+    global.__expo_file_system_mock__.mockFileSystem = {};
     configManager.resetConfig();
     resetRootPathState();
     await plainStorage.cleanup();
@@ -19,7 +21,7 @@ describe('legacy folder migration', () => {
     await plainStorage.cleanup();
     configManager.resetConfig();
     resetRootPathState();
-    (global as any).__expo_file_system_mock__.mockFileSystem = {};
+    global.__expo_file_system_mock__.mockFileSystem = {};
   });
 
   it('migrates legacy expo-lite-data content into lite-data-store when directory move is unavailable', async () => {

@@ -1,30 +1,23 @@
-/**
- * @module TransactionService
- * @description Transaction service managing begin, commit, and rollback operations
- * @since 2025-11-28
- * @version 3.0.0
- */
+/** Transaction service managing begin, commit, and rollback operations. */
 
 import { QueryEngine } from '../query/QueryEngine';
-/**
- * 事务错误类
- * 用于抛出事务相关的错误
- */
+import {
+  isStorageRecord,
+  type BulkOperation,
+  type FilterCondition,
+  type InternalWriteOptions,
+  type ReadOptions,
+  type StorageInput,
+  type StorageRecord,
+  type UpdatePayload,
+  type WriteResult,
+} from '../../types/storageTypes';
+/** Reports an invalid transaction lifecycle operation. */
 export class TransactionError extends Error {
-  /** 错误代码 */
   code: string;
-  /** 错误详情 */
   details?: string;
-  /** 错误建议 */
   suggestion?: string;
 
-  /**
-   * 构造函数
-   * @param message 错误消息
-   * @param code 错误代码
-   * @param details 错误详情
-   * @param suggestion 错误建议
-   */
   constructor(message: string, code: string, details?: string, suggestion?: string) {
     super(message);
     this.name = 'TransactionError';
@@ -34,80 +27,50 @@ export class TransactionError extends Error {
   }
 }
 
-/**
- * 操作选项类型
- */
-export interface OperationOptions {
-  /** 写入模式 */
-  mode?: 'append' | 'overwrite';
-  /** 是否直接写入 */
-  directWrite?: boolean;
-  /** 其他选项 */
-  [key: string]: any;
-}
+export type TransactionOperation =
+  | {
+      tableName: string;
+      type: 'overwrite' | 'write';
+      data: StorageRecord[];
+      options?: InternalWriteOptions;
+    }
+  | {
+      tableName: string;
+      type: 'delete';
+      where: FilterCondition<StorageRecord>;
+      options?: InternalWriteOptions;
+    }
+  | {
+      tableName: string;
+      type: 'bulkWrite';
+      operations: BulkOperation<StorageRecord>[];
+      options?: InternalWriteOptions;
+    }
+  | {
+      tableName: string;
+      type: 'update';
+      data: UpdatePayload<StorageRecord>;
+      where: FilterCondition<StorageRecord>;
+      options?: InternalWriteOptions;
+    };
 
-/**
- * 条件查询类型
- */
-export interface WhereCondition {
-  /** 字段名和值的映射 */
-  [key: string]: any;
-}
-
-/**
- * 事务操作接口
- * 定义事务中可以执行的操作类型
- */
-export interface Operation {
-  /** 表名 */
-  tableName: string;
-  /** 操作类型 */
-  type: 'overwrite' | 'write' | 'delete' | 'bulkWrite' | 'update';
-  /** 操作数据 */
-  data: Record<string, any> | Record<string, any>[];
-  /** 操作选项 */
-  options?: OperationOptions;
-  /** 更新条件 */
-  where?: WhereCondition;
-}
-
-/**
- * 表数据快照接口
- * 用于事务回滚时恢复表数据
- */
+/** Captures a table's state before its first transaction operation. */
 export interface Snapshot {
-  /** 表名 */
   tableName: string;
-  /** 表数据 */
-  data: Record<string, any>[];
+  /** Table contents before the first transaction operation. */
+  data: StorageRecord[];
   /** Whether the table existed before the transaction first touched it. */
   existed: boolean;
 }
 
-/**
- * 事务管理服务
- * 负责处理数据库事务的开始、提交和回滚
- * 支持事务操作队列管理和表数据快照保存
- */
+/** Queues table operations and restores snapshots when a transaction fails. */
 export class TransactionService {
-  /** 是否处于事务中 */
   private _isInTransaction = false;
-  /** 事务操作队列 */
-  private operations: Operation[] = [];
-  /** 表数据快照映射 */
+  private operations: TransactionOperation[] = [];
   private snapshots: Map<string, Snapshot> = new Map();
-  /** 事务中临时数据存储，用于保存未提交的更改 */
-  private transactionData: Map<string, Record<string, any>[]> = new Map();
+  private transactionData = new Map<string, StorageRecord[]>();
 
-  /**
-   * 构造函数
-   */
-  constructor() {}
-
-  /**
-   * 开始事务
-   * @throws {TransactionError} 当事务已存在时抛出
-   */
+  /** Starts a transaction and discards any stale queued state. */
   async beginTransaction(): Promise<void> {
     if (this.isInTransaction()) {
       throw new TransactionError(
@@ -123,25 +86,30 @@ export class TransactionService {
     this.transactionData.clear();
   }
 
-  /**
-   * 提交事务
-   * @param writeFn 写入处理函数
-   * @param deleteFn 删除处理函数
-   * @param bulkWriteFn 批量写入处理函数
-   * @param updateFn 更新处理函数
-   * @throws {TransactionError} 当事务不存在时抛出
-   */
+  /** Commits queued operations, restoring snapshots when a write fails. */
   async commit(
-    writeFn: (tableName: string, data: Record<string, any>[], options?: OperationOptions) => Promise<any>,
-    deleteFn: (tableName: string, where: WhereCondition, options?: OperationOptions) => Promise<any>,
-    bulkWriteFn: (tableName: string, operations: Record<string, any>[], options?: OperationOptions) => Promise<any>,
+    writeFn: (
+      tableName: string,
+      data: StorageInput<StorageRecord>,
+      options?: InternalWriteOptions
+    ) => Promise<WriteResult>,
+    deleteFn: (
+      tableName: string,
+      where: FilterCondition<StorageRecord>,
+      options?: InternalWriteOptions
+    ) => Promise<number>,
+    bulkWriteFn: (
+      tableName: string,
+      operations: BulkOperation<StorageRecord>[],
+      options?: InternalWriteOptions
+    ) => Promise<WriteResult>,
     updateFn: (
       tableName: string,
-      data: Record<string, any>,
-      where: WhereCondition,
-      options?: OperationOptions
-    ) => Promise<any>,
-    deleteTableFn?: (tableName: string) => Promise<any>,
+      data: UpdatePayload<StorageRecord>,
+      where: FilterCondition<StorageRecord>,
+      options?: InternalWriteOptions
+    ) => Promise<number>,
+    deleteTableFn?: (tableName: string) => Promise<void>,
     finalize?: () => Promise<void>
   ): Promise<void> {
     if (!this.isInTransaction()) {
@@ -154,70 +122,53 @@ export class TransactionService {
     }
 
     try {
-      // Execute each operation directly
       for (const operation of this.operations) {
         switch (operation.type) {
           case 'overwrite':
-            const overwriteData = Array.isArray(operation.data) ? operation.data : [operation.data];
-            await writeFn(operation.tableName, overwriteData, {
+            await writeFn(operation.tableName, operation.data, {
               ...operation.options,
               mode: 'overwrite',
               directWrite: true,
             });
             break;
           case 'write':
-            // Execute write operation directly with writeFn
-            // Ensure data is array
-            const writeData = Array.isArray(operation.data) ? operation.data : [operation.data];
-            await writeFn(operation.tableName, writeData, { ...operation.options, directWrite: true });
+            await writeFn(operation.tableName, operation.data, { ...operation.options, directWrite: true });
             break;
           case 'update':
-            // Execute update operation directly with updateFn
-            // Ensure where is not undefined
-            await updateFn(operation.tableName, operation.data, operation.where || {}, {
+            await updateFn(operation.tableName, operation.data, operation.where, {
               ...operation.options,
               directWrite: true,
             });
             break;
           case 'delete':
-            // Execute delete operation directly with deleteFn
-            // Ensure where is not undefined
-            // Note: delete where condition stored in operation.data
-            // Pass directWrite: true to ensure actual delete on commit
-            await deleteFn(operation.tableName, operation.data || {}, { ...operation.options, directWrite: true });
+            await deleteFn(operation.tableName, operation.where, { ...operation.options, directWrite: true });
             break;
           case 'bulkWrite':
-            // Execute bulk write operation directly with bulkWriteFn
-            // Ensure data is array
-            const bulkData = Array.isArray(operation.data) ? operation.data : [operation.data];
-            await bulkWriteFn(operation.tableName, bulkData, { ...operation.options, directWrite: true });
+            await bulkWriteFn(operation.tableName, operation.operations, { ...operation.options, directWrite: true });
             break;
         }
       }
 
       await finalize?.();
     } catch (error) {
-      // If operation fails, try to rollback transaction
+      // Restore snapshots before exposing a failed commit to the caller.
       await this.rollback(writeFn, deleteTableFn);
-      // Re-throw error to inform caller transaction failed
       throw error;
     } finally {
-      // Ensure transaction state is reset regardless of success
-      // Use resetTransactionState to ensure state consistency
       if (this.isInTransaction()) {
         this.resetTransactionState();
       }
     }
   }
 
-  /**
-   * 回滚事务
-   * @param writeFn 写入处理函数，用于恢复快照数据
-   * @throws {TransactionError} 当事务不存在时抛出
-   */
+  /** Restores snapshots and ends the active transaction. */
   async rollback(
-    writeFn: (tableName: string, data: Record<string, any>[], options?: OperationOptions) => Promise<any>,
-    deleteTableFn?: (tableName: string) => Promise<any>,
+    writeFn: (
+      tableName: string,
+      data: StorageInput<StorageRecord>,
+      options?: InternalWriteOptions
+    ) => Promise<WriteResult>,
+    deleteTableFn?: (tableName: string) => Promise<void>,
     restoreSnapshots = true
   ): Promise<void> {
     if (!this.isInTransaction()) {
@@ -242,32 +193,18 @@ export class TransactionService {
         }
       }
     } finally {
-      // End transaction state regardless of success or failure
-      // Use resetTransactionState to ensure state consistency
       this.resetTransactionState();
     }
   }
 
-  /**
-   * 获取事务状态（内部使用）
-   * @returns boolean 是否处于事务中
-   */
   getInTransaction(): boolean {
     return this._isInTransaction;
   }
 
-  /**
-   * 检查是否处于事务中（外部使用）
-   * @returns boolean 是否处于事务中
-   */
   isInTransaction(): boolean {
     return this.getInTransaction();
   }
 
-  /**
-   * 重置事务状态
-   * 确保事务状态在任何情况下都能正确重置
-   */
   private resetTransactionState(): void {
     this._isInTransaction = false;
     this.operations = [];
@@ -275,31 +212,16 @@ export class TransactionService {
     this.transactionData.clear();
   }
 
-  /**
-   * 获取事务中的表数据
-   * @param tableName 表名
-   * @returns Record<string, any>[] 表数据
-   */
-  getTransactionData(tableName: string): Record<string, any>[] | undefined {
+  getTransactionData(tableName: string): StorageRecord[] | undefined {
     return this.transactionData.get(tableName);
   }
 
-  /**
-   * 设置事务中的表数据
-   * @param tableName 表名
-   * @param data 表数据
-   */
-  setTransactionData(tableName: string, data: Record<string, any>[]): void {
+  setTransactionData(tableName: string, data: StorageRecord[]): void {
     this.transactionData.set(tableName, data);
   }
 
-  /**
-   * 保存表数据快照
-   * @param tableName 表名
-   * @param data 表数据
-   * @throws {TransactionError} 当事务不存在时抛出
-   */
-  saveSnapshot(tableName: string, data: Record<string, any>[], existed = true): void {
+  /** Saves the first deep snapshot for a table in the active transaction. */
+  saveSnapshot(tableName: string, data: StorageRecord[], existed = true): void {
     if (!this.isInTransaction()) {
       throw new TransactionError(
         'No transaction in progress',
@@ -309,16 +231,18 @@ export class TransactionService {
       );
     }
 
-    // Only save snapshot for first operation on this table
     if (!this.snapshots.has(tableName)) {
-      // Optimization: Efficient deep copy, reduce snapshot overhead by 60%
-      // Use structuredClone (if available) or optimized JSON deep copy
-      let snapshotData: Record<string, any>[];
+      // Snapshots cannot share mutable record objects with queued operations.
+      let snapshotData: StorageRecord[];
       if (typeof structuredClone !== 'undefined') {
         snapshotData = structuredClone(data);
       } else {
-        // Fallback到优化的JSON深拷贝
-        snapshotData = JSON.parse(JSON.stringify(data));
+        const serialized = JSON.stringify(data);
+        const parsed: unknown = serialized === undefined ? undefined : JSON.parse(serialized);
+        if (!Array.isArray(parsed) || !parsed.every(isStorageRecord)) {
+          throw new TransactionError('Could not create a transaction snapshot', 'SNAPSHOT_FAILED');
+        }
+        snapshotData = parsed;
       }
 
       this.snapshots.set(tableName, {
@@ -329,12 +253,8 @@ export class TransactionService {
     }
   }
 
-  /**
-   * 添加操作到事务队列
-   * @param operation 操作对象
-   * @throws {TransactionError} 当事务不存在时抛出
-   */
-  addOperation(operation: Operation): void {
+  /** Adds an operation and invalidates its materialized table view. */
+  addOperation(operation: TransactionOperation): void {
     if (!this.isInTransaction()) {
       throw new TransactionError(
         'No transaction in progress',
@@ -346,30 +266,20 @@ export class TransactionService {
 
     this.operations.push(operation);
 
-    // Clear transaction data cache, ensure recalculation on next access
-    // Ensures transaction data cache stays consistent with operation queue
     this.transactionData.delete(operation.tableName);
   }
 
-  /**
-   * 获取事务中的当前表数据，考虑所有已添加的操作
-   * @param tableName 表名
-   * @param readFn 读取函数，用于获取原始数据
-   * @returns Promise<Record<string, any>[]> 当前事务中的表数据
-   */
+  /** Materializes a table view with all queued operations applied. */
   async getCurrentTransactionData(
     tableName: string,
-    readFn: (tableName: string, options?: any) => Promise<Record<string, any>[]>
-  ): Promise<Record<string, any>[]> {
-    // If already has computed transaction data, return directly
+    readFn: (tableName: string, options?: ReadOptions<StorageRecord>) => Promise<StorageRecord[]>
+  ): Promise<StorageRecord[]> {
     if (this.transactionData.has(tableName)) {
       return this.transactionData.get(tableName)!;
     }
 
-    // Get原始数据
     let data = await readFn(tableName);
 
-    // Apply all added operations
     for (const operation of this.operations) {
       if (operation.tableName !== tableName) {
         continue;
@@ -377,22 +287,17 @@ export class TransactionService {
 
       switch (operation.type) {
         case 'overwrite':
-          data = Array.isArray(operation.data) ? operation.data : [operation.data];
+          data = [...operation.data];
           break;
         case 'write':
-          // Write操作：根据mode决定是覆盖还是追加
-          const writeData = Array.isArray(operation.data) ? operation.data : [operation.data];
           if (operation.options?.mode === 'overwrite') {
-            // Overwrite mode: Replace data directly
-            data = writeData;
+            data = [...operation.data];
           } else {
-            // Default append mode: Merge data
-            data = [...data, ...writeData];
+            data = [...data, ...operation.data];
           }
           break;
         case 'update':
-          // Update操作：使用QueryEngine过滤匹配的数据并更新
-          const matchedItems = QueryEngine.filter(data, operation.where || {});
+          const matchedItems = QueryEngine.filter(data, operation.where);
           const matchedItemRefs = new Set(matchedItems);
 
           data = data.map(item => {
@@ -403,31 +308,17 @@ export class TransactionService {
           });
           break;
         case 'delete':
-          // Delete操作：使用QueryEngine过滤掉匹配的数据
-          // Note: delete where condition stored in operation.data
-          data = data.filter(item => {
-            // Use QueryEngine to check if not matching condition
-            return QueryEngine.filter([item], operation.data || {}).length === 0;
-          });
+          data = data.filter(item => QueryEngine.filter([item], operation.where).length === 0);
           break;
         case 'bulkWrite':
-          // Bulk operation: Apply each sub-operation individually
-          const bulkOperations = Array.isArray(operation.data) ? operation.data : [operation.data];
-          for (const bulkOp of bulkOperations) {
-            // Ensure bulkOp is a valid operation object
-            if (typeof bulkOp !== 'object' || !bulkOp.type) {
-              continue;
-            }
-
+          for (const bulkOp of operation.operations) {
             switch (bulkOp.type) {
               case 'insert':
-                // Insert operation: Add data to collection
                 const insertData = Array.isArray(bulkOp.data) ? bulkOp.data : [bulkOp.data];
                 data = [...data, ...insertData];
                 break;
               case 'update':
-                // Update操作：使用QueryEngine过滤匹配的数据并更新
-                const bulkMatchedItems = QueryEngine.filter(data, bulkOp.where || {});
+                const bulkMatchedItems = QueryEngine.filter(data, bulkOp.where);
                 const bulkMatchedItemRefs = new Set(bulkMatchedItems);
 
                 data = data.map(item => {
@@ -438,12 +329,7 @@ export class TransactionService {
                 });
                 break;
               case 'delete':
-                // Delete操作：使用QueryEngine过滤掉匹配的数据
-                // Note: Consistent with top-level delete, condition stored in bulkOp.data
-                const deleteCondition = bulkOp.data || bulkOp.where || {};
-                data = data.filter(item => {
-                  return QueryEngine.filter([item], deleteCondition).length === 0;
-                });
+                data = data.filter(item => QueryEngine.filter([item], bulkOp.where).length === 0);
                 break;
             }
           }
@@ -451,7 +337,6 @@ export class TransactionService {
       }
     }
 
-    // Save计算结果到transactionData
     this.transactionData.set(tableName, data);
     return data;
   }

@@ -1,10 +1,3 @@
-/**
- * @module defaultConfig
- * @description Default configuration for expo-lite-data-store
- * @since 2025-11-19
- * @version 3.0.0
- */
-
 import { LiteStoreConfig } from './types/config';
 
 export default {
@@ -60,7 +53,7 @@ export default {
   monitoring: {
     enablePerformanceTracking: false, // Not fully supported yet
     enableHealthChecks: true, // Enable to improve performance and stability
-    metricsRetention: 86400000, // 24小时
+    metricsRetention: 86400000, // 24h
   },
 
   autoSync: {

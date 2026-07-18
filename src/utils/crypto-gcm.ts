@@ -1,12 +1,3 @@
-/**
- * AES-256-GCM Encryption Module
- * Compliant with NIST SP 800-38D and OWASP MASVS 2026 standards
- *
- * @module crypto-gcm
- * @since 2026-04-01
- * @version 3.0.0
- */
-
 import { gcm } from '@noble/ciphers/aes';
 import { hashBytes, pbkdf2, randomBytes } from './cryptoProvider';
 import { normalizePbkdf2Iterations } from './cryptoIterations';

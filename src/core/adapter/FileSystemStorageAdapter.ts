@@ -1,26 +1,32 @@
-/**
- * @module FileSystemStorageAdapter
- * @description File system storage adapter implementing IStorageAdapter interface
- * @since 2025-11-19
- * @version 3.0.0
- */
-// Created
-// Last modified
-
 import { configManager } from '../config/ConfigManager';
 import { StorageTaskProcessor } from '../../taskQueue/StorageTaskProcessor';
 import { taskQueue } from '../../taskQueue/taskQueue';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
 import { IStorageAdapter } from '../../types/storageAdapterInfc';
 import { StorageError } from '../../types/storageErrorInfc';
-import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from '../../types/storageTypes';
+import type {
+  BulkOperation,
+  CreateTableOptions,
+  FilterCondition,
+  FindOptions,
+  InternalWriteOptions,
+  NonInfer,
+  ReadOptions,
+  StorageInput,
+  StorageRecord,
+  TableOptions,
+  UpdatePayload,
+  WriteOptions,
+  WriteResult,
+} from '../../types/storageTypes';
+import { isStorageRecord } from '../../types/storageTypes';
 import { FileOperationManager } from '../FileOperationManager';
 import { CacheConfig, CacheManager, CacheStrategy } from '../cache/CacheManager';
 import { CACHE } from '../constants';
 import { DataReader } from '../data/DataReader';
 import { DataWriter } from '../data/DataWriter';
 import { IndexManager } from '../index/IndexManager';
-import { MetadataManager } from '../meta/MetadataManager';
+import { MetadataManager, type TableSchema } from '../meta/MetadataManager';
 import { CacheMonitor } from '../monitor/CacheMonitor';
 import { performanceMonitor } from '../monitor/PerformanceMonitor';
 import { CacheService } from '../service/CacheService';
@@ -33,36 +39,72 @@ import { getFileSystem } from '../../utils/fileSystemCompat';
 import { pathHelper } from '../../utils/PathHelper';
 import { QueryEngine } from '../query/QueryEngine';
 import { assertValidTableName } from '../../utils/tableName';
-/**
- * 文件系统存储适配器
- * 实现了IStorageAdapter接口，负责处理数据库的文件系统存储操作
- * 支持事务管理、缓存机制、索引管理
- */
+
 export class FileSystemStorageAdapter implements IStorageAdapter {
-  /** 元数据管理器 */
   private metadataManager: IMetadataManager;
-  /** 索引管理器 */
+
   private indexManager: IndexManager;
-  /** 文件操作管理器 */
+
   private fileOperationManager: FileOperationManager;
-  /** 缓存管理器 */
+
   private cacheManager: CacheManager;
-  /** 缓存服务 */
+
   private cacheService: CacheService;
-  /** 事务服务 */
+
   private transactionService: TransactionService;
-  /** 自动同步服务 */
+
   private autoSyncService: AutoSyncService;
-  /** 数据读取器 */
+
   private dataReader: DataReader;
-  /** 数据写入器 */
+
   private dataWriter: DataWriter;
-  /** 缓存监控器 */
+
   private cacheMonitor: CacheMonitor;
   private initializationPromise: Promise<void> | null = null;
   private servicesStarted = false;
   private taskQueueInitialized = false;
   private initializedStorageFolder: string | null = null;
+
+  /** Converts public object inputs into runtime-validated persistence records. */
+  private normalizeStorageInput<T extends object>(data: StorageInput<T>): StorageRecord[] {
+    const records: unknown[] = Array.isArray(data) ? data : [data];
+    if (!records.every(isStorageRecord)) {
+      throw new StorageError('Invalid data: expected an object or an array of objects', 'FILE_CONTENT_INVALID', {
+        suggestion: 'Provide a non-null object for every record.',
+      });
+    }
+    return records;
+  }
+
+  private normalizeStorageRecord(record: object): StorageRecord {
+    if (!isStorageRecord(record)) {
+      throw new StorageError('Invalid update payload: expected a non-array object', 'FILE_CONTENT_INVALID', {
+        suggestion: 'Provide one non-null object for the update payload.',
+      });
+    }
+    return record;
+  }
+
+  /** Public record types may be named interfaces without index signatures. */
+  private toPublicRecords<T extends object>(records: StorageRecord[]): T[] {
+    return records as unknown as T[];
+  }
+
+  private toPublicRecord<T extends object>(record: StorageRecord | null): T | null {
+    return record as unknown as T | null;
+  }
+
+  private toStorageFilter<T extends object>(filter: FilterCondition<T>): FilterCondition<StorageRecord> {
+    return filter as unknown as FilterCondition<StorageRecord>;
+  }
+
+  private toStorageReadOptions<T extends object>(options?: ReadOptions<T>): ReadOptions<StorageRecord> | undefined {
+    return options as unknown as ReadOptions<StorageRecord> | undefined;
+  }
+
+  private toStorageFindOptions<T extends object>(options?: FindOptions<T>): FindOptions<StorageRecord> | undefined {
+    return options as unknown as FindOptions<StorageRecord> | undefined;
+  }
 
   private validateTableName(tableName: string): void {
     assertValidTableName(tableName);
@@ -77,39 +119,19 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     if (configuredFolder !== this.initializedStorageFolder) {
       throw new StorageError('storageFolder changed while storage is active', 'STORAGE_ROOT_CHANGED', {
         details: `The adapter is initialized for "${this.initializedStorageFolder}" but configuration now selects "${configuredFolder}".`,
-        suggestion: 'Configure storageFolder before initialization. Test-only cleanup/reinitialization flows must finish cleanup before the next operation.',
+        suggestion:
+          'Configure storageFolder before initialization. Test-only cleanup/reinitialization flows must finish cleanup before the next operation.',
       });
     }
   }
 
-  private flattenInsertOperations(
-    operations: Array<
-      | {
-          type: 'insert';
-          data: Record<string, any> | Record<string, any>[];
-        }
-      | {
-          type: 'update';
-          data: Record<string, any>;
-          where: Record<string, any>;
-        }
-      | {
-          type: 'delete';
-          where: Record<string, any>;
-        }
-    >
-  ): Record<string, any>[] | null {
+  private flattenInsertOperations(operations: BulkOperation<StorageRecord>[]): StorageRecord[] | null {
     if (operations.length === 0) {
       return null;
     }
 
     const insertOperations = operations.filter(
-      (
-        operation
-      ): operation is {
-        type: 'insert';
-        data: Record<string, any> | Record<string, any>[];
-      } => operation.type === 'insert'
+      (operation): operation is Extract<BulkOperation<StorageRecord>, { type: 'insert' }> => operation.type === 'insert'
     );
 
     if (insertOperations.length !== operations.length) {
@@ -119,36 +141,51 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     return insertOperations.flatMap(operation => (Array.isArray(operation.data) ? operation.data : [operation.data]));
   }
 
-  /**
-   * 构造函数，接受元数据管理器实例
-   * @param metadataManager 元数据管理器实例，如果未提供则创建新实例（保持向后兼容）
-   * @param options 可选配置项
-   */
+  private normalizeBulkOperations<T extends object>(operations: BulkOperation<T>[]): BulkOperation<StorageRecord>[] {
+    return operations.map(operation => {
+      switch (operation.type) {
+        case 'insert': {
+          const records = this.normalizeStorageInput(operation.data);
+          return {
+            type: 'insert',
+            data: Array.isArray(operation.data) ? records : records[0],
+          };
+        }
+        case 'update':
+          return {
+            type: 'update',
+            data: this.normalizeStorageRecord(operation.data),
+            where: this.toStorageFilter(operation.where),
+          };
+        case 'delete':
+          return {
+            type: 'delete',
+            where: this.toStorageFilter(operation.where),
+          };
+      }
+    });
+  }
+
   constructor(
     metadataManager?: IMetadataManager,
     options?: {
       cacheConfig?: Partial<CacheConfig>;
     }
   ) {
-    // Use dependency injection，如果没有提供则创建新实例（保持向后兼容）
     this.metadataManager = metadataManager || new MetadataManager();
-
-    // Initialize核心组件
     this.indexManager = new IndexManager(this.metadataManager);
     const currentConfig = configManager.getConfig();
     this.fileOperationManager = new FileOperationManager(currentConfig.chunkSize, this.metadataManager);
-
-    // Initialize服务，支持自定义缓存配置
     const defaultCacheConfig: CacheConfig = {
       strategy: CacheStrategy.LRU,
       maxSize: currentConfig.cache.maxSize || CACHE.DEFAULT_MAX_SIZE,
-      defaultExpiry: currentConfig.cache.defaultExpiry || CACHE.DEFAULT_EXPIRY, // 1小时
+      defaultExpiry: currentConfig.cache.defaultExpiry || CACHE.DEFAULT_EXPIRY,
       enablePenetrationProtection: true,
       enableBreakdownProtection: true,
       enableAvalancheProtection: true,
       maxMemoryUsage: 50 * 1024 * 1024, // Default 50MB memory limit
-      memoryThreshold: currentConfig.cache.memoryWarningThreshold || CACHE.MEMORY_THRESHOLD, // 80%阈值触发清理
-      avalancheRandomExpiry: CACHE.AVALANCHE_PROTECTION_RANGE, // 0-5分钟随机过期
+      memoryThreshold: currentConfig.cache.memoryWarningThreshold || CACHE.MEMORY_THRESHOLD,
+      avalancheRandomExpiry: CACHE.AVALANCHE_PROTECTION_RANGE,
     };
 
     this.cacheManager = new CacheManager({
@@ -158,21 +195,12 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
     this.cacheService = new CacheService(this.cacheManager);
     this.transactionService = new TransactionService();
-
-    // Initialize性能监控（延迟到首次真实操作时启动）
     this.cacheMonitor = new CacheMonitor(this.cacheManager);
-
-    // Initialize数据访问组件
     this.dataReader = new DataReader(this.metadataManager, this.indexManager, this.cacheManager);
     this.dataWriter = new DataWriter(this.metadataManager, this.indexManager, this.fileOperationManager);
-
-    // Initialize自动同步服务（使用单例模式）
     this.autoSyncService = AutoSyncService.getInstance(this.cacheService, this);
   }
 
-  /**
-   * 初始化运行时依赖
-   */
   private async initializeRuntime(): Promise<void> {
     const storageFolder = pathHelper.getStorageFolder();
     await ensureStorageRootReady();
@@ -226,10 +254,6 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     await this.initializationPromise;
   }
 
-  /**
-   * 清理资源（用于测试）
-   * 停止任务队列、自动同步服务和缓存监控
-   */
   async cleanup(): Promise<void> {
     await this.autoSyncService.cleanup();
     await taskQueue.stop({ force: true });
@@ -254,20 +278,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     this.initializedStorageFolder = null;
   }
 
-  // ==================== 表管理 ====================
-  /**
-   * 创建表
-   * @param tableName 表名
-   * @param options 创建表选项
-   * @throws {Error} 当表名无效时抛出
-   * @returns Promise<void>
-   */
-  async createTable(
+  async createTable<T extends object = StorageRecord>(
     tableName: string,
-    options: CreateTableOptions & {
-      columns?: Record<string, string | { type: string; isHighRisk?: boolean }>;
-      initialData?: Record<string, any>[];
-      mode?: 'single' | 'chunked';
+    options: CreateTableOptions<T> & {
       isHighRisk?: boolean;
       highRiskFields?: string[];
     } = {}
@@ -282,17 +295,18 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       });
     }
 
-    return this.dataWriter.createTable(tableName, options);
+    const normalizedOptions: CreateTableOptions<StorageRecord> & {
+      isHighRisk?: boolean;
+      highRiskFields?: string[];
+    } = {
+      ...options,
+      initialData: options.initialData ? this.normalizeStorageInput(options.initialData) : undefined,
+    };
+
+    return this.dataWriter.createTable(tableName, normalizedOptions);
   }
 
-  /**
-   * 删除表
-   * @param tableName 表名
-   * @param _options Operation options, including common options
-   * @throws {Error} 当表名无效时抛出
-   * @returns Promise<void>
-   */
-  async deleteTable(tableName: string, _options?: any): Promise<void> {
+  async deleteTable(tableName: string, _options?: TableOptions): Promise<void> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
 
@@ -309,47 +323,20 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     return result;
   }
 
-  /**
-   * 检查表是否存在
-   * @param tableName 表名
-   * @param _options Operation options, including common options
-   * @returns Promise<boolean> 表是否存在
-   */
-  async hasTable(tableName: string, _options?: any): Promise<boolean> {
+  async hasTable(tableName: string, _options?: TableOptions): Promise<boolean> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
     return this.dataWriter.hasTable(tableName);
   }
 
-  /**
-   * 列出所有表
-   * @param _options Operation options, including common options
-   * @returns Promise<string[]> 表名数组
-   */
-  async listTables(_options?: any): Promise<string[]> {
+  async listTables(_options?: TableOptions): Promise<string[]> {
     await this.ensureInitialized();
     return this.metadataManager.allTables();
   }
 
-  // ==================== 数据读写 ====================
-  /**
-   * 写入数据
-   * @param tableName 表名
-   * @param data 要写入的数据
-   * @param options 写入选项
-   * @throws {Error} 当表名或数据无效时抛出
-   * @returns Promise<WriteResult> 写入结果
-   */
-  /**
-   * 覆盖数据（总是使用覆盖模式）
-   * @param tableName 表名
-   * @param data 要覆盖的数据
-   * @param options 写入选项（mode将被强制设为overwrite）
-   * @returns Promise<WriteResult>
-   */
-  async overwrite(
+  async overwrite<T extends object = StorageRecord>(
     tableName: string,
-    data: Record<string, any> | Record<string, any>[],
+    data: StorageInput<T>,
     options?: Omit<WriteOptions, 'mode'>
   ): Promise<WriteResult> {
     return StorageErrorHandler.handleAsyncError(
@@ -363,33 +350,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
             suggestion: 'Provide a valid non-empty string for tableName',
           });
         }
-
-        // Input validation: data cannot be empty and must be an object or array
-        if (data === undefined || data === null) {
-          throw new StorageError('Invalid data: must be an object or array of objects', 'FILE_CONTENT_INVALID', {
-            suggestion: 'Provide a valid object or array of objects',
-          });
-        }
-
-        // Validate数组中的每个元素都是对象
-        if (Array.isArray(data)) {
-          for (const item of data) {
-            if (typeof item !== 'object' || item === null || Array.isArray(item)) {
-              throw new StorageError('Invalid data: all items in the array must be objects', 'FILE_CONTENT_INVALID', {
-                suggestion: 'Ensure all items in the array are valid objects',
-              });
-            }
-          }
-        }
-        // Validate单个数据是对象
-        else if (typeof data !== 'object' || Array.isArray(data)) {
-          throw new StorageError('Invalid data: must be an object or array of objects', 'FILE_CONTENT_INVALID', {
-            suggestion: 'Provide a valid object or array of objects',
-          });
-        }
-
+        const normalizedData = this.normalizeStorageInput(data);
         const startTime = Date.now();
-        const dataSize = Array.isArray(data) ? data.length : 1;
+        const dataSize = normalizedData.length;
 
         // Transaction handling logic
         if (this.transactionService.isInTransaction()) {
@@ -404,26 +367,19 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
           this.transactionService.addOperation({
             tableName,
             type: 'overwrite',
-            data,
+            data: normalizedData,
             options,
           });
-
-          // Return mock result in transaction，不实际修改数据
           return {
-            written: Array.isArray(data) ? data.length : 1,
-            totalAfterWrite: Array.isArray(data) ? data.length : 1,
+            written: normalizedData.length,
+            totalAfterWrite: normalizedData.length,
             chunked: this.metadataManager.get(tableName)?.mode === 'chunked',
           };
         }
 
         // Overwrite mode: write data directly
-        const finalData = Array.isArray(data) ? data : [data];
-        const result = await this.dataWriter.write(tableName, finalData, { ...options, mode: 'overwrite' });
-
-        // Delete与该表相关的所有缓存，确保后续读取能获取到最新数据
+        const result = await this.dataWriter.write(tableName, normalizedData, { ...options, mode: 'overwrite' });
         this.cacheService.clearTableCache(tableName);
-
-        // Log性能指标
         performanceMonitor.record({
           operation: 'overwrite',
           duration: Date.now() - startTime,
@@ -434,23 +390,19 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
         return result;
       },
-      // Catch并处理写入操作中的错误
       (cause: unknown) => StorageErrorHandler.createFileError('overwrite', `table ${tableName}`, cause)
     );
   }
 
   /**
-   * 写入数据（支持追加或覆盖模式，用于向后兼容）
-   * @deprecated 请使用 insert（追加模式）或 overwrite（覆盖模式）
-   * @param tableName 表名
-   * @param data 要写入的数据
-   * @param options 写入选项，包括模式（'append' | 'overwrite'）
-   * @returns Promise<WriteResult>
+   * Writes with the caller-selected mode. Retained for backward compatibility.
+   *
+   * @deprecated Use insert for append mode or overwrite for replacement mode.
    */
-  async write(
+  async write<T extends object = StorageRecord>(
     tableName: string,
-    data: Record<string, any> | Record<string, any>[],
-    options?: WriteOptions & { directWrite?: boolean }
+    data: StorageInput<T>,
+    options?: InternalWriteOptions
   ): Promise<WriteResult> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
@@ -463,33 +415,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
             suggestion: 'Provide a valid non-empty string for tableName',
           });
         }
-
-        // Input validation: data cannot be empty and must be an object or array
-        if (data === undefined || data === null) {
-          throw new StorageError('Invalid data: must be an object or array of objects', 'FILE_CONTENT_INVALID', {
-            suggestion: 'Provide a valid object or array of objects',
-          });
-        }
-
-        // Validate数组中的每个元素都是对象
-        if (Array.isArray(data)) {
-          for (const item of data) {
-            if (typeof item !== 'object' || item === null || Array.isArray(item)) {
-              throw new StorageError('Invalid data: all items in the array must be objects', 'FILE_CONTENT_INVALID', {
-                suggestion: 'Ensure all items in the array are valid objects',
-              });
-            }
-          }
-        }
-        // Validate单个数据是对象
-        else if (typeof data !== 'object' || Array.isArray(data)) {
-          throw new StorageError('Invalid data: must be an object or array of objects', 'FILE_CONTENT_INVALID', {
-            suggestion: 'Provide a valid object or array of objects',
-          });
-        }
-
+        const normalizedData = this.normalizeStorageInput(data);
         const startTime = Date.now();
-        const dataSize = Array.isArray(data) ? data.length : 1;
+        const dataSize = normalizedData.length;
 
         // Transaction handling logic
         if (this.transactionService.isInTransaction() && !options?.directWrite) {
@@ -504,15 +432,13 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
           this.transactionService.addOperation({
             tableName,
             type: 'write',
-            data,
+            data: normalizedData,
             options,
           });
-
-          // Return mock result in transaction，不实际修改数据
           const currentCount = await this.count(tableName);
           return {
-            written: Array.isArray(data) ? data.length : 1,
-            totalAfterWrite: currentCount + (Array.isArray(data) ? data.length : 1),
+            written: normalizedData.length,
+            totalAfterWrite: currentCount + normalizedData.length,
             chunked: this.metadataManager.get(tableName)?.mode === 'chunked',
           };
         }
@@ -520,15 +446,12 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
         // Not in transaction, or directWrite is true. Let DataWriter own append merging
         // so concurrent inserts stay behind the same per-table lock instead of racing on
         // adapter-level stale snapshots.
-        const normalizedData = Array.isArray(data) ? data : [data];
         const writtenCount = normalizedData.length;
         const result = await this.dataWriter.write(tableName, normalizedData, options);
 
         if (options?.mode === 'append') {
           result.written = writtenCount;
         }
-
-        // If in transaction且directWrite为true，更新事务数据
         if (this.transactionService.isInTransaction() && options?.directWrite) {
           // Append/default writes need a post-write read because the writer merged with the
           // current persisted table inside its lock.
@@ -538,11 +461,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
               : await this.dataReader.read(tableName, { bypassCache: true });
           this.transactionService.setTransactionData(tableName, latestTransactionData);
         }
-
-        // Delete与该表相关的所有缓存，确保后续读取能获取到最新数据
         this.cacheService.clearTableCache(tableName);
-
-        // 5. 记录性能指标
         performanceMonitor.record({
           operation: 'write',
           duration: Date.now() - startTime,
@@ -553,19 +472,11 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
         return result;
       },
-      // Catch并处理写入操作中的错误
       (cause: unknown) => StorageErrorHandler.createFileError('write', `table ${tableName}`, cause)
     );
   }
 
-  /**
-   * 读取数据
-   * @param tableName 表名
-   * @param options 读取选项
-   * @throws {Error} 当表名无效时抛出
-   * @returns Promise<Record<string, any>[]> 读取的数据
-   */
-  async read(tableName: string, options?: ReadOptions & { bypassCache?: boolean }): Promise<Record<string, any>[]> {
+  async read<T extends object = StorageRecord>(tableName: string, options?: ReadOptions<NonInfer<T>>): Promise<T[]> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
 
@@ -575,35 +486,24 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
         suggestion: 'Provide a valid non-empty string for tableName',
       });
     }
-
-    // Special handling in transaction：如果在事务中，获取包含未提交操作的最新数据
+    // Transactional reads include staged operations that are not persisted yet.
     if (this.transactionService.isInTransaction()) {
-      return this.transactionService.getCurrentTransactionData(tableName, (tableName: string) =>
-        this.dataReader.read(tableName, options)
+      const transactionData = await this.transactionService.getCurrentTransactionData(
+        tableName,
+        (currentTableName: string) => this.dataReader.read(currentTableName, this.toStorageReadOptions(options))
       );
+      return this.toPublicRecords<T>(transactionData);
     }
 
-    return this.dataReader.read(tableName, options);
+    return this.toPublicRecords<T>(await this.dataReader.read(tableName, this.toStorageReadOptions(options)));
   }
 
-  /**
-   * 统计表数据行数
-   * @param tableName 表名
-   * @returns Promise<number> 数据行数
-   */
   async count(tableName: string): Promise<number> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
     return this.dataWriter.count(tableName);
   }
 
-  /**
-   * 验证表的计数准确性（用于诊断和修复）
-   * 返回元数据计数和实际计数的比较结果
-   * @param tableName 表名
-   * @throws {Error} 当表名无效时抛出
-   * @returns Promise<{ metadata: number; actual: number; match: boolean }> 计数比较结果
-   */
   async verifyCount(tableName: string): Promise<{ metadata: number; actual: number; match: boolean }> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
@@ -618,12 +518,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     return this.dataWriter.verifyCount(tableName);
   }
 
-  /**
-   * 获取表的元数据
-   * @param tableName 表名
-   * @returns 表的元数据，或者undefined如果表不存在
-   */
-  getTableMeta(tableName: string): any | undefined {
+  getTableMeta(tableName: string): TableSchema | undefined {
     this.assertStorageRootIsCurrent();
     this.validateTableName(tableName);
     return this.metadataManager.get(tableName);
@@ -656,7 +551,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     await this.metadataManager.saveImmediately?.();
   }
 
-  private async recoverTableMetaFromFiles(tableName: string, recordCount: number): Promise<any | undefined> {
+  private async recoverTableMetaFromFiles(tableName: string, recordCount: number): Promise<TableSchema | undefined> {
     this.validateTableName(tableName);
     const fileSystem = getFileSystem();
     const rootPath = getRootPathSync();
@@ -688,16 +583,11 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     return this.metadataManager.get(tableName);
   }
 
-  // ==================== 查询方法 ====================
-  /**
-   * 查找单条记录
-   * @param tableName 表名
-   * @param filter 过滤条件
-   * @param _options 操作选项，包括common options
-   * @throws {Error} 当表名无效时抛出
-   * @returns Promise<Record<string, any> | null> 找到的记录或null
-   */
-  async findOne(tableName: string, filter: Record<string, any>, _options?: any): Promise<Record<string, any> | null> {
+  async findOne<T extends object = StorageRecord>(
+    tableName: string,
+    filter: FilterCondition<NonInfer<T>>,
+    _options?: TableOptions
+  ): Promise<T | null> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
 
@@ -707,44 +597,31 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
         suggestion: 'Provide a valid non-empty string for tableName',
       });
     }
-    return this.dataReader.findOne(tableName, filter);
+    return this.toPublicRecord<T>(await this.dataReader.findOne(tableName, this.toStorageFilter(filter)));
   }
 
-  /**
-   * 查找多条记录
-   * @param tableName 表名
-   * @param filter 过滤条件
-   * @param options 查询选项
-   * @param _findOptions 操作选项，包括common options
-   * @returns Promise<Record<string, any>[]> 找到的记录数组
-   */
-  async findMany(
+  async findMany<T extends object = StorageRecord>(
     tableName: string,
-    filter?: Record<string, any>,
-    options?: {
-      skip?: number;
-      limit?: number;
-      sortBy?: string | string[];
-      order?: 'asc' | 'desc' | ('asc' | 'desc')[];
-      sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
-    },
-    _findOptions?: any
-  ): Promise<Record<string, any>[]> {
+    filter?: FilterCondition<NonInfer<T>>,
+    options?: FindOptions<NonInfer<T>>,
+    _findOptions?: TableOptions
+  ): Promise<T[]> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
-    return this.dataReader.findMany(tableName, filter, options);
+    return this.toPublicRecords<T>(
+      await this.dataReader.findMany(
+        tableName,
+        filter ? this.toStorageFilter(filter) : undefined,
+        this.toStorageFindOptions(options)
+      )
+    );
   }
 
-  // ==================== 删除数据 ====================
-  /**
-   * 删除数据
-   * @param tableName 表名
-   * @param where 删除条件
-   * @param options 删除选项
-   * @throws {Error} 当表名无效时抛出
-   * @returns Promise<number> 删除的记录数
-   */
-  async delete(tableName: string, where: Record<string, any>, options?: { directWrite?: boolean }): Promise<number> {
+  async delete<T extends object = StorageRecord>(
+    tableName: string,
+    where: FilterCondition<T>,
+    options?: InternalWriteOptions
+  ): Promise<number> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
 
@@ -757,7 +634,6 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
     // Transaction handling logic
     if (this.transactionService.isInTransaction() && !options?.directWrite) {
-      // Save数据快照（只在第一次操作该表时保存），用于事务回滚
       const currentData = await this.dataReader.read(tableName, { bypassCache: true });
       this.transactionService.saveSnapshot(tableName, currentData, this.metadataManager.get(tableName) !== undefined);
 
@@ -765,60 +641,38 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       this.transactionService.addOperation({
         tableName,
         type: 'delete',
-        data: where,
+        where: this.toStorageFilter(where),
+        options,
       });
-
-      // Return mock result in transaction，不实际修改数据
       return 0;
     }
-
-    // Not in transaction, or directWrite is true，直接执行删除操作，然后清理缓存
-
-    // 1. 执行磁盘删除操作
-    const result = await this.dataWriter.delete(tableName, where);
-
-    // 3. 删除与该表相关的所有缓存，确保后续读取能获取到最新数据
+    const result = await this.dataWriter.delete(tableName, this.toStorageFilter(where));
     this.cacheService.clearTableCache(tableName);
 
     return result;
   }
 
-  /**
-   * 删除数据（与delete方法功能相同，为了API兼容性）
-   * @param tableName 表名
-   * @param where 删除条件
-   * @throws {Error} 当表名无效时抛出
-   * @returns Promise<number> 删除的记录数
-   */
-  async remove(tableName: string, where: Record<string, any>): Promise<number> {
-    return this.delete(tableName, where);
+  async remove<T extends object = StorageRecord>(
+    tableName: string,
+    where: FilterCondition<T>,
+    options?: TableOptions
+  ): Promise<number> {
+    return this.delete(tableName, where, options);
   }
 
-  /**
-   * 插入数据（总是追加模式，与write方法的append模式功能相同）
-   * @param tableName 表名
-   * @param data 要插入的数据
-   * @param options 插入选项（mode将被强制设为append）
-   * @throws {Error} 当表名或数据无效时抛出
-   * @returns Promise<WriteResult> 插入结果
-   */
-  async insert(
+  async insert<T extends object = StorageRecord>(
     tableName: string,
-    data: Record<string, any> | Record<string, any>[],
+    data: StorageInput<T>,
     options?: WriteOptions
   ): Promise<WriteResult> {
-    // Insert always uses append mode，忽略传入的mode选项
     return this.write(tableName, data, { ...options, mode: 'append' });
   }
 
-  /**
-   * 更新匹配的数据
-   */
-  async update(
+  async update<T extends object = StorageRecord>(
     tableName: string,
-    data: Record<string, any>,
-    where: Record<string, any>,
-    options?: { directWrite?: boolean }
+    data: UpdatePayload<T>,
+    where: FilterCondition<T>,
+    options?: InternalWriteOptions
   ): Promise<number> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
@@ -828,11 +682,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
         suggestion: 'Provide a valid non-empty string for tableName',
       });
     }
-
-    // Get当前表数据
     let allData;
-
-    // Special handling in transaction：如果在事务中，使用getCurrentTransactionData获取包含未提交操作的数据
     if (this.transactionService.isInTransaction()) {
       allData = await this.transactionService.getCurrentTransactionData(tableName, (tableName: string) =>
         this.dataReader.read(tableName)
@@ -842,7 +692,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     }
 
     // Optimization:
-    const matchedItems = QueryEngine.filter(allData, where);
+    const storageWhere = this.toStorageFilter(where);
+    const storageData = this.normalizeStorageRecord(data);
+    const matchedItems = QueryEngine.filter(allData, storageWhere);
     const updatedCount = matchedItems.length;
 
     if (updatedCount === 0) {
@@ -852,11 +704,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     // Use object identity from QueryEngine.filter instead of id/_id so tables
     // without an identifier field still update only the matched rows.
     const matchedItemRefs = new Set(matchedItems);
-
-    // Update数据
-    const finalData = allData.map((item: Record<string, any>) => {
+    const finalData = allData.map(item => {
       if (matchedItemRefs.has(item)) {
-        return QueryEngine.update(item, data);
+        return QueryEngine.update(item, storageData);
       }
       return item;
     });
@@ -869,8 +719,8 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       this.transactionService.addOperation({
         tableName,
         type: 'update',
-        data: data,
-        where: where,
+        data: storageData,
+        where: storageWhere,
         options: { mode: 'overwrite' },
       });
 
@@ -878,7 +728,6 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     }
 
     if (updatedCount > 0) {
-      // Execute写入操作
       await this.write(tableName, finalData, { mode: 'overwrite', directWrite: options?.directWrite });
 
       // Note:
@@ -888,11 +737,6 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     return updatedCount;
   }
 
-  /**
-   * 清空表数据
-   * @param tableName 表名
-   * @returns Promise<void>
-   */
   async clearTable(tableName: string): Promise<void> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
@@ -908,47 +752,24 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     await this.write(tableName, [], { mode: 'overwrite' });
   }
 
-  // ==================== 批量操作 ====================
-  /**
-   * 批量操作
-   * @param tableName 表名
-   * @param operations 操作数组，使用联合类型确保类型安全
-   * @param options 操作选项
-   * @returns Promise<WriteResult> 操作结果
-   */
-  async bulkWrite(
+  async bulkWrite<T extends object = StorageRecord>(
     tableName: string,
-    operations: Array<
-      | {
-          type: 'insert';
-          data: Record<string, any> | Record<string, any>[];
-        }
-      | {
-          type: 'update';
-          data: Record<string, any>;
-          where: Record<string, any>;
-        }
-      | {
-          type: 'delete';
-          where: Record<string, any>;
-        }
-    >,
-    options?: { directWrite?: boolean }
+    operations: BulkOperation<T>[],
+    options?: InternalWriteOptions
   ): Promise<WriteResult> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
 
     const startTime = Date.now();
-    // If in transaction且directWrite为false，将操作添加到事务队列
     if (this.transactionService.isInTransaction() && !options?.directWrite) {
       const currentData = await this.dataReader.read(tableName, { bypassCache: true });
       this.transactionService.saveSnapshot(tableName, currentData, this.metadataManager.get(tableName) !== undefined);
-
-      // Add到事务操作队列
+      const normalizedOperations = this.normalizeBulkOperations(operations);
       this.transactionService.addOperation({
         tableName,
         type: 'bulkWrite',
-        data: operations,
+        operations: normalizedOperations,
+        options,
       });
 
       // Return mock result in transaction
@@ -960,7 +781,8 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       };
     }
 
-    const insertOnlyItems = this.flattenInsertOperations(operations);
+    const normalizedOperations = this.normalizeBulkOperations(operations);
+    const insertOnlyItems = this.flattenInsertOperations(normalizedOperations);
     if (insertOnlyItems) {
       const result = await this.dataWriter.write(tableName, insertOnlyItems, { mode: 'append' });
 
@@ -982,17 +804,13 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
     // Execute batch operations directly to avoid recursion.
     const BATCH_SIZE = 1000; // Data per batch
-
-    // Read当前数据
     const currentData = await this.read(tableName);
     let finalData = [...currentData];
     let writtenCount = 0;
 
     // Batch process operations
-    for (let i = 0; i < operations.length; i += BATCH_SIZE) {
-      const batchOperations = operations.slice(i, i + BATCH_SIZE);
-
-      // Process当前批次的操作
+    for (let i = 0; i < normalizedOperations.length; i += BATCH_SIZE) {
+      const batchOperations = normalizedOperations.slice(i, i + BATCH_SIZE);
       for (const op of batchOperations) {
         switch (op.type) {
           case 'insert':
@@ -1001,53 +819,24 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
             writtenCount += insertItems.length;
             break;
           case 'update':
-            if (op.where) {
-              const matchedItems = QueryEngine.filter(finalData, op.where);
-              const matchedItemRefs = new Set(matchedItems);
-              finalData = finalData.map(item => (matchedItemRefs.has(item) ? QueryEngine.update(item, op.data) : item));
-              writtenCount += matchedItems.length;
-            } else {
-              // Original: Update record by id
-              const updateItems = Array.isArray(op.data) ? op.data : [op.data];
-              for (const updateItem of updateItems) {
-                if (updateItem.id !== undefined) {
-                  let updated = false;
-                  finalData = finalData.map(item => {
-                    if (item.id === updateItem.id) {
-                      updated = true;
-                      return { ...item, ...updateItem };
-                    }
-                    return item;
-                  });
-                  if (updated) {
-                    writtenCount++;
-                  }
-                }
-              }
-            }
+            const matchedItems = QueryEngine.filter(finalData, op.where);
+            const matchedItemRefs = new Set(matchedItems);
+            finalData = finalData.map(item => (matchedItemRefs.has(item) ? QueryEngine.update(item, op.data) : item));
+            writtenCount += matchedItems.length;
             break;
           case 'delete':
-            if (op.where) {
-              const matchedItems = QueryEngine.filter(finalData, op.where);
-              const matchedItemRefs = new Set(matchedItems);
-              finalData = finalData.filter(item => !matchedItemRefs.has(item));
-              writtenCount += matchedItems.length;
-            } else {
-              writtenCount += finalData.length;
-              finalData = [];
-            }
+            const deletedItems = QueryEngine.filter(finalData, op.where);
+            const deletedItemRefs = new Set(deletedItems);
+            finalData = finalData.filter(item => !deletedItemRefs.has(item));
+            writtenCount += deletedItems.length;
             break;
         }
       }
     }
-
-    // Write更新后的数据
     const result = await this.dataWriter.write(tableName, finalData, { mode: 'overwrite' });
 
     // Clear cache for this table
     this.cacheService.clearTableCache(tableName);
-
-    // Log性能指标
     performanceMonitor.record({
       operation: 'bulkWrite',
       duration: Date.now() - startTime,
@@ -1061,8 +850,6 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       written: writtenCount,
     };
   }
-
-  // ==================== 事务管理 ====================
   /**
    * Exposes transaction state to decorators that must defer metadata updates
    * until the underlying write has committed.
@@ -1071,39 +858,31 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     return this.transactionService.isInTransaction();
   }
 
-  /**
-   * 开始事务
-   * @returns Promise<void>
-   * @throws {Error} 当事务已存在时抛出
-   */
-  async beginTransaction(_options?: any): Promise<void> {
+  async beginTransaction(_options?: TableOptions): Promise<void> {
     await this.ensureInitialized();
     await this.transactionService.beginTransaction();
   }
 
-  /**
-   * 提交事务
-   * @param options 事务选项
-   * @returns Promise<void>
-   * @throws {Error} 当事务不存在时抛出
-   */
-  async commit(options?: any, finalize?: () => Promise<void>): Promise<void> {
+  async commit(options?: TableOptions, finalize?: () => Promise<void>): Promise<void> {
     await this.ensureInitialized();
     await this.transactionService.commit(
       // writeFn - Write handler function
-      (tableName: string, data: any, opOptions?: any) =>
+      (tableName: string, data: StorageInput<StorageRecord>, opOptions?: InternalWriteOptions) =>
         this.write(tableName, data, { ...options, ...opOptions, directWrite: true }),
       // deleteFn - Delete handler function
-      (tableName: string, where: any, deleteOptions?: any) =>
+      (tableName: string, where: FilterCondition<StorageRecord>, deleteOptions?: InternalWriteOptions) =>
         this.delete(tableName, where, { ...options, ...deleteOptions, directWrite: true }),
       // bulkWriteFn - Bulk write handler
-      (tableName: string, operations: any[], bulkOptions?: any) =>
+      (tableName: string, operations: BulkOperation<StorageRecord>[], bulkOptions?: InternalWriteOptions) =>
         this.bulkWrite(tableName, operations, { ...options, ...bulkOptions, directWrite: true }),
       // updateFn - Update handler function
-      async (tableName: string, data: any, where: any, _updateOptions?: any) => {
-        // Execute update logic directly on commit，不经过事务检查
+      async (
+        tableName: string,
+        data: UpdatePayload<StorageRecord>,
+        where: FilterCondition<StorageRecord>,
+        _updateOptions?: InternalWriteOptions
+      ) => {
         // Note:
-        // Read raw data directly，应用更新，然后写入
         const allData = await this.dataReader.read(tableName);
         const matchedItems = QueryEngine.filter(allData, where);
         const updatedCount = matchedItems.length;
@@ -1113,7 +892,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
         }
 
         const matchedItemRefs = new Set(matchedItems);
-        const finalData = allData.map((item: Record<string, any>) => {
+        const finalData = allData.map(item => {
           if (matchedItemRefs.has(item)) {
             return QueryEngine.update(item, data);
           }
@@ -1130,30 +909,16 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     );
   }
 
-  /**
-   * 回滚事务
-   * @param options 事务选项
-   * @returns Promise<void>
-   * @throws {Error} 当事务不存在时抛出
-   */
-  async rollback(_options?: any): Promise<void> {
+  async rollback(_options?: TableOptions): Promise<void> {
     await this.ensureInitialized();
-    // Call transaction service rollback，传入writeFn用于恢复数据
     await this.transactionService.rollback(
-      (tableName: string, data: Record<string, any>[], options?: any) =>
+      (tableName: string, data: StorageInput<StorageRecord>, options?: InternalWriteOptions) =>
         this.dataWriter.write(tableName, data, { ...options, directWrite: true }),
       (tableName: string) => this.deleteTable(tableName),
       false
     );
   }
 
-  // ==================== 模式迁移 ====================
-  /**
-   * 将表迁移到分片模式
-   * @param tableName 表名
-   * @returns Promise<void>
-   * @throws {StorageError} 当迁移失败时抛出
-   */
   async migrateToChunked(tableName: string): Promise<void> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
@@ -1178,14 +943,8 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     this.cacheService.clearTableCache(tableName);
   }
 }
-
-// Global存储实例（延迟初始化，避免在测试环境中自动启动任务队列）
 let storageInstance: FileSystemStorageAdapter | null = null;
 
-/**
- * 获取存储实例
- * @returns FileSystemStorageAdapter 存储实例
- */
 function getStorageInstance(): FileSystemStorageAdapter {
   if (!storageInstance) {
     storageInstance = new FileSystemStorageAdapter();

@@ -1,9 +1,3 @@
-/**
- * @module monitor
- * @description Monitoring module exports for performance and cache tracking
- * @since 2025-11-28
- * @version 3.0.0
- */
 export {
   PerformanceMonitor,
   performanceMonitor,

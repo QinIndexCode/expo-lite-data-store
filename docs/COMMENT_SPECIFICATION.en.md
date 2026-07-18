@@ -1,99 +1,74 @@
-# Comment Specification
+# Code Comment and Test Style
 
-[README Entry](../README.md) | [简体中文](./COMMENT_SPECIFICATION.zh-CN.md) | [Consumer Guide](../README.en.md)
+[README Entry](../README.md) | [Simplified Chinese](./COMMENT_SPECIFICATION.zh-CN.md) | [Contributing Guide](../CONTRIBUTING.en.md)
 
-## 1. File Header Comment
+## Scope and Language
 
-Every source file should include a file header comment describing the file's purpose, creation date, and last modified date.
+This guide applies to maintained TypeScript source, tests, and test helpers. Write code comments and TSDoc in English so a single code path has one searchable language. User-facing documentation remains bilingual under the repository documentation policy.
+
+Git records authorship and change history. Do not add or update manual creation dates, last-modified dates, or release-version tags in source comments. Generated files and third-party code are out of scope.
+
+## When to Comment
+
+Add a comment only when it preserves information that code alone cannot express:
+
+- a public package API has a non-obvious contract, side effect, lifecycle, or failure mode;
+- a security, persistence, compatibility, or concurrency invariant explains why an implementation must remain structured as it is;
+- a branch, cache, or recovery path intentionally handles an edge case that would otherwise look redundant.
+
+Do not add file headers, class comments, or line-by-line narration merely because a symbol is exported. Clear names, types, and small functions are the default documentation.
+
+## TSDoc for Public APIs
+
+Use concise TSDoc for exported APIs whose behavior is not obvious from their type and name. Start with a sentence ending in a period. Add `@param`, `@returns`, or `@throws` only when they communicate a meaningful contract that the signature does not already make clear.
 
 ```typescript
 /**
- * @module module-name
- * @description Brief description in English
- * @since YYYY-MM-DD
- * @version semver
- */
-```
-
-## 2. JSDoc Comments
-
-Public APIs (exported classes, functions, interfaces) should use JSDoc format comments.
-
-```typescript
-/**
- * Brief function description
+ * Replays a committed append journal before exposing table records.
  *
- * @param paramName Parameter description
- * @returns Return value description
- * @throws ErrorType Exception description (if applicable)
- * @example
- * ```typescript
- * const result = exampleFunction('param');
- * ```
+ * @throws StorageError when the journal cannot be reconciled safely.
  */
-export function exampleFunction(paramName: string): string {
+export async function recoverAppendJournal(tableName: string): Promise<void> {
   // ...
 }
 ```
 
-## 3. Class Comments
+Avoid duplicate `@description` blocks, bilingual copies of the same text, and stale `@since` or `@version` tags.
 
-Public classes should include class-level comments explaining the class's purpose and usage.
+## Inline Comments
+
+Inline comments explain **why**, an invariant, or a deliberately non-obvious trade-off. Keep them adjacent to the code they justify and remove them when the code changes.
 
 ```typescript
-/**
- * Brief class description
- *
- * @description Detailed description of the class's functionality, design patterns, and use cases
- * @since Version number
- * @version Current version
- */
-export class ExampleClass {
-  // ...
+// Only the current expiry entry may evict this key: a refresh leaves an older heap entry behind.
+if (item.expiry !== heapEntry.expiry) {
+  continue;
 }
 ```
 
-## 4. Inline Comments
+Avoid comments that restate the next line, such as `// increment index` before `index += 1`.
 
-- Inline comments should be concise and explain "why" rather than "what"
-- Complex logic must include explanatory comments
-- Use English comments for consistency
+## TODOs
 
-```typescript
-// Good comment: explains why this is done
-if (cache.size > MAX_SIZE) {
-  // Trigger cleanup when cache exceeds limit to prevent memory overflow
-  cache.clear();
-}
-
-// Bad comment: repeats code intent
-// If cache size exceeds max, clear cache
-if (cache.size > MAX_SIZE) {
-  cache.clear();
-}
-```
-
-## 5. TODO Comments
-
-Use standard format for TODO comments for easy tracking.
+Use a stable owner or tracker reference and state the remaining work:
 
 ```typescript
-// TODO(username): Description of pending work
-// TODO: Short-term task description - Expected completion date
+// TODO(#123): Replace the legacy decoder after the migration window closes.
+// TODO(maintainer): Remove this compatibility path when v2 metadata is no longer supported.
 ```
 
-## 6. Module Export Comments
+Do not leave anonymous, date-based, or already-resolved TODOs in maintained code.
 
-In index.ts or main export files, add brief descriptions for each exported item.
+## Test Style
 
-```typescript
-/**
- * Create a table
- * @param tableName Table name
- * @param options Create table options
- * @returns Promise<void>
- */
-export const createTable = async (tableName: string, options?: CreateTableOptions): Promise<void> => {
-  // ...
-};
-```
+- Write `describe`, `it`, and `test` titles in English as direct observable outcomes under a condition: `it('rejects traversal segments in table names', ...)`. Avoid expectation phrasing such as `should ...`.
+- Keep each test in arrange, act, assert order. Use blank lines to separate the phases; add comments only when a fixture or assertion has a non-obvious purpose.
+- Prefer typed fixtures, helpers, and generic mocks. Do not use explicit `any`; use `unknown` at untrusted boundaries and narrow it before use.
+- Restore spies, environment variables, timers, and module state in `afterEach` or `finally`. Remove temporary directories and generated files created by a test.
+- Keep performance measurements out of deterministic functional suites unless the assertion is about behavior rather than a machine-dependent threshold.
+
+## Review Checklist
+
+- Comments describe durable intent rather than implementation narration or Git history.
+- Public contracts, persistence invariants, and failure behavior are documented where needed.
+- Tests are isolated, deterministic, typed, and clean up every resource they create.

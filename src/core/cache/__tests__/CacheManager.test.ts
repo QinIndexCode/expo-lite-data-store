@@ -1,16 +1,19 @@
-// src/core/cache/__tests__/CacheManager.test.ts
-// CacheManager 单元测试
-
 import { CacheManager, CacheStrategy } from '../CacheManager';
 
-// 全局数组，用于跟踪需要清理的临时CacheManager实例
 const tempCacheManagers: CacheManager[] = [];
+
+type CacheManagerPrivateAccess = {
+  cleanupExpired: () => void;
+  expiryHeap: [number, string][];
+};
+
+const getCacheManagerPrivateAccess = (cache: CacheManager): CacheManagerPrivateAccess =>
+  cache as unknown as CacheManagerPrivateAccess;
 
 describe('CacheManager', () => {
   let cacheManager: CacheManager;
 
   beforeEach(() => {
-    // 创建新的CacheManager实例用于每个测试
     cacheManager = new CacheManager({
       strategy: CacheStrategy.LRU,
       maxSize: 10,
@@ -21,117 +24,88 @@ describe('CacheManager', () => {
     });
   });
 
-  afterEach(done => {
-    // 清理主CacheManager实例
-    if (cacheManager) {
-      cacheManager.cleanup();
-    }
-
-    // 清理所有临时CacheManager实例
-    tempCacheManagers.forEach(tempCache => {
-      tempCache.cleanup();
-    });
-    tempCacheManagers.length = 0; // 清空数组
-
-    // 使用 process.nextTick 而不是 setTimeout，避免阻塞
-    process.nextTick(() => {
-      done();
-    });
+  afterEach(() => {
+    cacheManager.cleanup();
+    tempCacheManagers.forEach(tempCache => tempCache.cleanup());
+    tempCacheManagers.length = 0;
+    jest.restoreAllMocks();
+    jest.useRealTimers();
   });
 
-  describe('Basic Functionality Tests', () => {
-    it('should be able to set and get cache items', () => {
-      // Test setting cache
+  describe('basic operations', () => {
+    it('stores and retrieves cache items', () => {
       cacheManager.set('test-key', 'test-value');
 
-      // Test getting cache
       const result = cacheManager.get('test-key');
       expect(result).toBe('test-value');
     });
 
-    it('should be able to delete cache items', () => {
-      // Set cache
+    it('deletes cache items', () => {
       cacheManager.set('test-key', 'test-value');
       expect(cacheManager.get('test-key')).toBe('test-value');
 
-      // Delete cache
       cacheManager.delete('test-key');
       expect(cacheManager.get('test-key')).toBeUndefined();
     });
 
-    it('should be able to check if cache item exists', () => {
-      // Set cache
+    it('reports whether a cache item exists', () => {
       cacheManager.set('test-key', 'test-value');
       expect(cacheManager.has('test-key')).toBe(true);
 
-      // Check non-existent cache
       expect(cacheManager.has('non-existent-key')).toBe(false);
     });
 
-    it('should be able to clear cache', () => {
-      // Set multiple cache items
+    it('clears cache items', () => {
       cacheManager.set('key1', 'value1');
       cacheManager.set('key2', 'value2');
       cacheManager.set('key3', 'value3');
 
-      // Clear cache
       cacheManager.clear();
 
-      // Check if all cache items are cleared
       expect(cacheManager.get('key1')).toBeUndefined();
       expect(cacheManager.get('key2')).toBeUndefined();
       expect(cacheManager.get('key3')).toBeUndefined();
     });
   });
 
-  describe('Cache Strategy Tests', () => {
-    it('should evict cache items according to LRU strategy', () => {
-      // Create LRU strategy cache manager, disable avalanche protection for testing
+  describe('cache strategies', () => {
+    it('evicts least-recently-used cache items at capacity', () => {
       const lruCache = new CacheManager({
         strategy: CacheStrategy.LRU,
         maxSize: 3,
         enableAvalancheProtection: false,
       });
-      tempCacheManagers.push(lruCache); // 添加到清理列表
+      tempCacheManagers.push(lruCache);
 
-      // Set cache items exceeding capacity
       lruCache.set('key1', 'value1');
       lruCache.set('key2', 'value2');
       lruCache.set('key3', 'value3');
 
-      // Directly check cache size
       expect(lruCache.getSize()).toBe(3);
 
-      // Set 4th cache item, should evict oldest key1
       lruCache.set('key4', 'value4');
 
-      // Check results
       expect(lruCache.getSize()).toBe(3);
       expect(lruCache.get('key4')).toBe('value4');
     });
 
-    it('should evict cache items according to LFU strategy', () => {
-      // Create LFU strategy cache manager
+    it('evicts least-frequently-used cache items at capacity', () => {
       const lfuCache = new CacheManager({
         strategy: CacheStrategy.LFU,
         maxSize: 3,
       });
-      tempCacheManagers.push(lfuCache); // 添加到清理列表
+      tempCacheManagers.push(lfuCache);
 
-      // Set cache items
       lfuCache.set('key1', 'value1');
       lfuCache.set('key2', 'value2');
       lfuCache.set('key3', 'value3');
 
-      // Access key1 and key3 multiple times
       lfuCache.get('key1');
       lfuCache.get('key1');
       lfuCache.get('key3');
 
-      // Set 4th cache item, should evict least frequently used key2
       lfuCache.set('key4', 'value4');
 
-      // Check results
       expect(lfuCache.get('key1')).toBe('value1');
       expect(lfuCache.get('key2')).toBeUndefined();
       expect(lfuCache.get('key3')).toBe('value3');
@@ -139,46 +113,32 @@ describe('CacheManager', () => {
     });
   });
 
-  describe('Cache Expiry Tests', () => {
-    it('should automatically clear expired cache items', () => {
-      // Create cache manager with short expiry time
+  describe('cache expiry', () => {
+    it('evicts expired cache items', () => {
+      jest.useFakeTimers();
       const cache = new CacheManager({
-        defaultExpiry: 100, // 100ms expiry
+        defaultExpiry: 100,
       });
-      tempCacheManagers.push(cache); // 添加到清理列表
+      tempCacheManagers.push(cache);
 
-      // Set cache
       cache.set('test-key', 'test-value');
       expect(cache.get('test-key')).toBe('test-value');
 
-      // Wait for cache to expire
-      return new Promise<void>(resolve => {
-        setTimeout(() => {
-          expect(cache.get('test-key')).toBeUndefined();
-          resolve();
-        }, 150);
-      });
+      jest.advanceTimersByTime(150);
+      expect(cache.get('test-key')).toBeUndefined();
     });
 
-    it('should support custom expiry time', () => {
-      // Set cache item with 100ms expiry
+    it('honors custom cache expiry times', () => {
+      jest.useFakeTimers();
       cacheManager.set('short-expiry', 'short-value', 100);
-      // Set cache item with 1s expiry
       cacheManager.set('long-expiry', 'long-value', 1000);
 
-      // Wait for 150ms
-      return new Promise<void>(resolve => {
-        setTimeout(() => {
-          // Short expiry cache should be expired
-          expect(cacheManager.get('short-expiry')).toBeUndefined();
-          // Long expiry cache should still be valid
-          expect(cacheManager.get('long-expiry')).toBe('long-value');
-          resolve();
-        }, 150);
-      });
+      jest.advanceTimersByTime(150);
+      expect(cacheManager.get('short-expiry')).toBeUndefined();
+      expect(cacheManager.get('long-expiry')).toBe('long-value');
     });
 
-    it('should not evict a refreshed key using a stale expiry heap entry', () => {
+    it('preserves refreshed keys when stale expiry entries are collected', () => {
       const nowSpy = jest.spyOn(Date, 'now');
       const cache = new CacheManager({
         defaultExpiry: 10,
@@ -186,19 +146,22 @@ describe('CacheManager', () => {
       });
       tempCacheManagers.push(cache);
 
-      nowSpy.mockReturnValue(1000);
-      cache.set('refreshed-key', 'old-value', 10);
-      nowSpy.mockReturnValue(1005);
-      cache.set('refreshed-key', 'new-value', 1000);
-      nowSpy.mockReturnValue(1015);
+      try {
+        nowSpy.mockReturnValue(1000);
+        cache.set('refreshed-key', 'old-value', 10);
+        nowSpy.mockReturnValue(1005);
+        cache.set('refreshed-key', 'new-value', 1000);
+        nowSpy.mockReturnValue(1015);
 
-      (cache as any).cleanupExpired();
+        getCacheManagerPrivateAccess(cache).cleanupExpired();
 
-      expect(cache.get('refreshed-key')).toBe('new-value');
-      nowSpy.mockRestore();
+        expect(cache.get('refreshed-key')).toBe('new-value');
+      } finally {
+        nowSpy.mockRestore();
+      }
     });
 
-    it('should release memory usage when an expired item is read', () => {
+    it('releases memory when an expired item is read', () => {
       const nowSpy = jest.spyOn(Date, 'now');
       const cache = new CacheManager({
         defaultExpiry: 10,
@@ -219,7 +182,7 @@ describe('CacheManager', () => {
       }
     });
 
-    it('should compact stale expiry entries for frequently refreshed keys', () => {
+    it('compacts stale expiry entries for frequently refreshed keys', () => {
       const cache = new CacheManager({
         defaultExpiry: 60000,
         enableAvalancheProtection: false,
@@ -230,30 +193,25 @@ describe('CacheManager', () => {
         cache.set('hot-key', index);
       }
 
-      const expiryHeap = (cache as unknown as { expiryHeap: unknown[] }).expiryHeap;
+      const expiryHeap = getCacheManagerPrivateAccess(cache).expiryHeap;
       expect(expiryHeap.length).toBeLessThanOrEqual(64);
       expect(cache.get('hot-key')).toBe(199);
     });
   });
 
-  describe('Cache Statistics Tests', () => {
-    it('should correctly record cache statistics', () => {
-      // Initial statistics
+  describe('cache statistics', () => {
+    it('records cache statistics', () => {
       const initialStats = cacheManager.getStats();
       expect(initialStats.hits).toBe(0);
       expect(initialStats.misses).toBe(0);
       expect(initialStats.size).toBe(0);
 
-      // Set cache
       cacheManager.set('test-key', 'test-value');
 
-      // Get cache (hit)
       cacheManager.get('test-key');
 
-      // Get non-existent cache (miss)
       cacheManager.get('non-existent-key');
 
-      // Check statistics
       const stats = cacheManager.getStats();
       expect(stats.hits).toBe(1);
       expect(stats.misses).toBe(1);
@@ -263,70 +221,55 @@ describe('CacheManager', () => {
     });
   });
 
-  describe('Thread Safety Tests', () => {
-    it('should support thread-safe getSafe method', async () => {
-      // Mock async data fetching function
+  describe('concurrent reads', () => {
+    it('deduplicates concurrent getSafe reads', async () => {
       const fetchFn = jest.fn().mockResolvedValue('fetched-value');
 
-      // Multiple concurrent calls to getSafe
       const promises = [
         cacheManager.getSafe('async-key', fetchFn),
         cacheManager.getSafe('async-key', fetchFn),
         cacheManager.getSafe('async-key', fetchFn),
       ];
 
-      // Wait for all promises to complete
       const results = await Promise.all(promises);
 
-      // All calls should return the same result
       results.forEach(result => {
         expect(result).toBe('fetched-value');
       });
 
-      // fetchFn should only be called once (cache breakdown protection)
       expect(fetchFn).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe('Cache Penetration Protection Tests', () => {
-    it('should support cache penetration protection', async () => {
-      // Mock fetch function that returns null
+  describe('cache penetration protection', () => {
+    it('caches fallback values for penetration protection', async () => {
       const fetchFn = jest.fn().mockResolvedValue(null);
 
-      // Get data with penetration protection
       const result = await cacheManager.getWithPenetrationProtection('null-key', fetchFn, 'default-value');
 
-      // Should return default value
       expect(result).toBe('default-value');
 
-      // Call again, should get from cache without calling fetchFn
       const result2 = await cacheManager.getWithPenetrationProtection('null-key', fetchFn, 'default-value');
       expect(result2).toBe('default-value');
       expect(fetchFn).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe('Dirty Data Handling Tests', () => {
-    it('should be able to mark and get dirty data', () => {
-      // Set cache items
+  describe('dirty data', () => {
+    it('marks and retrieves dirty data', () => {
       cacheManager.set('clean-key', 'clean-value');
       cacheManager.set('dirty-key', 'dirty-value', undefined, true);
 
-      // Mark clean-key as dirty
       cacheManager.markAsDirty('clean-key');
 
-      // Get all dirty data
       const dirtyData = cacheManager.getDirtyData();
 
-      // Check results
       expect(dirtyData.size).toBe(2);
       expect(dirtyData.get('clean-key')).toBe('clean-value');
       expect(dirtyData.get('dirty-key')).toBe('dirty-value');
 
-      // Mark clean-key as clean
       cacheManager.markAsClean('clean-key');
 
-      // Get dirty data again
       const dirtyData2 = cacheManager.getDirtyData();
       expect(dirtyData2.size).toBe(1);
       expect(dirtyData2.get('dirty-key')).toBe('dirty-value');

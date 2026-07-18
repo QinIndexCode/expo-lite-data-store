@@ -1,11 +1,4 @@
 /**
- * @module apiResponse
- * @description Unified API response format definitions
- * @since 2025-11-19
- * @version 3.0.0
- */
-
-/**
  * API response status enum
  */
 export enum ApiResponseStatus {
@@ -16,7 +9,7 @@ export enum ApiResponseStatus {
 /**
  * API response interface
  */
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   /**
    * Whether the operation succeeded
    */
@@ -54,7 +47,7 @@ export interface ApiResponse<T = any> {
     /**
      * Original error
      */
-    cause?: any;
+    cause?: unknown;
   };
 
   /**
@@ -96,7 +89,7 @@ export interface ApiResponse<T = any> {
 /**
  * Bulk operation response interface
  */
-export interface BulkApiResponse<T = any> extends ApiResponse {
+export interface BulkApiResponse<T = unknown> extends ApiResponse {
   /**
    * Bulk operation results
    */
@@ -171,7 +164,7 @@ export function createErrorResponse(
     message: string;
     details?: string;
     suggestion?: string;
-    cause?: any;
+    cause?: unknown;
   },
   options?: {
     requestId?: string;

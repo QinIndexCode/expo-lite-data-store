@@ -57,16 +57,16 @@ import { db, configManager, performanceMonitor, StorageError, StorageErrorCode }
 
 ### Export groups
 
-| Export group                  | Public items                                                                                                                                                                                                              |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Facade object                 | `db`                                                                                                                                                                                                                      |
-| Named CRUD functions          | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked` |
-| Transaction functions         | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                  |
-| Config exports                | `configManager`, `ConfigManager`                                                                                                                                                                                          |
-| Monitoring exports            | `performanceMonitor`; type-only `PerformanceStats`, `HealthCheckResult`                                                                                                                                                  |
-| Crypto helpers                | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`; type-only `KeyCacheStats`                                                         |
-| Error exports                 | `StorageError`, `StorageErrorCode`, `CryptoError`                                                                                                                                                                         |
-| Type exports                  | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FilterCondition`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats` |
+| Export group          | Public items                                                                                                                                                                                                                                                                                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Facade object         | `db`                                                                                                                                                                                                                                                                                                                                                                           |
+| Named CRUD functions  | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked`                                                                                                                                                      |
+| Transaction functions | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                                                                                                                                                                       |
+| Config exports        | `configManager`, `ConfigManager`                                                                                                                                                                                                                                                                                                                                               |
+| Monitoring exports    | `performanceMonitor`; type-only `PerformanceStats`, `HealthCheckResult`                                                                                                                                                                                                                                                                                                        |
+| Crypto helpers        | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`; type-only `KeyCacheStats`                                                                                                                                                                                                             |
+| Error exports         | `StorageError`, `StorageErrorCode`, `CryptoError`                                                                                                                                                                                                                                                                                                                              |
+| Type exports          | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FindOneOptions`, `FindManyOptions`, `UpdateOptions`, `FilterCondition`, `BulkOperation`, `StorageInput`, `StorageRecord`, `UpdatePayload`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats` |
 
 ### `db` facade vs named exports
 
@@ -116,14 +116,26 @@ Current runtime behavior:
 - `totalAfterWrite` is the total row count after the operation;
 - `chunked` reflects the resulting table storage mode.
 
-### `CreateTableOptions`
+### Typed Records and `CreateTableOptions`
+
+Record-oriented APIs are generic. Supply a named record type when you want field completion, while schema-less tables can use the default `StorageRecord`.
 
 ```ts
-type CreateTableOptions = CommonOptions & {
-  columns?: Record<string, string>;
+type StorageRecord = Record<string, unknown>;
+type StorageInput<T extends object = StorageRecord> = T | T[];
+type ColumnDefinition =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'date'
+  | 'blob'
+  | { type: 'string' | 'number' | 'boolean' | 'date' | 'blob'; isHighRisk?: boolean };
+
+type CreateTableOptions<T extends object = StorageRecord> = CommonOptions & {
+  columns?: Record<string, ColumnDefinition>;
   intermediates?: boolean;
   chunkSize?: number;
-  initialData?: Record<string, any>[];
+  initialData?: T[];
   mode?: 'single' | 'chunked';
   encryptedFields?: string[];
   encryptFullTable?: boolean;
@@ -141,11 +153,11 @@ Supported column types in current runtime validation:
 ### `ReadOptions`
 
 ```ts
-type ReadOptions = CommonOptions & {
+type ReadOptions<T extends object = StorageRecord> = CommonOptions & {
   skip?: number;
   limit?: number;
-  filter?: FilterCondition;
-  sortBy?: string | string[];
+  filter?: FilterCondition<T>;
+  sortBy?: SortField<T> | SortField<T>[];
   order?: 'asc' | 'desc' | ('asc' | 'desc')[];
   sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
   bypassCache?: boolean;
@@ -170,10 +182,11 @@ type WriteOptions = CommonOptions & {
 ### `FilterCondition`
 
 ```ts
-type FilterCondition =
-  | ((item: Record<string, any>) => boolean)
-  | Partial<Record<string, any>>
-  | { $or?: FilterCondition[]; $and?: FilterCondition[] };
+type FilterCondition<T extends object = StorageRecord> =
+  | ((item: T) => boolean)
+  | Partial<T>
+  | StorageRecord
+  | { $or?: FilterCondition<T>[]; $and?: FilterCondition<T>[] };
 ```
 
 Although the internal query engine supports function filters, the typed public `findOne()` and `findMany()` APIs are documented around object-based `where` conditions. Use object conditions for stable public compatibility.
@@ -332,10 +345,21 @@ await bulkWrite('users', [
 Operation forms:
 
 ```ts
-type BulkOperation =
-  | { type: 'insert'; data: Record<string, any> | Record<string, any>[] }
-  | { type: 'update'; data: Record<string, any>; where: Record<string, any> }
-  | { type: 'delete'; where: Record<string, any> };
+type UpdateOperatorPayload = {
+  $inc?: Record<string, number>;
+  $set?: StorageRecord;
+  $unset?: string[];
+  $push?: StorageRecord;
+  $pull?: StorageRecord;
+  $addToSet?: StorageRecord;
+};
+
+type UpdatePayload<T extends object = StorageRecord> = Partial<T> | UpdateOperatorPayload | StorageRecord;
+
+type BulkOperation<T extends object = StorageRecord> =
+  | { type: 'insert'; data: StorageInput<T> }
+  | { type: 'update'; data: UpdatePayload<T>; where: FilterCondition<T> }
+  | { type: 'delete'; where: FilterCondition<T> };
 ```
 
 Behavior:
@@ -376,11 +400,11 @@ const user = await findOne('users', {
 Signature shape:
 
 ```ts
-findOne(tableName, {
-  where: Record<string, any>;
+findOne<T extends object = StorageRecord>(tableName, {
+  where: FilterCondition<T>;
   encrypted?: boolean;
   requireAuthOnAccess?: boolean;
-})
+}): Promise<T | null>
 ```
 
 Returns the first matching record or `null`.
@@ -401,16 +425,16 @@ const users = await findMany('users', {
 Signature shape:
 
 ```ts
-findMany(tableName, {
-  where?: Record<string, any>;
+findMany<T extends object = StorageRecord>(tableName, {
+  where?: FilterCondition<T>;
   skip?: number;
   limit?: number;
-  sortBy?: string | string[];
+  sortBy?: SortField<T> | SortField<T>[];
   order?: 'asc' | 'desc' | Array<'asc' | 'desc'>;
   sortAlgorithm?: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
   encrypted?: boolean;
   requireAuthOnAccess?: boolean;
-})
+}): Promise<T[]>
 ```
 
 #### Supported query operators
@@ -590,7 +614,7 @@ The runtime configuration layer is not a merge of every host source. In an Expo,
 
 ### `app.json` example
 
-`autoSync.enabled` is `false` by default. The following example opts into background dirty-cache syncing explicitly.
+`autoSync.enabled` is `false` by default. The following example opts into background dirty-cache syncing explicitly. `autoSync.batchSize` limits the number of dirty cache entries processed for each table in one sync run; it does not split a single table overwrite into record-level writes.
 
 ```json
 {
@@ -741,21 +765,21 @@ try {
 
 ### Common `StorageErrorCode` values
 
-| Code                         | Meaning                                                                    |
-| ---------------------------- | -------------------------------------------------------------------------- |
-| `EXPO_MODULE_MISSING`        | Required Expo runtime package is missing                                   |
-| `AUTH_ON_ACCESS_UNSUPPORTED` | Strict per-access authentication cannot be enforced in the current runtime |
+| Code                         | Meaning                                                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `EXPO_MODULE_MISSING`        | Required Expo runtime package is missing                                                                |
+| `AUTH_ON_ACCESS_UNSUPPORTED` | Strict per-access authentication cannot be enforced in the current runtime                              |
 | `PERMISSION_DENIED`          | A request selected a weaker storage surface than the table's encryption or strict-authentication policy |
-| `TABLE_NOT_FOUND`            | The requested table does not exist                                         |
-| `TABLE_NAME_INVALID`         | The table name is empty or invalid                                         |
-| `TABLE_COLUMN_INVALID`       | A declared column uses an unsupported type                                 |
-| `QUERY_FAILED`               | The query engine failed to execute the condition                           |
-| `MIGRATION_FAILED`           | Table migration failed, or strict authentication requires an explicit key/data migration |
-| `TRANSACTION_IN_PROGRESS`    | A transaction already exists on the current surface                        |
-| `NO_TRANSACTION_IN_PROGRESS` | `commit()` or `rollback()` was called with no active transaction           |
-| `LOCK_TIMEOUT`               | Concurrent write lock acquisition exceeded the timeout budget              |
-| `TIMEOUT`                    | An operation exceeded a configured timeout                                 |
-| `CORRUPTED_DATA`             | On-disk data could not be parsed safely                                    |
+| `TABLE_NOT_FOUND`            | The requested table does not exist                                                                      |
+| `TABLE_NAME_INVALID`         | The table name is empty or invalid                                                                      |
+| `TABLE_COLUMN_INVALID`       | A declared column uses an unsupported type                                                              |
+| `QUERY_FAILED`               | The query engine failed to execute the condition                                                        |
+| `MIGRATION_FAILED`           | Table migration failed, or strict authentication requires an explicit key/data migration                |
+| `TRANSACTION_IN_PROGRESS`    | A transaction already exists on the current surface                                                     |
+| `NO_TRANSACTION_IN_PROGRESS` | `commit()` or `rollback()` was called with no active transaction                                        |
+| `LOCK_TIMEOUT`               | Concurrent write lock acquisition exceeded the timeout budget                                           |
+| `TIMEOUT`                    | An operation exceeded a configured timeout                                                              |
+| `CORRUPTED_DATA`             | On-disk data could not be parsed safely                                                                 |
 
 ### `CryptoError`
 

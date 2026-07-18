@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "target": "es2020"
+  },
+  "include": ["__mocks__/**/*.ts"],
+  "exclude": ["dist/**", "coverage/**", "node_modules/**"]
+}

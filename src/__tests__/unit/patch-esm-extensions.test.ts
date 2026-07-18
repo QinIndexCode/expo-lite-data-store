@@ -4,8 +4,19 @@ import path from 'path';
 
 describe('patch ESM extensions helper', () => {
   const scriptPath = path.resolve(__dirname, '../../../scripts/patch-esm-extensions.cjs');
+  const temporaryRoots: string[] = [];
 
-  const createTempDist = () => fs.mkdtempSync(path.join(os.tmpdir(), 'expo-lite-data-store-esm-patch-'));
+  const createTempDist = () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'expo-lite-data-store-esm-patch-'));
+    temporaryRoots.push(root);
+    return root;
+  };
+
+  afterEach(() => {
+    for (const root of temporaryRoots.splice(0)) {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 
   it('adds .js to relative ESM import and export specifiers that target built files', () => {
     const distRoot = createTempDist();

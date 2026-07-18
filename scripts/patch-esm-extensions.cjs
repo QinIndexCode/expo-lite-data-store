@@ -8,7 +8,7 @@ const fromSpecifierPattern = /(\bfrom\s*['"])(\.{1,2}\/[^'"]+)(['"])/gu;
 const bareImportPattern = /(\bimport\s*['"])(\.{1,2}\/[^'"]+)(['"])/gu;
 const dynamicImportPattern = /(\bimport\s*\(\s*['"])(\.{1,2}\/[^'"]+)(['"]\s*\))/gu;
 
-const hasExplicitExtension = (specifier) => {
+const hasExplicitExtension = specifier => {
   const lastSegment = specifier.split('/').pop() || '';
   return /\.[A-Za-z0-9]+$/u.test(lastSegment);
 };
@@ -50,7 +50,7 @@ const patchSource = (source, currentFile) => {
   return output;
 };
 
-const walkFiles = (directory) => {
+const walkFiles = directory => {
   const entries = fs.readdirSync(directory, { withFileTypes: true });
   const files = [];
 
@@ -66,7 +66,7 @@ const walkFiles = (directory) => {
   return files;
 };
 
-const patchFile = (filePath) => {
+const patchFile = filePath => {
   const source = fs.readFileSync(filePath, 'utf8');
   const patched = patchSource(source, filePath);
 

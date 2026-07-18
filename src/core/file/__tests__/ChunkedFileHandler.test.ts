@@ -1,10 +1,33 @@
-// src/core/file/__tests__/ChunkedFileHandler.test.ts
+/// <reference path="../../../__tests__/test-globals.d.ts" />
 
 import { MetadataManager } from '../../meta/MetadataManager';
 import { ChunkedFileHandler } from '../ChunkedFileHandler';
 import logger from '../../../utils/logger';
 import { configManager } from '../../config/ConfigManager';
 import { getFileSystem } from '../../../utils/fileSystemCompat';
+import type { StorageRecord } from '../../../types/storageTypes';
+
+type ChunkedFileHandlerPrivateAccess = {
+  writeChunk: (index: number, data: StorageRecord[]) => Promise<void>;
+  writeOverwriteJournal: (previousData: StorageRecord[], targetData: StorageRecord[]) => Promise<void>;
+  writeAppendJournal: (
+    previousCount: number,
+    previousChunks: number,
+    targetChunkIndices: number[],
+    targetData: StorageRecord[]
+  ) => Promise<void>;
+};
+
+const getChunkedFileHandlerPrivateAccess = (handler: ChunkedFileHandler): ChunkedFileHandlerPrivateAccess =>
+  handler as unknown as ChunkedFileHandlerPrivateAccess;
+
+const readMockFileText = (path: string): string => {
+  const entry = global.__expo_file_system_mock__.mockFileSystem[path];
+  if (typeof entry !== 'string') {
+    throw new Error(`Expected a file at ${path}`);
+  }
+  return entry;
+};
 
 describe('ChunkedFileHandler', () => {
   let chunkedFileHandler: ChunkedFileHandler;
@@ -12,187 +35,166 @@ describe('ChunkedFileHandler', () => {
   const metadataManager = new MetadataManager();
 
   beforeEach(() => {
+    jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     configManager.resetConfig();
-    // 清理mock文件系统中的数据
-    if ((global as any).__expo_file_system_mock__) {
-      (global as any).__expo_file_system_mock__.mockFileSystem = {};
+    if (global.__expo_file_system_mock__) {
+      global.__expo_file_system_mock__.mockFileSystem = {};
     }
 
-    // 创建新的 ChunkedFileHandler 实例用于每个测试
     chunkedFileHandler = new ChunkedFileHandler(testTableName, metadataManager);
   });
 
   afterEach(async () => {
-    // 清理测试数据
     await chunkedFileHandler.clear();
 
-    // 清理mock文件系统中的数据
-    if ((global as any).__expo_file_system_mock__) {
-      (global as any).__expo_file_system_mock__.mockFileSystem = {};
+    if (global.__expo_file_system_mock__) {
+      global.__expo_file_system_mock__.mockFileSystem = {};
     }
     configManager.resetConfig();
+    jest.restoreAllMocks();
   });
 
-  describe('Basic Functionality Tests', () => {
-    it('should be able to write and read data', async () => {
+  describe('basic behavior', () => {
+    it('writes and reads records', async () => {
       const testData = [
         { id: 1, name: 'test1' },
         { id: 2, name: 'test2' },
       ];
 
-      // Write data
       await chunkedFileHandler.write(testData);
 
-      // Read data
       const result = await chunkedFileHandler.read();
 
       expect(result).toEqual(testData);
     });
 
-    it('should be able to append data', async () => {
+    it('appends records after existing data', async () => {
       const initialData = [{ id: 1, name: 'test1' }];
       const appendData = [
         { id: 2, name: 'test2' },
         { id: 3, name: 'test3' },
       ];
 
-      // Write initial data
       await chunkedFileHandler.write(initialData);
 
-      // Append data
       await chunkedFileHandler.append(appendData);
 
-      // Read all data
       const result = await chunkedFileHandler.read();
 
       expect(result).toEqual([...initialData, ...appendData]);
     });
 
-    it('should be able to clear data', async () => {
+    it('clears persisted records', async () => {
       const testData = [
         { id: 1, name: 'test1' },
         { id: 2, name: 'test2' },
       ];
 
-      // Write data
       await chunkedFileHandler.write(testData);
 
-      // Clear data
       await chunkedFileHandler.clear();
 
-      // Read data, should return empty array
       const result = await chunkedFileHandler.read();
 
       expect(result).toEqual([]);
     });
 
-    it('should be able to delete data', async () => {
+    it('deletes persisted records', async () => {
       const testData = [
         { id: 1, name: 'test1' },
         { id: 2, name: 'test2' },
       ];
 
-      // Write data
       await chunkedFileHandler.write(testData);
 
-      // Delete data
       await chunkedFileHandler.delete();
 
-      // Read data, should return empty array
       const result = await chunkedFileHandler.read();
 
       expect(result).toEqual([]);
     });
   });
 
-  describe('Advanced Functionality Tests', () => {
-    it('should be able to read all data', async () => {
+  describe('multi-chunk reads', () => {
+    it('reads all records', async () => {
       const testData = [
         { id: 1, name: 'test1' },
         { id: 2, name: 'test2' },
         { id: 3, name: 'test3' },
       ];
 
-      // Write data
       await chunkedFileHandler.write(testData);
 
-      // Read all data using readAll
       const result = await chunkedFileHandler.readAll();
 
       expect(result).toEqual(testData);
     });
 
-    it('should be able to read data from specified chunk range', async () => {
-      // Write enough data to ensure multiple chunks are created
+    it('reads a requested chunk range', async () => {
+      // This fixture spans multiple chunks so the range boundary is exercised.
       const testData = Array.from({ length: 1000 }, (_, i) => ({ id: i, name: `test${i}` }));
 
-      // Write data
       await chunkedFileHandler.write(testData);
 
-      // Read data from specified chunk range
       const result = await chunkedFileHandler.readRange(0, 0);
 
-      // Verify result is not empty
       expect(result.length).toBeGreaterThan(0);
       expect(result.length).toBeLessThanOrEqual(1000);
     });
   });
 
-  describe('Edge Case Tests', () => {
-    it('should be able to handle empty data', async () => {
-      // Write empty data
+  describe('edge cases', () => {
+    it('accepts an empty record set', async () => {
       await chunkedFileHandler.write([]);
 
-      // Read data, should return empty array
       const result = await chunkedFileHandler.read();
 
       expect(result).toEqual([]);
     });
 
-    it('should be able to handle large data write in single operation', async () => {
-      // Generate large test data
+    it('writes a large record set in one operation', async () => {
+      // The payload size forces chunking without making the fixture unbounded.
       const testData = Array.from({ length: 500 }, (_, i) => ({
         id: i,
         name: `test${i}`,
-        data: `test data ${i}`.repeat(100), // Increase data size to ensure chunking
+        data: `test data ${i}`.repeat(100),
       }));
 
-      // Write data
       await chunkedFileHandler.write(testData);
 
-      // Read data
       const result = await chunkedFileHandler.readAll();
 
-      // Verify data integrity
       expect(result.length).toBe(testData.length);
       expect(result[0]).toEqual(testData[0]);
       expect(result[result.length - 1]).toEqual(testData[testData.length - 1]);
     });
   });
 
-  describe('Error Handling Tests', () => {
-    it('should be able to handle invalid data', async () => {
-      // @ts-ignore - Intentionally passing invalid data type
-      await expect(chunkedFileHandler.write('invalid data')).rejects.toThrow();
+  describe('failure handling', () => {
+    it('rejects a non-record write payload', async () => {
+      const invalidData: unknown = 'invalid data';
+
+      await expect(chunkedFileHandler.write(invalidData as StorageRecord[])).rejects.toThrow();
     });
 
-    it('should reject a corrupted chunk instead of silently dropping its records', async () => {
+    it('rejects a corrupted chunk instead of silently dropping its records', async () => {
       await chunkedFileHandler.write([{ id: 1, name: 'original' }]);
 
       const chunkPath = '/mock/documents/lite-data-store/test_chunked_table/000000.ldb';
-      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
-      const parsed = JSON.parse(fileSystem[chunkPath]);
+      const fileSystem = global.__expo_file_system_mock__.mockFileSystem;
+      const parsed = JSON.parse(readMockFileText(chunkPath));
       parsed.data[0].name = 'tampered';
       fileSystem[chunkPath] = JSON.stringify(parsed);
 
       await expect(chunkedFileHandler.readAll()).rejects.toMatchObject({ code: 'CORRUPTED_DATA' });
     });
 
-    it('should not clear corrupted source data when an overwrite cannot take a snapshot', async () => {
+    it('does not clear corrupted source data when an overwrite cannot take a snapshot', async () => {
       await chunkedFileHandler.write([{ id: 1, name: 'original' }]);
 
       const chunkPath = '/mock/documents/lite-data-store/test_chunked_table/000000.ldb';
-      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+      const fileSystem = global.__expo_file_system_mock__.mockFileSystem;
       fileSystem[chunkPath] = '{corrupted';
 
       await expect(chunkedFileHandler.write([{ id: 2, name: 'replacement' }])).rejects.toMatchObject({
@@ -201,60 +203,65 @@ describe('ChunkedFileHandler', () => {
       expect(fileSystem[chunkPath]).toBe('{corrupted');
     });
 
-    it('should restore previous data when a chunked overwrite fails', async () => {
+    it('restores previous data when a chunked overwrite fails', async () => {
       const originalData = [{ id: 1, name: 'original' }];
       await chunkedFileHandler.write(originalData);
 
-      const handler = chunkedFileHandler as any;
+      const handler = getChunkedFileHandlerPrivateAccess(chunkedFileHandler);
       const originalWriteChunk = handler.writeChunk.bind(handler);
       let writeAttempts = 0;
-      const writeSpy = jest.spyOn(handler, 'writeChunk').mockImplementation(async (...args: any[]) => {
-        writeAttempts++;
-        if (writeAttempts === 1) {
-          throw new Error('injected chunk write failure');
-        }
-        return originalWriteChunk(...args);
-      });
+      const writeSpy = jest
+        .spyOn(handler, 'writeChunk')
+        .mockImplementation(async (...args: Parameters<typeof handler.writeChunk>) => {
+          writeAttempts++;
+          if (writeAttempts === 1) {
+            throw new Error('injected chunk write failure');
+          }
+          return originalWriteChunk(...args);
+        });
 
-      await expect(chunkedFileHandler.write([{ id: 2, name: 'replacement' }])).rejects.toThrow();
-      writeSpy.mockRestore();
+      try {
+        await expect(chunkedFileHandler.write([{ id: 2, name: 'replacement' }])).rejects.toThrow();
+      } finally {
+        writeSpy.mockRestore();
+      }
 
       await expect(chunkedFileHandler.readAll()).resolves.toEqual(originalData);
     });
 
-    it('should reject non-serializable records without silently dropping them', async () => {
+    it('rejects non-serializable records without silently dropping them', async () => {
       const originalData = [{ id: 1, name: 'original' }];
       await chunkedFileHandler.write(originalData);
 
-      const circular: Record<string, any> = { id: 2 };
+      const circular: StorageRecord = { id: 2 };
       circular.self = circular;
 
       await expect(chunkedFileHandler.write([circular])).rejects.toThrow();
       await expect(chunkedFileHandler.readAll()).resolves.toEqual(originalData);
     });
 
-    it('should recover previous data from a pending overwrite journal after an interrupted clear', async () => {
+    it('recovers previous data from a pending overwrite journal after an interrupted clear', async () => {
       const originalData = [{ id: 1, name: 'original' }];
       const replacementData = [{ id: 2, name: 'replacement' }];
       await chunkedFileHandler.write(originalData);
 
-      await (chunkedFileHandler as any).writeOverwriteJournal(originalData, replacementData);
+      await getChunkedFileHandlerPrivateAccess(chunkedFileHandler).writeOverwriteJournal(originalData, replacementData);
       await chunkedFileHandler.clear();
 
       const restartedHandler = new ChunkedFileHandler(testTableName, metadataManager);
       await expect(restartedHandler.readAll()).resolves.toEqual(originalData);
 
       const journalPath = '/mock/documents/lite-data-store/test_chunked_table.overwrite-journal';
-      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+      const fileSystem = global.__expo_file_system_mock__.mockFileSystem;
       expect(fileSystem[journalPath]).toBeUndefined();
     });
 
-    it('should keep completed replacement data when an overwrite journal is left behind', async () => {
+    it('keeps completed replacement data when an overwrite journal is left behind', async () => {
       const originalData = [{ id: 1, name: 'original' }];
       const replacementData = [{ id: 2, name: 'replacement' }];
       await chunkedFileHandler.write(originalData);
 
-      await (chunkedFileHandler as any).writeOverwriteJournal(originalData, replacementData);
+      await getChunkedFileHandlerPrivateAccess(chunkedFileHandler).writeOverwriteJournal(originalData, replacementData);
       await chunkedFileHandler.clear();
       await chunkedFileHandler.append(replacementData);
 
@@ -262,7 +269,7 @@ describe('ChunkedFileHandler', () => {
       await expect(restartedHandler.readAll()).resolves.toEqual(replacementData);
     });
 
-    it('should invalidate cached chunks after an overwrite', async () => {
+    it('invalidates cached chunks after an overwrite', async () => {
       await chunkedFileHandler.write([{ id: 1, name: 'original' }]);
       await chunkedFileHandler.readAll();
 
@@ -271,17 +278,17 @@ describe('ChunkedFileHandler', () => {
       await expect(chunkedFileHandler.readAll()).resolves.toEqual([{ id: 2, name: 'replacement' }]);
     });
 
-    it('should reject a corrupted overwrite journal instead of guessing recovery state', async () => {
+    it('rejects a corrupted overwrite journal instead of guessing recovery state', async () => {
       await chunkedFileHandler.write([{ id: 1, name: 'original' }]);
 
       const journalPath = '/mock/documents/lite-data-store/test_chunked_table.overwrite-journal';
-      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+      const fileSystem = global.__expo_file_system_mock__.mockFileSystem;
       fileSystem[journalPath] = '{corrupted';
 
       await expect(chunkedFileHandler.readAll()).rejects.toMatchObject({ code: 'CORRUPTED_DATA' });
     });
 
-    it('should roll back partial append chunks when a later chunk write fails', async () => {
+    it('rolls back partial append chunks when a later chunk write fails', async () => {
       configManager.updateConfig({ chunkSize: 256 });
       const originalData = [{ id: 1, name: 'original' }];
       const appendData = [
@@ -290,23 +297,28 @@ describe('ChunkedFileHandler', () => {
       ];
       await chunkedFileHandler.write(originalData);
 
-      const handler = chunkedFileHandler as any;
+      const handler = getChunkedFileHandlerPrivateAccess(chunkedFileHandler);
       const originalWriteChunk = handler.writeChunk.bind(handler);
       let appendWriteAttempts = 0;
-      const writeSpy = jest.spyOn(handler, 'writeChunk').mockImplementation(async (...args: any[]) => {
-        appendWriteAttempts++;
-        if (appendWriteAttempts === 2) {
-          throw new Error('injected append chunk failure');
-        }
-        return originalWriteChunk(...args);
-      });
+      const writeSpy = jest
+        .spyOn(handler, 'writeChunk')
+        .mockImplementation(async (...args: Parameters<typeof handler.writeChunk>) => {
+          appendWriteAttempts++;
+          if (appendWriteAttempts === 2) {
+            throw new Error('injected append chunk failure');
+          }
+          return originalWriteChunk(...args);
+        });
 
-      await expect(chunkedFileHandler.append(appendData)).rejects.toThrow();
-      writeSpy.mockRestore();
+      try {
+        await expect(chunkedFileHandler.append(appendData)).rejects.toThrow();
+      } finally {
+        writeSpy.mockRestore();
+      }
 
       await expect(chunkedFileHandler.readAll()).resolves.toEqual(originalData);
 
-      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+      const fileSystem = global.__expo_file_system_mock__.mockFileSystem;
       expect(fileSystem['/mock/documents/lite-data-store/test_chunked_table/000001.ldb']).toBeUndefined();
       expect(fileSystem['/mock/documents/lite-data-store/test_chunked_table/000002.ldb']).toBeUndefined();
       expect(fileSystem['/mock/documents/lite-data-store/test_chunked_table.append-journal']).toBeUndefined();
@@ -317,14 +329,14 @@ describe('ChunkedFileHandler', () => {
       const appendData = [{ id: 2, name: 'interrupted' }];
       await chunkedFileHandler.write(originalData);
 
-      const handler = chunkedFileHandler as any;
+      const handler = getChunkedFileHandlerPrivateAccess(chunkedFileHandler);
       await handler.writeAppendJournal(1, 1, [1], appendData);
       await handler.writeChunk(1, appendData);
 
       const restartedHandler = new ChunkedFileHandler(testTableName, metadataManager);
       await expect(restartedHandler.readAll()).resolves.toEqual(originalData);
 
-      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+      const fileSystem = global.__expo_file_system_mock__.mockFileSystem;
       expect(fileSystem['/mock/documents/lite-data-store/test_chunked_table/000001.ldb']).toBeUndefined();
       expect(fileSystem['/mock/documents/lite-data-store/test_chunked_table.append-journal']).toBeUndefined();
     });
@@ -337,7 +349,7 @@ describe('ChunkedFileHandler', () => {
         { id: 3, payload: 'z'.repeat(300) },
       ]);
 
-      const fileSystem = (global as any).__expo_file_system_mock__.mockFileSystem;
+      const fileSystem = global.__expo_file_system_mock__.mockFileSystem;
       delete fileSystem['/mock/documents/lite-data-store/test_chunked_table/000001.ldb'];
 
       const restartedHandler = new ChunkedFileHandler(testTableName, metadataManager);
@@ -345,29 +357,19 @@ describe('ChunkedFileHandler', () => {
     });
   });
 
-  describe('Chunk Processing Tests', () => {
-    it('should correctly handle chunked write and read operations', async () => {
-      // Write multiple batches of data to ensure multiple chunks are created
+  describe('chunk processing', () => {
+    it('preserves record order across writes and appends', async () => {
       const batch1 = Array.from({ length: 300 }, (_, i) => ({ id: i, name: `batch1-${i}` }));
       const batch2 = Array.from({ length: 300 }, (_, i) => ({ id: 300 + i, name: `batch2-${i}` }));
       const batch3 = Array.from({ length: 300 }, (_, i) => ({ id: 600 + i, name: `batch3-${i}` }));
 
-      // Write first batch
       await chunkedFileHandler.write(batch1);
-
-      // Append second batch
       await chunkedFileHandler.append(batch2);
-
-      // Append third batch
       await chunkedFileHandler.append(batch3);
 
-      // Read all data
       const result = await chunkedFileHandler.readAll();
 
-      // Verify data integrity
       expect(result.length).toBe(batch1.length + batch2.length + batch3.length);
-
-      // Verify data order
       expect(result[0]).toEqual(batch1[0]);
       expect(result[300]).toEqual(batch2[0]);
       expect(result[600]).toEqual(batch3[0]);

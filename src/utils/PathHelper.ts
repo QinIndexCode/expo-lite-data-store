@@ -1,10 +1,3 @@
-/**
- * @module PathHelper
- * @description Independent path management to avoid circular dependencies
- * @since 2026-04-02
- * @version 3.0.0
- */
-
 import logger from './logger';
 import { getDocumentDirectory, getFileSystem } from './fileSystemCompat';
 
@@ -25,7 +18,7 @@ export const isValidStorageFolderName = (folder: unknown): folder is string => {
 
   // Storage paths are file URIs on native runtimes. Reject URI escapes too,
   // because an encoded dot segment can otherwise normalize outside the root.
-  return !(/[\\/\u0000%]/u.test(folder));
+  return !/[\\/\u0000%]/u.test(folder);
 };
 
 export function assertValidStorageFolderName(folder: unknown): asserts folder is string {

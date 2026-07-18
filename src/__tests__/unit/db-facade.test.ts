@@ -1,13 +1,4 @@
-import {
-  db,
-  decrypt,
-  deleteTable,
-  encrypt,
-  findOne,
-  hasTable,
-  hash,
-  insert,
-} from '../../expo-lite-data-store';
+import { db, decrypt, deleteTable, encrypt, findOne, hasTable, hash, insert } from '../../expo-lite-data-store';
 
 describe('db facade', () => {
   const tableName = 'db_facade_users';

@@ -1,4 +1,3 @@
-// src/core/index/__tests__/IndexManager.test.ts
 import { StorageError } from '../../../types/storageErrorInfc';
 import { meta } from '../../meta/MetadataManager';
 import { IndexManager, IndexType } from '../IndexManager';
@@ -8,13 +7,10 @@ describe('IndexManager', () => {
   const testTableName = 'test_table';
 
   beforeEach(() => {
-    // 创建新的IndexManager实例
     indexManager = new IndexManager(meta);
 
-    // 清除元数据
     meta.delete(testTableName);
 
-    // 创建测试表元数据
     meta.update(testTableName, {
       mode: 'single',
       path: testTableName + '.ldb',
@@ -31,8 +27,12 @@ describe('IndexManager', () => {
     });
   });
 
+  afterEach(() => {
+    meta.cleanup();
+  });
+
   describe('createIndex', () => {
-    it('should be able to create normal index', async () => {
+    it('creates a normal index', async () => {
       await indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
       const indexes = indexManager.getTableIndexes(testTableName);
       expect(indexes.length).toBe(1);
@@ -41,7 +41,7 @@ describe('IndexManager', () => {
       expect(indexes[0].fields).toEqual(['name']);
     });
 
-    it('should be able to create unique index', async () => {
+    it('creates a unique index', async () => {
       await indexManager.createIndex(testTableName, 'id', IndexType.UNIQUE);
       const indexes = indexManager.getTableIndexes(testTableName);
       expect(indexes.length).toBe(1);
@@ -50,31 +50,31 @@ describe('IndexManager', () => {
       expect(indexes[0].fields).toEqual(['id']);
     });
 
-    it('should throw error when creating duplicate index', async () => {
+    it('rejects duplicate index creation', async () => {
       await indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
       await expect(indexManager.createIndex(testTableName, 'name', IndexType.NORMAL)).rejects.toThrow(StorageError);
     });
 
-    it('should throw error when table does not exist', async () => {
+    it('rejects index creation for a nonexistent table', async () => {
       await expect(indexManager.createIndex('non_existent_table', 'name', IndexType.NORMAL)).rejects.toThrow(
         StorageError
       );
     });
 
-    it('should throw error when field name is empty', async () => {
+    it('rejects an empty index field', async () => {
       await expect(indexManager.createIndex(testTableName, '', IndexType.NORMAL)).rejects.toThrow(StorageError);
     });
   });
 
   describe('dropIndex', () => {
-    it('should be able to drop index', async () => {
+    it('removes an index', async () => {
       await indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
       await indexManager.dropIndex(testTableName, 'name', IndexType.NORMAL);
       const indexes = indexManager.getTableIndexes(testTableName);
       expect(indexes.length).toBe(0);
     });
 
-    it('should throw error when index does not exist', async () => {
+    it('rejects deletion of a nonexistent index', async () => {
       await expect(indexManager.dropIndex(testTableName, 'non_existent_field', IndexType.NORMAL)).rejects.toThrow(
         StorageError
       );
@@ -82,7 +82,7 @@ describe('IndexManager', () => {
   });
 
   describe('addToIndex', () => {
-    it('should be able to add data to index', () => {
+    it('adds data to an index', () => {
       indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
 
       const data = { id: '1', name: 'test', age: 25 };
@@ -92,7 +92,7 @@ describe('IndexManager', () => {
       expect(result).toEqual(['1']);
     });
 
-    it('should throw error when violating unique constraint', () => {
+    it('rejects a duplicate value in a unique index', () => {
       indexManager.createIndex(testTableName, 'name', IndexType.UNIQUE);
 
       const data1 = { id: '1', name: 'test', age: 25 };
@@ -102,16 +102,16 @@ describe('IndexManager', () => {
       expect(() => indexManager.addToIndex(testTableName, data2)).toThrow(StorageError);
     });
 
-    it('should skip data without ID', () => {
+    it('ignores data without an ID', () => {
       indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
 
-      const data = { name: 'test', age: 25 }; // No ID
+      const data = { name: 'test', age: 25 };
       expect(() => indexManager.addToIndex(testTableName, data)).not.toThrow();
     });
   });
 
   describe('removeFromIndex', () => {
-    it('should be able to remove data from index', () => {
+    it('removes data from an index', () => {
       indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
 
       const data = { id: '1', name: 'test', age: 25 };
@@ -127,7 +127,7 @@ describe('IndexManager', () => {
   });
 
   describe('updateIndex', () => {
-    it('should be able to update index', () => {
+    it('updates an index entry', () => {
       indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
 
       const oldData = { id: '1', name: 'old_name', age: 25 };
@@ -147,7 +147,7 @@ describe('IndexManager', () => {
   });
 
   describe('queryIndex', () => {
-    it('should be able to query index', () => {
+    it('returns matching IDs from an index', () => {
       indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
       indexManager.createIndex(testTableName, 'age', IndexType.NORMAL);
 
@@ -166,14 +166,14 @@ describe('IndexManager', () => {
       expect(result).toEqual(['2']);
     });
 
-    it('should return empty array when index does not exist', () => {
+    it('returns an empty array for a nonexistent index', () => {
       const result = indexManager.queryIndex(testTableName, 'non_existent_field', 'value');
       expect(result).toEqual([]);
     });
   });
 
   describe('hasIndex', () => {
-    it('should be able to check if field has index', () => {
+    it('reports whether a field is indexed', () => {
       indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
 
       expect(indexManager.hasIndex(testTableName, 'name')).toBe(true);
@@ -182,7 +182,7 @@ describe('IndexManager', () => {
   });
 
   describe('clearTableIndexes', () => {
-    it('should be able to clear all indexes for table', () => {
+    it('clears all indexes for a table', () => {
       indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
       indexManager.createIndex(testTableName, 'age', IndexType.NORMAL);
 

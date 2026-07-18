@@ -9,29 +9,24 @@ const { getDefaultConfig } = require('expo/metro-config');
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
-// 配置resolver.resolveRequest来处理@noble/ciphers和@noble/hashes包的导入
+// Metro does not resolve these package subpaths consistently across Expo targets.
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  // 处理@noble/ciphers包的导入
   if (moduleName.startsWith('@noble/ciphers/')) {
     const subModule = moduleName.replace('@noble/ciphers/', '');
-    // 返回完整的文件路径，确保Metro能正确解析
     return {
       filePath: require.resolve(`@noble/ciphers/${subModule}`),
       type: 'sourceFile',
     };
   }
 
-  // 处理@noble/hashes包的导入
   if (moduleName.startsWith('@noble/hashes/')) {
     const subModule = moduleName.replace('@noble/hashes/', '');
-    // 返回完整的文件路径，确保Metro能正确解析
     return {
       filePath: require.resolve(`@noble/hashes/${subModule}`),
       type: 'sourceFile',
     };
   }
 
-  // 对于其他模块，使用默认解析器
   return context.resolveRequest(context, moduleName, platform);
 };
 

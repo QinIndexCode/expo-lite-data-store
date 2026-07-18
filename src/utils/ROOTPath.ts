@@ -1,10 +1,3 @@
-/**
- * @module ROOTPath
- * @description Runtime root path helpers
- * @since 2025-11-19
- * @version 3.0.0
- */
-
 import { pathHelper } from './PathHelper';
 
 export const getRootPath = async (): Promise<string> => {

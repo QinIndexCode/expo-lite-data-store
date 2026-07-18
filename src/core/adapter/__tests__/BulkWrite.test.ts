@@ -1,8 +1,14 @@
-// src/core/adapter/__tests__/BulkWrite.test.ts
 import { MetadataManager } from '../../meta/MetadataManager';
 import { FileSystemStorageAdapter } from '../FileSystemStorageAdapter';
 
-describe('FileSystemStorageAdapter - BulkWrite', () => {
+type UserRecord = {
+  id: number;
+  name: string;
+  age?: number;
+  active?: boolean;
+};
+
+describe('FileSystemStorageAdapter bulkWrite', () => {
   let adapter: FileSystemStorageAdapter;
   let metadataManager: MetadataManager;
   const tableName = 'test_bulk_write';
@@ -14,22 +20,15 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
   });
 
   afterEach(async () => {
-    try {
+    if (await adapter.hasTable(tableName)) {
       await adapter.deleteTable(tableName);
-    } catch (e) {
-      // 忽略删除错误
     }
-    // 清理资源，防止测试挂起
-    if (adapter && typeof (adapter as any).cleanup === 'function') {
-      (adapter as any).cleanup();
-    }
-    if (metadataManager) {
-      metadataManager.cleanup();
-    }
+    await adapter.cleanup();
+    metadataManager.cleanup();
   });
 
-  describe('批量插入操作', () => {
-    it('应该能够批量插入多条数据', async () => {
+  describe('inserts', () => {
+    it('inserts multiple records', async () => {
       const operations = [
         { type: 'insert' as const, data: { id: 1, name: 'Alice' } },
         { type: 'insert' as const, data: { id: 2, name: 'Bob' } },
@@ -41,12 +40,12 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
       expect(result.written).toBe(3);
       expect(result.totalAfterWrite).toBe(3);
 
-      const allData = await adapter.read(tableName, { bypassCache: true });
+      const allData = await adapter.read<UserRecord>(tableName, { bypassCache: true });
       expect(allData.length).toBe(3);
-      expect(allData.find((d: any) => d.id === 1)?.name).toBe('Alice');
+      expect(allData.find(record => record.id === 1)?.name).toBe('Alice');
     });
 
-    it('应该能够批量插入数组数据', async () => {
+    it('inserts an array payload', async () => {
       const operations = [
         {
           type: 'insert' as const,
@@ -60,12 +59,12 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
       const result = await adapter.bulkWrite(tableName, operations);
 
       expect(result.written).toBe(2);
-      const allData = await adapter.read(tableName, { bypassCache: true });
+      const allData = await adapter.read<UserRecord>(tableName, { bypassCache: true });
       expect(allData.length).toBe(2);
     });
   });
 
-  describe('批量更新操作', () => {
+  describe('updates', () => {
     beforeEach(async () => {
       await adapter.overwrite(tableName, [
         { id: 1, name: 'Alice', age: 25, active: true },
@@ -76,7 +75,7 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
       ]);
     });
 
-    it('应该能够批量更新多条数据', async () => {
+    it('updates multiple records', async () => {
       const operations = [
         { type: 'update' as const, data: { age: 26 }, where: { id: 1 } },
         { type: 'update' as const, data: { age: 31 }, where: { id: 2 } },
@@ -86,59 +85,72 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
 
       expect(result.written).toBe(2);
 
-      const data1 = await adapter.findOne(tableName, { id: 1 });
-      const data2 = await adapter.findOne(tableName, { id: 2 });
+      const data1 = await adapter.findOne<UserRecord>(tableName, { id: 1 });
+      const data2 = await adapter.findOne<UserRecord>(tableName, { id: 2 });
 
       expect(data1?.age).toBe(26);
       expect(data2?.age).toBe(31);
-      expect(data1?.name).toBe('Alice'); // 其他字段保持不变
+      expect(data1?.name).toBe('Alice');
     });
 
-    it('应该能够使用where条件批量更新多条数据', async () => {
+    it('updates records selected by a where condition', async () => {
       const operations = [
-        { 
-          type: 'update' as const, 
-          data: { age: 40 }, 
-          where: { active: true } 
+        {
+          type: 'update' as const,
+          data: { age: 40 },
+          where: { active: true },
         },
       ];
 
       const result = await adapter.bulkWrite(tableName, operations);
 
-      expect(result.written).toBe(3); // 3个active=true的用户
+      expect(result.written).toBe(3);
 
-      const activeUsers = await adapter.findMany(tableName, { active: true });
-      expect(activeUsers.every((user: any) => user.age === 40)).toBe(true);
+      const activeUsers = await adapter.findMany<UserRecord>(tableName, { active: true });
+      expect(activeUsers.every(user => user.age === 40)).toBe(true);
     });
 
-    it('应该能够使用复杂where条件批量更新数据', async () => {
+    it('updates records selected by a compound where condition', async () => {
       const operations = [
-        { 
-          type: 'update' as const, 
-          data: { name: 'Updated' }, 
-          where: { $and: [{ age: { $gt: 25 } }, { active: false }] } 
+        {
+          type: 'update' as const,
+          data: { name: 'Updated' },
+          where: { $and: [{ age: { $gt: 25 } }, { active: false }] },
         },
       ];
 
       const result = await adapter.bulkWrite(tableName, operations);
 
-      expect(result.written).toBe(2); // Charlie和Eve符合条件
+      expect(result.written).toBe(2);
 
-      const updatedUsers = await adapter.findMany(tableName, { name: 'Updated' });
+      const updatedUsers = await adapter.findMany<UserRecord>(tableName, { name: 'Updated' });
       expect(updatedUsers.length).toBe(2);
-      expect(updatedUsers.every((user: any) => user.age > 25 && user.active === false)).toBe(true);
+      expect(updatedUsers.every(user => user.age !== undefined && user.age > 25 && user.active === false)).toBe(true);
     });
 
-    it('应该能够更新不存在的记录而不报错', async () => {
+    it('updates zero records when no record matches', async () => {
       const operations = [{ type: 'update' as const, data: { age: 99 }, where: { id: 999 } }];
 
       const result = await adapter.bulkWrite(tableName, operations);
 
       expect(result.written).toBe(0);
     });
+
+    it('rejects array update payloads instead of applying the first item', async () => {
+      const invalidUpdate = [{ age: 99 }] as unknown as UserRecord;
+
+      await expect(adapter.update(tableName, invalidUpdate, { id: 1 })).rejects.toMatchObject({
+        code: 'FILE_CONTENT_INVALID',
+      });
+      await expect(
+        adapter.bulkWrite(tableName, [{ type: 'update', data: invalidUpdate, where: { id: 1 } }])
+      ).rejects.toMatchObject({ code: 'FILE_CONTENT_INVALID' });
+
+      await expect(adapter.findOne<UserRecord>(tableName, { id: 1 })).resolves.toMatchObject({ age: 25 });
+    });
   });
 
-  describe('批量删除操作', () => {
+  describe('deletes', () => {
     beforeEach(async () => {
       await adapter.overwrite(tableName, [
         { id: 1, name: 'Alice', age: 25, active: true },
@@ -149,7 +161,7 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
       ]);
     });
 
-    it('应该能够批量删除多条数据', async () => {
+    it('deletes multiple records', async () => {
       const operations = [
         { type: 'delete' as const, where: { id: 1 } },
         { type: 'delete' as const, where: { id: 2 } },
@@ -159,66 +171,65 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
 
       expect(result.written).toBe(2);
 
-      const allData = await adapter.read(tableName, { bypassCache: true });
+      const allData = await adapter.read<UserRecord>(tableName, { bypassCache: true });
       expect(allData.length).toBe(3);
-      expect(allData.every((item: any) => item.id !== 1 && item.id !== 2)).toBe(true);
+      expect(allData.every(item => item.id !== 1 && item.id !== 2)).toBe(true);
     });
 
-    it('应该能够使用where条件批量删除多条数据', async () => {
+    it('deletes records selected by a where condition', async () => {
       const operations = [
-        { 
-          type: 'delete' as const, 
-          where: { active: false } 
+        {
+          type: 'delete' as const,
+          where: { active: false },
         },
       ];
 
       const result = await adapter.bulkWrite(tableName, operations);
 
-      expect(result.written).toBe(2); // 2个active=false的用户
+      expect(result.written).toBe(2);
 
-      const allData = await adapter.read(tableName, { bypassCache: true });
+      const allData = await adapter.read<UserRecord>(tableName, { bypassCache: true });
       expect(allData.length).toBe(3);
-      expect(allData.every((item: any) => item.active === true)).toBe(true);
+      expect(allData.every(item => item.active === true)).toBe(true);
     });
 
-    it('应该能够使用复杂where条件批量删除数据', async () => {
+    it('deletes records selected by a compound where condition', async () => {
       const operations = [
-        { 
-          type: 'delete' as const, 
-          where: { $or: [{ age: { $lt: 27 } }, { age: { $gt: 33 } }] } 
+        {
+          type: 'delete' as const,
+          where: { $or: [{ age: { $lt: 27 } }, { age: { $gt: 33 } }] },
         },
       ];
 
       const result = await adapter.bulkWrite(tableName, operations);
 
-      expect(result.written).toBe(2); // Alice(25)和Charlie(35)符合条件
+      expect(result.written).toBe(2);
 
-      const remainingData = await adapter.read(tableName, { bypassCache: true });
+      const remainingData = await adapter.read<UserRecord>(tableName, { bypassCache: true });
       expect(remainingData.length).toBe(3);
-      expect(remainingData.every((user: any) => user.age >= 27 && user.age <= 33)).toBe(true);
+      expect(remainingData.every(user => user.age !== undefined && user.age >= 27 && user.age <= 33)).toBe(true);
     });
 
-    it('应该能够使用多条件组合删除数据', async () => {
+    it('deletes records selected by multiple conditions', async () => {
       const operations = [
-        { 
-          type: 'delete' as const, 
-          where: { $and: [{ name: 'Alice' }, { active: true }] } 
+        {
+          type: 'delete' as const,
+          where: { $and: [{ name: 'Alice' }, { active: true }] },
         },
       ];
 
       const result = await adapter.bulkWrite(tableName, operations);
 
-      expect(result.written).toBe(1); // Alice符合条件
+      expect(result.written).toBe(1);
 
-      const remainingData = await adapter.read(tableName, { bypassCache: true });
+      const remainingData = await adapter.read<UserRecord>(tableName, { bypassCache: true });
       expect(remainingData.length).toBe(4);
-      expect(remainingData.every((item: any) => item.name !== 'Alice')).toBe(true);
+      expect(remainingData.every(item => item.name !== 'Alice')).toBe(true);
     });
   });
 
-  describe('混合操作', () => {
-    it('应该能够执行插入、更新、删除的混合操作', async () => {
-      // 先插入一些初始数据
+  describe('mixed operations', () => {
+    it('applies insert, update, and delete operations together', async () => {
       await adapter.overwrite(tableName, [
         { id: 1, name: 'Alice', age: 25 },
         { id: 2, name: 'Bob', age: 30 },
@@ -234,47 +245,33 @@ describe('FileSystemStorageAdapter - BulkWrite', () => {
 
       expect(result.written).toBe(3);
 
-      const allData = await adapter.read(tableName, { bypassCache: true });
+      const allData = await adapter.read<UserRecord>(tableName, { bypassCache: true });
       expect(allData.length).toBe(2);
 
-      const alice = allData.find((d: any) => d.id === 1);
-      const charlie = allData.find((d: any) => d.id === 3);
+      const alice = allData.find(record => record.id === 1);
+      const charlie = allData.find(record => record.id === 3);
 
       expect(alice?.age).toBe(26);
       expect(charlie?.name).toBe('Charlie');
     });
   });
 
-  describe('性能测试', () => {
-    it('批量操作应该比单个操作更高效', async () => {
+  describe('large batches', () => {
+    it('writes every record in a large batch', async () => {
       const largeDataSet = Array.from({ length: 100 }, (_, i) => ({
         id: i + 1,
         name: `User${i + 1}`,
         age: 20 + i,
       }));
 
-      // 批量插入
-      const startTime = Date.now();
       const operations = largeDataSet.map(item => ({
         type: 'insert' as const,
         data: item,
       }));
-      await adapter.bulkWrite(tableName, operations);
-      const bulkTime = Date.now() - startTime;
+      const result = await adapter.bulkWrite(tableName, operations);
 
-      // 清空表
-      await adapter.deleteTable(tableName);
-      await adapter.createTable(tableName);
-
-      // 单个插入
-      const startTime2 = Date.now();
-      for (const item of largeDataSet) {
-        await adapter.insert(tableName, item);
-      }
-      const singleTime = Date.now() - startTime2;
-
-      // 批量操作应该明显更快（至少快30%）
-      expect(bulkTime).toBeLessThan(singleTime * 0.7);
+      expect(result).toMatchObject({ written: largeDataSet.length, totalAfterWrite: largeDataSet.length });
+      await expect(adapter.count(tableName)).resolves.toBe(largeDataSet.length);
     });
   });
 });

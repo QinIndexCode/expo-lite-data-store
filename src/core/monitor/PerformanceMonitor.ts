@@ -1,9 +1,3 @@
-/**
- * @module PerformanceMonitor
- * @description Performance monitor collecting and reporting application metrics
- * @since 2025-11-28
- * @version 3.0.0
- */
 import { configManager } from '../config/ConfigManager';
 
 export interface PerformanceMetrics {
@@ -201,7 +195,9 @@ export class PerformanceMonitor {
     }
   }
 
-  getMetrics(filter?: Partial<Pick<PerformanceMetrics, 'operation' | 'group' | 'channel' | 'profile' | 'provider'>>): PerformanceMetrics[] {
+  getMetrics(
+    filter?: Partial<Pick<PerformanceMetrics, 'operation' | 'group' | 'channel' | 'profile' | 'provider'>>
+  ): PerformanceMetrics[] {
     if (!filter) {
       return [...this.metrics];
     }
@@ -232,7 +228,9 @@ export class PerformanceMonitor {
     }
 
     const grouped = new Map<string, PerformanceStats>();
-    const groups = Array.from(new Set(this.metrics.map(metric => metric.group).filter((value): value is string => Boolean(value))));
+    const groups = Array.from(
+      new Set(this.metrics.map(metric => metric.group).filter((value): value is string => Boolean(value)))
+    );
 
     groups.forEach(name => {
       grouped.set(name, buildStats(this.metrics.filter(metric => metric.group === name)));
@@ -336,9 +334,9 @@ export class PerformanceMonitor {
     const stats = this.getOverallStats();
     const thresholds = this.getThresholds();
     const performanceHealthy =
-      stats.successRate >= thresholds.minSuccessRate
-      && stats.averageDuration <= thresholds.maxAverageDuration
-      && stats.p95Duration <= thresholds.maxP95Duration;
+      stats.successRate >= thresholds.minSuccessRate &&
+      stats.averageDuration <= thresholds.maxAverageDuration &&
+      stats.p95Duration <= thresholds.maxP95Duration;
 
     const resources = {
       memoryUsage:
