@@ -4,7 +4,7 @@
 
 ## 文档范围
 
-本文件是当前 `2.x` 公共表面的详细 API 参考，覆盖以下内容：
+本文件是当前 `3.x` 公共表面的详细 API 参考，覆盖以下内容：
 
 - 正式支持的安装契约；
 - 公开导出的 facade、命名函数与辅助导出；
@@ -13,6 +13,10 @@
 - 加密辅助函数、错误类型，以及常见运行时错误码。
 
 如果你需要的是叙述式安装与接入指南，请先阅读 [README.zh-CN.md](../README.zh-CN.md)。如果你需要维护者视角的发布验证与运行时证据，请阅读 [EXPO_RUNTIME_QA.zh-CN.md](./EXPO_RUNTIME_QA.zh-CN.md)。
+
+## v3 迁移
+
+`plainStorage` 以及 `expo-lite-data-store/dist/js/...`、`dist/cjs/...` 等包内深层导入不再属于公开 API。请从 `expo-lite-data-store` 根入口使用 `db` facade 或命名 API。对以 `encrypted: true` 创建的表，每一次表操作都必须传入 `encrypted: true`；选择明文表面的请求会以 fail-closed 方式被拒绝。
 
 ## 安装契约
 
@@ -62,8 +66,7 @@ import { db, configManager, performanceMonitor, StorageError, StorageErrorCode }
 | 监控导出           | `performanceMonitor`                                                                                                                                                                                                      |
 | 加密辅助导出       | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`                                                                                   |
 | 错误导出           | `StorageError`, `StorageErrorCode`, `CryptoError`                                                                                                                                                                         |
-| 类型导出           | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FilterCondition`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`                               |
-| 高级明文适配器导出 | `plainStorage`                                                                                                                                                                                                            |
+| 类型导出           | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FilterCondition`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats` |
 
 ### `db` facade 与命名导出
 
@@ -93,6 +96,8 @@ type CommonOptions = {
 
 - `encrypted: true` 会选择加密适配器表面。
 - `requireAuthOnAccess: true` 会隐式要求走加密表面，并表达严格逐次访问认证语义。
+
+严格表会绑定到该认证密钥作用域。常规加密表面不能访问严格表，严格表面也不能把既有常规加密表重新解释为严格表。应先由应用把数据显式迁移到新建的严格表并完成验证，再退役常规表和常规密钥。
 
 ### `WriteResult`
 
@@ -250,6 +255,12 @@ const tables = await listTables();
 ```
 
 返回当前表面下所有已知表名。
+
+若任何已知表绑定了 `requireAuthOnAccess: true`，未选择严格表面的列表请求会 fail-closed：`listTables()` 以及仅传入 `encrypted: true` 的调用都会抛出错误码为 `PERMISSION_DENIED` 的 `StorageError`，而不会返回可能泄露表存在性的部分列表。只有具备相应权限的调用方才应重试：
+
+```ts
+const tables = await listTables({ encrypted: true, requireAuthOnAccess: true });
+```
 
 ### `countTable(tableName, options?)`
 
@@ -547,6 +558,8 @@ configManager.updateConfig({
 });
 ```
 
+`storageFolder` 只接受单一目录名，路径分隔符、编码后的分隔符和路径穿越名称都会被拒绝。请在首次存储操作前配置；适配器运行期间修改该值会被拒绝，以防元数据或缓存状态跨根目录混用。
+
 #### `configManager.resetConfig()`
 
 丢弃程序化覆盖项，回到“默认值 + 非程序化来源”的合并结果。
@@ -573,10 +586,11 @@ configManager.set('monitoring.enablePerformanceTracking', true);
 当前优先级从低到高如下：
 
 1. 内建默认值
-2. 环境变量
-3. 来自 `app.json` / `app.config.*` 的 Expo 运行时配置
-4. `global.liteStoreConfig`
-5. 配置管理器的程序化覆盖
+2. 受支持的 `LITE_STORE_*` 环境变量
+3. 一个 Expo 运行时配置来源
+4. 配置管理器的程序化覆盖
+
+运行时配置层不会合并每一种宿主来源。在 Expo、React Native 或测试运行时中，它会按以下顺序选择第一个可用来源：`global.__expoConfig.extra.liteStore`、`expo-constants`（`getConfig()`、`expoConfig`、`manifest` 或 `extra`）、`global.expo.extra.liteStore`，最后才回退到 `global.liteStoreConfig`。
 
 ### `app.json` 示例
 
@@ -699,6 +713,7 @@ import {
 - 默认 `encryption.algorithm` 为 `auto`；当前运行时会在调用方未显式指定 `AES-CTR` 时，把新写入走到 `AES-GCM` 路径；
 - `AES-CTR` 仍保留用于显式配置或旧数据兼容；
 - `requireAuthOnAccess: true` 采用严格语义，当运行时无法真正强制逐次访问认证时，会抛出 `AUTH_ON_ACCESS_UNSUPPORTED`；
+- 严格密钥作用域绝不会从常规主密钥静默派生或替代；若试图原地把既有加密数据升级为严格认证，在应用显式迁移并验证数据前会以 `MIGRATION_FAILED` 失败；
 - Expo Go 支持常规加密存储，但不支持严格的生物识别或逐次访问认证保证。
 
 ## 错误与失败语义
@@ -734,11 +749,12 @@ try {
 | ---------------------------- | ----------------------------------------------- |
 | `EXPO_MODULE_MISSING`        | 缺少必需的 Expo 运行时包                        |
 | `AUTH_ON_ACCESS_UNSUPPORTED` | 当前运行时无法兑现严格逐次访问认证              |
+| `PERMISSION_DENIED`          | 通过明文表面访问加密表，或未用严格认证表面访问严格表/列出严格表时被拒绝 |
 | `TABLE_NOT_FOUND`            | 请求的表不存在                                  |
 | `TABLE_NAME_INVALID`         | 表名为空或不合法                                |
 | `TABLE_COLUMN_INVALID`       | 列定义使用了不支持的类型                        |
 | `QUERY_FAILED`               | 查询引擎执行条件失败                            |
-| `MIGRATION_FAILED`           | 表迁移失败                                      |
+| `MIGRATION_FAILED`           | 表迁移失败，或严格认证需要显式迁移密钥与数据    |
 | `TRANSACTION_IN_PROGRESS`    | 当前表面已经存在一个活动事务                    |
 | `NO_TRANSACTION_IN_PROGRESS` | 没有活动事务却调用了 `commit()` 或 `rollback()` |
 | `LOCK_TIMEOUT`               | 并发写锁获取超时                                |
@@ -750,10 +766,6 @@ try {
 加密辅助流程中的特定失败路径可能会抛出 `CryptoError`。
 
 ## 高级导出
-
-### `plainStorage`
-
-`plainStorage` 暴露底层非加密适配器。它属于高级导出，通常只建议用于调试或低层集成。
 
 ### `CryptoService`
 

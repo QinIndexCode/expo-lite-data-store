@@ -1,6 +1,6 @@
 {
   "name": "expo-lite-data-store",
-  "version": "2.0.2",
+  "version": "3.0.0",
   "main": "dist/cjs/index.js",
   "types": "dist/types/index.d.ts",
   "author": "QinIndexCode",
@@ -37,14 +37,6 @@
       "types": "./dist/types/index.d.ts",
       "import": "./dist/cjs/index.js",
       "require": "./dist/cjs/index.js"
-    },
-    "./dist/js/*": {
-      "import": "./dist/js/*",
-      "require": "./dist/cjs/*"
-    },
-    "./dist/cjs/*": {
-      "import": "./dist/cjs/*",
-      "require": "./dist/cjs/*"
     },
     "./utils/*": {
       "types": "./dist/types/utils/*.d.ts",
@@ -102,7 +94,7 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm run audit:prod && npm run audit:no-high && npm run typecheck && npm run build:all && npm run test:all && npm run smoke:expo-consumer",
     "publish:safe": "npm run build && npm run typecheck && npm publish",
-    "publish:force": "npm publish --ignore-scripts"
+    "publish:force": "npm publish"
   },
   "dependencies": {
     "@noble/ciphers": "~0.6.0",

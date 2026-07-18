@@ -2,7 +2,7 @@
  * @module logger
  * @description Colored console logging utility for development
  * @since 2025-11-19
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 // Detect ANSI color code support
@@ -21,6 +21,11 @@ const blue = supportsColor ? '\x1b[34m' : '';
 const magenta = supportsColor ? '\x1b[35m' : '';
 const cyan = supportsColor ? '\x1b[36m' : '';
 
+const shouldLogNonCriticalMessage = (): boolean =>
+  typeof process === 'undefined' ||
+  process.env.NODE_ENV !== 'test' ||
+  process.env.EXPO_LITE_DATA_STORE_TEST_LOGS === '1';
+
 /**
  * Colored console logger singleton
  */
@@ -29,6 +34,9 @@ class Logger {
    * Success message (green)
    */
   success(message: string, ...args: any[]): void {
+    if (!shouldLogNonCriticalMessage()) {
+      return;
+    }
     console.log(green + message + reset, ...args);
   }
 
@@ -50,6 +58,9 @@ class Logger {
    * Info message (blue)
    */
   info(message: string, ...args: any[]): void {
+    if (!shouldLogNonCriticalMessage()) {
+      return;
+    }
     console.log(blue + message + reset, ...args);
   }
 
@@ -57,6 +68,9 @@ class Logger {
    * Debug message (cyan)
    */
   debug(message: string, ...args: any[]): void {
+    if (!shouldLogNonCriticalMessage()) {
+      return;
+    }
     console.debug(cyan + message + reset, ...args);
   }
 
@@ -64,6 +78,9 @@ class Logger {
    * Highlight message (magenta)
    */
   highlight(message: string, ...args: any[]): void {
+    if (!shouldLogNonCriticalMessage()) {
+      return;
+    }
     console.log(magenta + message + reset, ...args);
   }
 }

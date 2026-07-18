@@ -15,6 +15,8 @@ This `README.md` is the package introduction and documentation index for npm and
 - Simplified Chinese guides end with `.zh-CN.md`
 - Bare `.md` files are repository indexes or internal maintenance documents, not the primary end-user manuals
 
+> **v3 migration:** Version `3.0.0` removes the public `plainStorage` export and unsupported package deep imports. Import the root `db` facade or named APIs from `expo-lite-data-store`; see the [v3 API migration notes](./docs/API.en.md#v3-migration) before upgrading.
+
 ## Supported install contract
 
 Do not treat `npm install expo-lite-data-store` as a complete setup.

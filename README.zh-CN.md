@@ -17,6 +17,8 @@
 - 在原生开发构建或独立应用中支持可选的原生加密加速；
 - 支持从历史 beta 根目录迁移到稳定的 `lite-data-store` 根目录。
 
+> **v3 迁移：**`plainStorage` 和 `expo-lite-data-store/dist/js/...` 等包内深层导入不再属于公开 API。请改从 `expo-lite-data-store` 根入口导入 `db` facade 或命名 API。对以 `encrypted: true` 创建的表，后续调用也必须显式传入 `encrypted: true`；明文表面访问会被拒绝。
+
 ## 支持矩阵
 
 | 运行面                       | 状态                             |
@@ -167,7 +169,7 @@ const activeUsers = await db.findMany('users', {
 - 你预期会频繁追加或覆盖大批量记录；
 - 希望在超过阈值时让运行时自动切分为多个 chunk 文件。
 
-如果初始数据明显超过配置的 chunk 阈值，运行时也可能自动切换到 chunked 存储方式。
+建表时若传入 `initialData`，其序列化大小估算值只有在超过 `chunkSize` 一半时才会自动选择 chunked 模式；默认 `chunkSize` 为 5 MiB，因此默认门槛是超过 2.5 MiB。后续写入不会隐式把单文件表迁移为 chunked；需要转换时请显式设置 `mode: 'chunked'` 或调用 `migrateToChunked()`。
 
 chunked 覆盖写和追加写都带恢复日志，并会清理失败时已经写出的部分 chunk。追加写会先提交元数据、再移除恢复日志；读取遇到不完整 chunk 集合时会明确报错，而不是静默返回部分数据。表元数据采用串行化临时文件发布，并发表写不会吞掉较晚的元数据更新。
 
@@ -347,25 +349,17 @@ const result = await db.verifyCountTable('users');
 当前运行时从低到高按以下顺序合并配置：
 
 1. `defaultConfig` 内建默认值
-2. 环境变量
-3. 来自 `app.json` / `app.config.*` 的 Expo 运行时配置
-4. `global.liteStoreConfig`
-5. 通过 `configManager.setConfig()`、`configManager.updateConfig()`、`configManager.set()` 注入的程序化配置
+2. 受支持的 `LITE_STORE_*` 环境变量
+3. 一个 Expo 运行时配置来源
+4. 通过 `configManager.setConfig()`、`configManager.updateConfig()`、`configManager.set()` 注入的程序化配置
 
-在 Expo 运行时配置内部，加载顺序为：
-
-1. `global.__expoConfig`
-2. `expo-constants.getConfig()`
-3. `Constants.expoConfig`
-4. `Constants.manifest`
-5. `Constants.extra.liteStore`
-6. `global.expo.extra.liteStore`
+运行时配置层不会合并每一种宿主来源。在 Expo、React Native 或测试运行时中，它会按以下顺序选择第一个可用来源：`global.__expoConfig.extra.liteStore`、`expo-constants`（`getConfig()`、`expoConfig`、`manifest` 或 `extra`）、`global.expo.extra.liteStore`，最后才回退到 `global.liteStoreConfig`。
 
 ### 常用运行时配置项
 
 | Key                                    | 默认值            | 作用                                           |
 | -------------------------------------- | ----------------- | ---------------------------------------------- |
-| `chunkSize`                            | `5242880`         | chunk 切分阈值，单位为字节                     |
+| `chunkSize`                            | `5242880`         | 分片目标大小；初始数据自动选 chunked 的门槛为其一半 |
 | `storageFolder`                        | `lite-data-store` | Expo 文件系统下的根目录名                      |
 | `sortMethods`                          | `default`         | 默认排序策略提示                               |
 | `timeout`                              | `10000`           | 部分文件操作的超时时间                         |
@@ -379,6 +373,8 @@ const result = await db.verifyCountTable('users');
 | `autoSync.interval`                    | `30000`           | 自动同步间隔，单位毫秒                         |
 | `autoSync.minItems`                    | `1`               | 触发自动同步前的最小排队项数                   |
 | `autoSync.batchSize`                   | `100`             | 每批自动同步的最大项目数                       |
+
+`storageFolder` 只能是单一目录名，不能包含路径分隔符、编码后的分隔符或路径穿越名称。请在首次存储操作前完成配置；适配器运行期间修改该值会被明确拒绝，避免不同根目录间混用元数据和缓存状态。
 
 ### 当前支持的环境变量
 
@@ -448,6 +444,8 @@ await db.createTable('profiles', {
 
 `requireAuthOnAccess: true` 采用严格语义；当当前运行时无法真正强制“每次访问都认证”时，库会直接抛出 `AUTH_ON_ACCESS_UNSUPPORTED`。
 
+严格访问使用独立的密钥作用域，不能把已有常规加密表原地升级。应由应用显式迁移数据：在旧密钥仍可用时通过常规加密表面读取数据，写入并验证一个新建的严格认证表，再退役旧表和旧密钥。库绝不会静默复用常规主密钥来满足严格访问。
+
 这意味着：
 
 - Expo Go 适合验证明文存储、chunked 存储和常规加密存储；
@@ -456,12 +454,14 @@ await db.createTable('profiles', {
 
 ### 既有设备数据
 
-稳定 2.x 运行时会继续兼容较早 beta 版本产生的设备端数据格式，包括：
+稳定 3.x 运行时会继续兼容较早 beta 版本产生的设备端数据格式，包括：
 
 - 元数据文件；
 - 明文表文件；
 - chunked 表布局；
 - 历史 beta 产生的加密负载格式。
+
+上述兼容不代表会把常规加密数据转换为严格访问数据。若未经过应用控制的数据迁移就为已有常规加密表启用 `requireAuthOnAccess`，操作会以 `MIGRATION_FAILED` 失败。
 
 当稳定默认根目录 `lite-data-store` 尚不存在，而旧目录 `expo-lite-data` 存在时，运行时会自动尝试兼容迁移。
 

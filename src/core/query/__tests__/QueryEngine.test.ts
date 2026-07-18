@@ -1,6 +1,7 @@
 // src/core/query/__tests__/QueryEngine.test.ts
 
 import { QueryEngine } from '../QueryEngine';
+import { isQueryOperator, isUpdateOperator } from '../../../utils/specialOperators';
 
 describe('QueryEngine', () => {
   // 测试数据
@@ -69,6 +70,13 @@ describe('QueryEngine', () => {
 
       const result2 = QueryEngine.filter(testData, { name: { $like: '%2' } });
       expect(result2).toEqual([testData[1]]);
+    });
+
+    it('matches wildcard-heavy LIKE patterns without regular-expression backtracking', () => {
+      const pattern = `${'%a'.repeat(24)}%b`;
+      const result = QueryEngine.filter([{ value: 'a'.repeat(48) }], { value: { $like: pattern } });
+
+      expect(result).toEqual([]);
     });
 
     it('should handle boolean filtering', () => {
@@ -233,9 +241,33 @@ describe('QueryEngine', () => {
       expect(Object.keys(result)).toEqual(['']);
       expect(result[''].length).toBe(5);
     });
+
+    it('keeps prototype-like group keys as ordinary groups', () => {
+      const result = QueryEngine.groupBy(
+        [
+          { kind: '__proto__', id: 1 },
+          { kind: '__proto__', id: 2 },
+        ],
+        'kind'
+      );
+
+      expect(Object.prototype.hasOwnProperty.call(result, '__proto__')).toBe(true);
+      expect(result['__proto__']).toHaveLength(2);
+    });
   });
 
   describe('Edge Case Tests', () => {
+    it('does not treat inherited object properties as operators', () => {
+      expect(isQueryOperator('toString')).toBe(false);
+      expect(isUpdateOperator('__proto__')).toBe(false);
+    });
+
+    it('rejects prototype keys in update payloads', () => {
+      const payload = JSON.parse('{"$set":{"__proto__":{"isAdmin":true}}}');
+
+      expect(() => QueryEngine.update({ id: 'record-1' }, payload)).toThrow('Unsafe update field: __proto__');
+    });
+
     it('should handle empty conditions', () => {
       const result = QueryEngine.filter(testData, undefined);
       expect(result).toEqual(testData);

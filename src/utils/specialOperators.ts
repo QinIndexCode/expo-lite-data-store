@@ -2,7 +2,7 @@
  * @module specialOperators
  * @description Query and update operator definitions and handlers
  * @since 2025-12-12
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 /**
@@ -14,6 +14,25 @@ export type QueryOperator = '$and' | '$or' | '$eq' | '$ne' | '$gt' | '$gte' | '$
  * 更新操作符类型定义
  */
 export type UpdateOperator = '$inc' | '$set' | '$unset' | '$push' | '$pull' | '$addToSet';
+
+const UNSAFE_UPDATE_FIELD_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
+
+const assertSafeUpdateFieldName = (field: string): void => {
+  if (UNSAFE_UPDATE_FIELD_NAMES.has(field)) {
+    throw new Error(`Unsafe update field: ${field}`);
+  }
+};
+
+const safeObjectEntries = (value: unknown): Array<[string, unknown]> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return [];
+  }
+
+  return Object.entries(value).map(([field, entryValue]) => {
+    assertSafeUpdateFieldName(field);
+    return [field, entryValue];
+  });
+};
 
 /**
  * 所有特殊操作符的集合
@@ -48,14 +67,14 @@ export const SPECIAL_OPERATORS = {
  * 检查是否为查询操作符
  */
 export function isQueryOperator(key: string): key is QueryOperator {
-  return key in SPECIAL_OPERATORS.QUERY;
+  return Object.prototype.hasOwnProperty.call(SPECIAL_OPERATORS.QUERY, key);
 }
 
 /**
  * 检查是否为更新操作符
  */
 export function isUpdateOperator(key: string): key is UpdateOperator {
-  return key in SPECIAL_OPERATORS.UPDATE;
+  return Object.prototype.hasOwnProperty.call(SPECIAL_OPERATORS.UPDATE, key);
 }
 
 /**
@@ -87,13 +106,14 @@ export function separateUpdateOperators(updateData: UpdateData): {
   regularFields: Record<string, any>;
   operators: Partial<Record<UpdateOperator, any>>;
 } {
-  const regularFields: Record<string, any> = {};
-  const operators: Partial<Record<UpdateOperator, any>> = {};
+  const regularFields: Record<string, any> = Object.create(null);
+  const operators: Partial<Record<UpdateOperator, any>> = Object.create(null);
 
   for (const [key, value] of Object.entries(updateData)) {
     if (isUpdateOperator(key)) {
       operators[key] = value;
     } else {
+      assertSafeUpdateFieldName(key);
       regularFields[key] = value;
     }
   }
@@ -114,7 +134,7 @@ export function processUpdateOperators<T extends Record<string, any>>(originalDa
 
   // Process特殊操作符
   if (operators.$inc) {
-    for (const [field, increment] of Object.entries(operators.$inc)) {
+    for (const [field, increment] of safeObjectEntries(operators.$inc)) {
       if (typeof increment === 'number') {
         const currentValue = typeof result[field] === 'number' ? result[field] : 0;
         result[field] = currentValue + increment;
@@ -123,7 +143,7 @@ export function processUpdateOperators<T extends Record<string, any>>(originalDa
   }
 
   if (operators.$set) {
-    for (const [field, value] of Object.entries(operators.$set)) {
+    for (const [field, value] of safeObjectEntries(operators.$set)) {
       result[field] = value;
     }
   }
@@ -131,13 +151,14 @@ export function processUpdateOperators<T extends Record<string, any>>(originalDa
   if (operators.$unset) {
     if (Array.isArray(operators.$unset)) {
       for (const field of operators.$unset) {
+        assertSafeUpdateFieldName(field);
         delete result[field];
       }
     }
   }
 
   if (operators.$push) {
-    for (const [field, value] of Object.entries(operators.$push)) {
+    for (const [field, value] of safeObjectEntries(operators.$push)) {
       if (!Array.isArray(result[field])) {
         result[field] = [];
       }
@@ -146,7 +167,7 @@ export function processUpdateOperators<T extends Record<string, any>>(originalDa
   }
 
   if (operators.$pull) {
-    for (const [field, condition] of Object.entries(operators.$pull)) {
+    for (const [field, condition] of safeObjectEntries(operators.$pull)) {
       if (Array.isArray(result[field])) {
         result[field] = result[field].filter(item => {
           // Simple value comparison
@@ -166,7 +187,7 @@ export function processUpdateOperators<T extends Record<string, any>>(originalDa
   }
 
   if (operators.$addToSet) {
-    for (const [field, value] of Object.entries(operators.$addToSet)) {
+    for (const [field, value] of safeObjectEntries(operators.$addToSet)) {
       if (!Array.isArray(result[field])) {
         result[field] = [];
       }

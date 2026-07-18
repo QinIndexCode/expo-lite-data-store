@@ -1,5 +1,6 @@
 import { configManager } from '../../core/config/ConfigManager';
-import { createTable, db, findOne, insert, plainStorage, read } from '../../expo-lite-data-store';
+import { plainStorage } from '../../core/db';
+import { createTable, db, findOne, insert, read } from '../../expo-lite-data-store';
 import { getRootPath, resetRootPathState } from '../../utils/ROOTPath';
 import { getFileSystem } from '../../utils/fileSystemCompat';
 

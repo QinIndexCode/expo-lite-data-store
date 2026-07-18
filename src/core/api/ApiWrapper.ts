@@ -2,7 +2,7 @@
  * @module ApiWrapper
  * @description API wrapper using facade pattern to coordinate components
  * @since 2025-11-28
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import { ApiResponse } from '../../types/apiResponse';
@@ -11,6 +11,7 @@ import type { CreateTableOptions, ReadOptions, WriteOptions, WriteResult } from 
 import { ApiRouter } from './ApiRouter';
 import { ErrorHandler as ApiErrorHandler } from './ApiErrorHandler';
 import { RateLimitWrapper } from './RateLimitWrapper';
+import type { RateLimitStatus } from './RateLimiter';
 import { ValidationWrapper } from './ValidationWrapper';
 
 /**
@@ -54,6 +55,39 @@ export class ApiWrapper {
     this.errorHandler = new ApiErrorHandler();
   }
 
+  private createRateLimitExceededResponse<T>(
+    rateLimitStatus: RateLimitStatus,
+    requestId: string,
+    startTime: number,
+    apiVersion: string
+  ): ApiResponse<T> {
+    return {
+      success: false,
+      data: undefined,
+      error: {
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: 'Rate limit exceeded',
+        details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
+        suggestion: 'Reduce the frequency of requests or contact support to increase your rate limit',
+      },
+      meta: {
+        requestId,
+        timestamp: Date.now(),
+        duration: Date.now() - startTime,
+        version: apiVersion,
+      },
+      status: 'error',
+    };
+  }
+
+  private getWriteTokenCost(data: Record<string, any> | Record<string, any>[]): number {
+    return Array.isArray(data) ? Math.min(data.length, 10) : 3;
+  }
+
+  private getBulkWriteTokenCost(totalRecords: number): number {
+    return Math.min(totalRecords * 2, 20);
+  }
+
   /**
    * 创建表
    * @param tableName 表名
@@ -77,24 +111,16 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
+      this.validationWrapper.validateTableName(tableName);
+      if (options?.initialData !== undefined) {
+        this.validationWrapper.validateInitialData(options.initialData);
+      }
+
       // Check限流
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 5); // Create表消耗5个令牌
       if (!rateLimitStatus.allowed) {
-        return this.errorHandler.handleError(
-          {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded',
-            details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
-            suggestion: 'Reduce the frequency of requests or contact support to increase your rate limit',
-          },
-          requestId,
-          startTime,
-          apiVersion
-        );
+        return this.createRateLimitExceededResponse<void>(rateLimitStatus, requestId, startTime, apiVersion);
       }
-
-      // Request validation
-      this.validationWrapper.validateTableName(tableName);
 
       await this.storageAdapter.createTable(tableName, options);
 
@@ -131,17 +157,7 @@ export class ApiWrapper {
       // Check限流
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 3); // Delete表消耗3个令牌
       if (!rateLimitStatus.allowed) {
-        return this.errorHandler.handleError(
-          {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded',
-            details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
-            suggestion: 'Reduce the frequency of requests or contact support to increase your rate limit',
-          },
-          requestId,
-          startTime,
-          apiVersion
-        );
+        return this.createRateLimitExceededResponse<void>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
       // Request validation
@@ -182,23 +198,7 @@ export class ApiWrapper {
       // Check限流
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1); // Check表存在性消耗1个令牌
       if (!rateLimitStatus.allowed) {
-        return {
-          success: false,
-          data: undefined,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded',
-            details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
-            suggestion: 'Reduce the frequency of requests or contact support to increase your rate limit',
-          },
-          meta: {
-            requestId,
-            timestamp: Date.now(),
-            duration: Date.now() - startTime,
-            version: apiVersion,
-          },
-          status: 'success',
-        };
+        return this.createRateLimitExceededResponse<boolean>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
       // Request validation
@@ -238,23 +238,7 @@ export class ApiWrapper {
       // Check限流
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2); // List tables costs 2 tokens
       if (!rateLimitStatus.allowed) {
-        return {
-          success: false,
-          data: undefined,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded',
-            details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
-            suggestion: 'Reduce the frequency of requests or contact support to increase your rate limit',
-          },
-          meta: {
-            requestId,
-            timestamp: Date.now(),
-            duration: Date.now() - startTime,
-            version: apiVersion,
-          },
-          status: 'success',
-        };
+        return this.createRateLimitExceededResponse<string[]>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
       const result = await this.storageAdapter.listTables();
@@ -297,30 +281,14 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      const tokens = Array.isArray(data) ? Math.min(data.length, 10) : 3;
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, tokens);
-      if (!rateLimitStatus.allowed) {
-        return {
-          success: false,
-          data: undefined,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded',
-            details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
-            suggestion: 'Reduce of frequency of requests or contact support to increase your rate limit',
-          },
-          meta: {
-            requestId,
-            timestamp: Date.now(),
-            duration: Date.now() - startTime,
-            version: apiVersion,
-          },
-          status: 'success',
-        };
-      }
-
       this.validationWrapper.validateTableName(tableName);
       this.validationWrapper.validateWriteData(data);
+
+      const tokens = this.getWriteTokenCost(data);
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, tokens);
+      if (!rateLimitStatus.allowed) {
+        return this.createRateLimitExceededResponse<WriteResult>(rateLimitStatus, requestId, startTime, apiVersion);
+      }
 
       const result = await this.storageAdapter.overwrite(tableName, data, options);
 
@@ -363,32 +331,15 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
-      // Check限流
-      const tokens = Array.isArray(data) ? Math.min(data.length, 10) : 3; // Write操作消耗3-10个令牌
-      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, tokens);
-      if (!rateLimitStatus.allowed) {
-        return {
-          success: false,
-          data: undefined,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded',
-            details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
-            suggestion: 'Reduce the frequency of requests or contact support to increase your rate limit',
-          },
-          meta: {
-            requestId,
-            timestamp: Date.now(),
-            duration: Date.now() - startTime,
-            version: apiVersion,
-          },
-          status: 'success',
-        };
-      }
-
-      // Request validation
       this.validationWrapper.validateTableName(tableName);
       this.validationWrapper.validateWriteData(data);
+
+      // Check限流
+      const tokens = this.getWriteTokenCost(data); // Write操作消耗3-10个令牌
+      const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, tokens);
+      if (!rateLimitStatus.allowed) {
+        return this.createRateLimitExceededResponse<WriteResult>(rateLimitStatus, requestId, startTime, apiVersion);
+      }
 
       const result = await this.storageAdapter.write(tableName, data, options);
 
@@ -431,23 +382,7 @@ export class ApiWrapper {
       // Check限流
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2); // Read操作消耗2个令牌
       if (!rateLimitStatus.allowed) {
-        return {
-          success: false,
-          data: undefined,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded',
-            details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
-            suggestion: 'Reduce the frequency of requests or contact support to increase your rate limit',
-          },
-          meta: {
-            requestId,
-            timestamp: Date.now(),
-            duration: Date.now() - startTime,
-            version: apiVersion,
-          },
-          status: 'success',
-        };
+        return this.createRateLimitExceededResponse<Record<string, any>[]>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
       // Request validation
@@ -488,23 +423,7 @@ export class ApiWrapper {
       // Check限流
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1); // Count operation costs 1 token
       if (!rateLimitStatus.allowed) {
-        return {
-          success: false,
-          data: undefined,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded',
-            details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
-            suggestion: 'Reduce the frequency of requests or contact support to increase your rate limit',
-          },
-          meta: {
-            requestId,
-            timestamp: Date.now(),
-            duration: Date.now() - startTime,
-            version: apiVersion,
-          },
-          status: 'success',
-        };
+        return this.createRateLimitExceededResponse<number>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
       // Request validation
@@ -551,23 +470,12 @@ export class ApiWrapper {
       // Check限流
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 1); // Find单条记录消耗1个令牌
       if (!rateLimitStatus.allowed) {
-        return {
-          success: false,
-          data: null,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded',
-            details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
-            suggestion: 'Reduce the frequency of requests or contact support to increase your rate limit',
-          },
-          meta: {
-            requestId,
-            timestamp: Date.now(),
-            duration: Date.now() - startTime,
-            version: apiVersion,
-          },
-          status: 'success',
-        };
+        return this.createRateLimitExceededResponse<Record<string, any> | null>(
+          rateLimitStatus,
+          requestId,
+          startTime,
+          apiVersion
+        );
       }
 
       // Request validation
@@ -617,23 +525,7 @@ export class ApiWrapper {
       // Check限流
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 2); // Find多条记录消耗2个令牌
       if (!rateLimitStatus.allowed) {
-        return {
-          success: false,
-          data: undefined,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded',
-            details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
-            suggestion: 'Reduce the frequency of requests or contact support to increase your rate limit',
-          },
-          meta: {
-            requestId,
-            timestamp: Date.now(),
-            duration: Date.now() - startTime,
-            version: apiVersion,
-          },
-          status: 'success',
-        };
+        return this.createRateLimitExceededResponse<Record<string, any>[]>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
       // Request validation
@@ -694,39 +586,15 @@ export class ApiWrapper {
     const apiVersion = this.apiRouter.getApiVersion(version);
 
     try {
+      this.validationWrapper.validateTableName(tableName);
+      const totalRecords = this.validationWrapper.validateBulkOperations(operations);
+
       // Check限流
-      const totalOperations = operations.reduce((count, op) => {
-        if (op.type === 'insert') {
-          const insertOp = op as { type: 'insert'; data: Record<string, any> | Record<string, any>[] };
-          return count + (Array.isArray(insertOp.data) ? insertOp.data.length : 1);
-        }
-        return count + 1;
-      }, 0);
-      const tokens = Math.min(totalOperations * 2, 20); // Batch operation costs 2-20 tokens
+      const tokens = this.getBulkWriteTokenCost(totalRecords); // Batch operation costs 2-20 tokens
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, tokens);
       if (!rateLimitStatus.allowed) {
-        return {
-          success: false,
-          data: undefined,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded',
-            details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
-            suggestion: 'Reduce the frequency of requests or contact support to increase your rate limit',
-          },
-          meta: {
-            requestId,
-            timestamp: Date.now(),
-            duration: Date.now() - startTime,
-            version: apiVersion,
-          },
-          status: 'success',
-        };
+        return this.createRateLimitExceededResponse<WriteResult>(rateLimitStatus, requestId, startTime, apiVersion);
       }
-
-      // Request validation
-      this.validationWrapper.validateTableName(tableName);
-      this.validationWrapper.validateBulkOperations(operations);
 
       const result = await this.storageAdapter.bulkWrite(tableName, operations);
 
@@ -767,23 +635,7 @@ export class ApiWrapper {
       // Check限流
       const rateLimitStatus = this.rateLimitWrapper.checkRateLimit(clientId, 10); // Migration operation costs 10 tokens
       if (!rateLimitStatus.allowed) {
-        return {
-          success: false,
-          data: undefined,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded',
-            details: `Too many requests. Please try again after ${rateLimitStatus.retryAfter}ms.`,
-            suggestion: 'Reduce the frequency of requests or contact support to increase your rate limit',
-          },
-          meta: {
-            requestId,
-            timestamp: Date.now(),
-            duration: Date.now() - startTime,
-            version: apiVersion,
-          },
-          status: 'success',
-        };
+        return this.createRateLimitExceededResponse<void>(rateLimitStatus, requestId, startTime, apiVersion);
       }
 
       // Request validation

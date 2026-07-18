@@ -2,7 +2,7 @@
  * @module PathHelper
  * @description Independent path management to avoid circular dependencies
  * @since 2026-04-02
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import logger from './logger';
@@ -13,6 +13,26 @@ import { getDocumentDirectory, getFileSystem } from './fileSystemCompat';
  */
 const DEFAULT_STORAGE_FOLDER = 'lite-data-store';
 const LEGACY_STORAGE_FOLDER = 'expo-lite-data';
+
+/**
+ * A storage root is intentionally a single directory name. Allowing path
+ * separators here would let configuration escape Expo's document directory.
+ */
+export const isValidStorageFolderName = (folder: unknown): folder is string => {
+  if (typeof folder !== 'string' || folder.trim().length === 0 || folder === '.' || folder === '..') {
+    return false;
+  }
+
+  // Storage paths are file URIs on native runtimes. Reject URI escapes too,
+  // because an encoded dot segment can otherwise normalize outside the root.
+  return !(/[\\/\u0000%]/u.test(folder));
+};
+
+export function assertValidStorageFolderName(folder: unknown): asserts folder is string {
+  if (!isValidStorageFolderName(folder)) {
+    throw new Error('Invalid storageFolder: use one non-empty directory name without path separators or traversal');
+  }
+}
 
 /**
  * Path helper class to manage application paths
@@ -39,6 +59,8 @@ export class PathHelper {
    * Set storage folder name
    */
   setStorageFolder(folder: string): void {
+    assertValidStorageFolderName(folder);
+
     if (this.storageFolder !== folder) {
       this.storageFolder = folder;
       this.rootPath = null;

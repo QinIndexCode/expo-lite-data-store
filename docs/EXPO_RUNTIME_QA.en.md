@@ -114,11 +114,17 @@ Important files:
 - `<channel>/<profile>/<mode>/events.jsonl`
   Accepted phase events for that exact lane and run ID.
 - `<channel>/<profile>/<mode>/logcat.txt`
-  Full captured logcat stream for the phase.
+  Tail of the captured phase logcat stream, bounded to the latest 512 KiB.
 - `<channel>/<profile>/<mode>/screenshots/`
   Launch, summary, and failure screenshots when capture succeeds.
 
 The release source of truth is `summary.json`, with `cases.jsonl` and per-phase artifacts used for drill-down.
+
+### Artifact hygiene
+
+- Captured command and stream logs, plus JSONL case/event files, retain only their latest 512 KiB. They are diagnostic tails, not complete historical logs.
+- Default artifact runs are written below `artifacts/expo-runtime-qa/`. After a run completes, the harness retains the three newest completed timestamped runs and prunes only older safe completed runs. In-progress, non-timestamped, and symlinked locations are not candidates for automatic pruning.
+- Passing `--artifacts-dir=PATH` opts out of automatic retention. Custom artifact directories are never automatically pruned by the harness.
 
 ## Verdict Interpretation
 

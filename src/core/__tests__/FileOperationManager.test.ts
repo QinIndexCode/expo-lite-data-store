@@ -43,6 +43,17 @@ describe('FileOperationManager', () => {
       expect(chunkedFileHandler).toBeDefined();
     });
 
+    it('rejects path-like table names before creating handlers or deleting directories', async () => {
+      expect(() => fileOperationManager.getSingleFileHandler('../outside')).toThrow('Invalid table name');
+      await expect(fileOperationManager.deleteDirectory('../outside')).rejects.toMatchObject({
+        code: 'TABLE_NAME_INVALID',
+      });
+    });
+
+    it('rejects the case-insensitive metadata table name', () => {
+      expect(() => fileOperationManager.getSingleFileHandler('META')).toThrow('reserved for internal storage');
+    });
+
     it('should be able to determine if chunked mode should be used', () => {
       // Small data should not use chunked mode
       const smallData = [{ id: 1, name: 'test' }];

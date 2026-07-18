@@ -2,10 +2,11 @@
  * @module configValidator
  * @description Configuration validator for ConfigManager parameters
  * @since 2025-11-19
- * @version 2.0.1
+ * @version 3.0.0
  */
 import { configManager } from '../core/config/ConfigManager';
 import defaultConfig from '../defaultConfig';
+import { isValidStorageFolderName } from './PathHelper';
 
 /**
  * 配置验证结果接口
@@ -79,8 +80,8 @@ export class ConfigValidator {
 
     // ValidatestorageFolder
     if (config.storageFolder !== undefined) {
-      if (typeof config.storageFolder !== 'string') {
-        result.errors.push('storageFolder must be a string');
+      if (!isValidStorageFolderName(config.storageFolder)) {
+        result.errors.push('storageFolder must be one non-empty directory name without path separators or traversal');
         result.isValid = false;
       }
     }
@@ -391,7 +392,7 @@ export class ConfigValidator {
       config.chunkSize = defaultConfig.chunkSize;
     }
 
-    if (typeof config.storageFolder !== 'string') {
+    if (!isValidStorageFolderName(config.storageFolder)) {
       config.storageFolder = defaultConfig.storageFolder;
     }
 

@@ -24,6 +24,8 @@ describe('expo runtime QA UI template', () => {
     expect(source).toContain('primeNativeCryptoModule();');
     expect(source).toContain('formatClipboardReport(report)');
     expect(source).toContain('const copyResult = async () =>');
+    expect(source).not.toMatch(/\bplainStorage\b/);
+    expect(source).not.toMatch(/\.metadataManager\b/);
   });
 
   it('keeps single-package source free of managed-compatible extras', () => {

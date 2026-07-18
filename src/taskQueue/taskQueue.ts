@@ -2,7 +2,7 @@
  * @module taskQueue
  * @description Task queue management system for asynchronous operations
  * @since 2025-11-28
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 //

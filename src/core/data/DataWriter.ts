@@ -2,7 +2,7 @@
  * @module DataWriter
  * @description Data writer handling insert, overwrite, update, and delete operations
  * @since 2025-11-19
- * @version 2.0.1
+ * @version 3.0.0
  */
 import { configManager } from '../config/ConfigManager';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
@@ -27,6 +27,7 @@ export class DataWriter {
   private metadataManager: IMetadataManager;
   private fileOperationManager: FileOperationManager;
   private countValidationCache = new Map<string, { lastCheckTime: number; isAccurate: boolean }>();
+  private countValidationInFlight = new Map<string, Promise<void>>();
   private readonly VALIDATION_INTERVAL = 5 * 60 * 1000;
   private readonly MAX_VALIDATION_CACHE_SIZE = 100;
   private readonly LOCK_TIMEOUT = 30 * 1000;
@@ -103,6 +104,50 @@ export class DataWriter {
   private getChunkedHandler(tableName: string): ChunkedFileHandler {
     assertValidTableName(tableName);
     return new ChunkedFileHandler(tableName, this.metadataManager);
+  }
+
+  private getTableArtifactPaths(tableName: string): {
+    singleFile: string;
+    singleTempFile: string;
+    chunkDirectory: string;
+    journals: string[];
+  } {
+    assertValidTableName(tableName);
+    const tablePath = `${getRootPathSync()}${tableName}`;
+    return {
+      singleFile: `${tablePath}.ldb`,
+      singleTempFile: `${tablePath}.ldb.tmp`,
+      chunkDirectory: `${tablePath}/`,
+      journals: [
+        `${tablePath}.overwrite-journal`,
+        `${tablePath}.overwrite-journal.tmp`,
+        `${tablePath}.append-journal`,
+        `${tablePath}.append-journal.tmp`,
+      ],
+    };
+  }
+
+  private async deleteTableArtifact(path: string, description: string): Promise<void> {
+    await withTimeout(getFileSystem().deleteAsync(path, { idempotent: true }), 10000, description);
+  }
+
+  /**
+   * Remove every physical representation before deleting metadata. Delete
+   * non-authoritative artifacts first so a cleanup failure leaves the current
+   * table and its metadata available for retry or recovery.
+   */
+  private async purgeTableArtifacts(tableName: string, mode?: 'single' | 'chunked'): Promise<void> {
+    const { singleFile, singleTempFile, chunkDirectory, journals } = this.getTableArtifactPaths(tableName);
+    const paths =
+      mode === 'single'
+        ? [chunkDirectory, ...journals, singleTempFile, singleFile]
+        : mode === 'chunked'
+          ? [singleFile, singleTempFile, ...journals, chunkDirectory]
+          : [singleFile, chunkDirectory, singleTempFile, ...journals];
+
+    for (const path of paths) {
+      await this.deleteTableArtifact(path, `delete table artifact ${path}`);
+    }
   }
 
   private async persistMetadataIfSupported(): Promise<void> {
@@ -247,6 +292,7 @@ export class DataWriter {
             encryptedFields: options.encryptedFields || [],
             encrypted: options.encrypted || false,
             encryptFullTable: options.encryptFullTable || false,
+            requireAuthOnAccess: options.requireAuthOnAccess === true,
           });
           await this.persistMetadataIfSupported();
         } finally {
@@ -275,19 +321,7 @@ export class DataWriter {
         try {
           const tableMeta = this.metadataManager.get(tableName);
 
-          if (tableMeta?.mode === 'chunked') {
-            const handler = this.getChunkedHandler(tableName);
-            await withTimeout(handler.clear(), 10000, `delete chunked table ${tableName}`);
-          } else {
-            await withTimeout(
-              Promise.allSettled([
-                this.getSingleFile(tableName).delete(),
-                getFileSystem().deleteAsync(`${getRootPathSync()}${tableName}`, { idempotent: true }),
-              ]),
-              10000,
-              `delete table ${tableName}`
-            );
-          }
+          await this.purgeTableArtifacts(tableName, tableMeta?.mode);
 
           this.indexManager.clearTableIndexes(tableName);
           this.metadataManager.delete(tableName);
@@ -297,6 +331,40 @@ export class DataWriter {
         }
       },
       error => StorageErrorHandler.createTableError('delete', tableName, error)
+    );
+  }
+
+  /**
+   * Convert a single-file table while holding the same table lock used by
+   * writes, so a migration cannot snapshot past a concurrent append.
+   */
+  async migrateToChunked(tableName: string): Promise<void> {
+    return StorageErrorHandler.handleAsyncError(
+      async () => {
+        assertValidTableName(tableName);
+        const releaseLock = await this.acquireLock(tableName);
+
+        try {
+          await this.fileOperationManager.checkPermissions();
+          const tableMeta = this.metadataManager.get(tableName);
+          if (!tableMeta) {
+            throw new StorageError(`Table ${tableName} not found`, 'TABLE_NOT_FOUND');
+          }
+          if (tableMeta.mode === 'chunked') {
+            return;
+          }
+
+          const finalCount = await this.writeToForcedChunkedTable(tableName, []);
+          await this.updateTableMetadata(tableName, finalCount, true);
+        } finally {
+          releaseLock();
+        }
+      },
+      error =>
+        new StorageError(`Failed to migrate table ${tableName} to chunked mode`, 'MIGRATION_FAILED', {
+          cause: error,
+          suggestion: 'Retry after checking storage permissions and available space.',
+        })
     );
   }
 
@@ -330,7 +398,7 @@ export class DataWriter {
 
           await this.updateIndexes(tableName, items, options?.mode === 'overwrite');
 
-          await this.updateTableMetadata(tableName, writeResult.finalCount);
+          await this.updateTableMetadata(tableName, writeResult.finalCount, writeResult.isChunked);
 
           return {
             written: items.length,
@@ -370,6 +438,9 @@ export class DataWriter {
 
     if (tableMeta?.mode === 'chunked') {
       finalCount = await this.writeToChunkedTable(tableName, items, options);
+      isChunked = true;
+    } else if (options?.forceChunked) {
+      finalCount = await this.writeToForcedChunkedTable(tableName, items, options);
       isChunked = true;
     } else {
       finalCount = await this.writeToSingleFileTable(tableName, items, options);
@@ -413,6 +484,43 @@ export class DataWriter {
     return final.length;
   }
 
+  /**
+   * Move a single-file table to chunked storage while its table lock is held.
+   * The old file is removed only after the chunked replacement is durable.
+   */
+  private async writeToForcedChunkedTable(
+    tableName: string,
+    items: Record<string, any>[],
+    options?: WriteOptions & { directWrite?: boolean }
+  ): Promise<number> {
+    const originalMetadata = this.metadataManager.get(tableName);
+    const singleFile = this.getSingleFile(tableName);
+    const existing =
+      options?.mode === 'overwrite'
+        ? []
+        : await withTimeout(singleFile.read(), 10000, `read single file table ${tableName} before chunk migration`);
+    const finalData = options?.mode === 'overwrite' ? items : [...existing, ...items];
+    const chunkedHandler = this.getChunkedHandler(tableName);
+
+    await withTimeout(chunkedHandler.write(finalData), 10000, `write forced chunked table ${tableName}`);
+
+    const { singleFile: singleFilePath, singleTempFile } = this.getTableArtifactPaths(tableName);
+    try {
+      await this.deleteTableArtifact(singleTempFile, `delete migrated single-file temp artifact for ${tableName}`);
+      await this.deleteTableArtifact(singleFilePath, `delete migrated single file table ${tableName}`);
+    } catch (error) {
+      // The source file remains authoritative until cleanup succeeds. Restore
+      // the metadata that ChunkedFileHandler updated while staging the copy.
+      if (originalMetadata) {
+        this.metadataManager.update(tableName, originalMetadata);
+        await this.persistMetadataIfSupported();
+      }
+      throw error;
+    }
+
+    return finalData.length;
+  }
+
   private async updateIndexes(tableName: string, items: Record<string, any>[], isOverwrite: boolean): Promise<void> {
     try {
       if (isOverwrite) {
@@ -437,10 +545,16 @@ export class DataWriter {
     }
   }
 
-  private async updateTableMetadata(tableName: string, newCount: number): Promise<void> {
+  private async updateTableMetadata(tableName: string, newCount: number, isChunked: boolean): Promise<void> {
     this.metadataManager.update(tableName, {
       count: newCount,
       updatedAt: Date.now(),
+      ...(isChunked
+        ? {
+            mode: 'chunked',
+            path: `${tableName}/`,
+          }
+        : {}),
     });
     await this.persistMetadataIfSupported();
   }
@@ -519,15 +633,12 @@ export class DataWriter {
     }
 
     const metadataCount = this.metadataManager.count(tableName);
-    await this.validateCountAsync(tableName);
+    this.scheduleCountValidation(tableName);
 
     return metadataCount;
   }
 
-  /**
-   * Async count validation (non-blocking, lazy strategy)
-   */
-  private async validateCountAsync(tableName: string): Promise<void> {
+  private scheduleCountValidation(tableName: string): void {
     const validationInfo = this.countValidationCache.get(tableName);
     const now = Date.now();
 
@@ -535,9 +646,44 @@ export class DataWriter {
       return;
     }
 
+    if (this.countValidationInFlight.has(tableName)) {
+      return;
+    }
+
+    const validation = this.validateCountAsync(tableName);
+    this.countValidationInFlight.set(tableName, validation);
+    void validation
+      .finally(() => {
+        if (this.countValidationInFlight.get(tableName) === validation) {
+          this.countValidationInFlight.delete(tableName);
+        }
+      })
+      .catch(() => undefined);
+  }
+
+  /**
+   * Async count validation (non-blocking, lazy strategy)
+   */
+  private async validateCountAsync(tableName: string): Promise<void> {
+    const now = Date.now();
+
     try {
       const tableMeta = this.metadataManager.get(tableName);
       if (!tableMeta) return;
+
+      // A full-table encrypted table intentionally stores one physical envelope
+      // for many logical records. Only the encrypted adapter can verify its
+      // logical count, so the raw-file validator must not overwrite it.
+      if (tableMeta.encryptFullTable) {
+        this.countValidationCache.set(tableName, { lastCheckTime: now, isAccurate: true });
+        this.cleanupValidationCache();
+        return;
+      }
+
+      const expectedMetadata = {
+        count: this.metadataManager.count(tableName),
+        updatedAt: tableMeta.updatedAt,
+      };
 
       if (now - tableMeta.updatedAt > 24 * 60 * 60 * 1000) {
         this.countValidationCache.set(tableName, { lastCheckTime: now, isAccurate: true });
@@ -545,7 +691,16 @@ export class DataWriter {
       }
 
       const actualCount = await this.getActualCount(tableName);
-      const metadataCount = this.metadataManager.count(tableName);
+      const currentMetadata = this.metadataManager.get(tableName);
+      if (
+        !currentMetadata ||
+        currentMetadata.updatedAt !== expectedMetadata.updatedAt ||
+        currentMetadata.count !== expectedMetadata.count
+      ) {
+        return;
+      }
+
+      const metadataCount = expectedMetadata.count;
 
       this.countValidationCache.set(tableName, {
         lastCheckTime: now,

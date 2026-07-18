@@ -2,12 +2,13 @@
  * @module ConfigManager
  * @description Configuration manager supporting multiple configuration sources
  * @since 2025-11-19
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import defaultConfig from '../../defaultConfig';
 import { LiteStoreConfig, DeepPartial } from '../../types/config';
 import logger from '../../utils/logger';
+import { assertValidStorageFolderName, pathHelper } from '../../utils/PathHelper';
 // Inline basic logger to avoid Metro bundler import issues
 
 type LiteStoreExtraConfig = {
@@ -44,7 +45,7 @@ export class ConfigManager {
    */
   private constructor() {
     // Initialize时加载默认配置
-    this.currentConfig = { ...defaultConfig };
+    this.currentConfig = this.sanitizeConfigValue(defaultConfig as LiteStoreConfig);
     this.loadConfig();
   }
 
@@ -112,7 +113,7 @@ export class ConfigManager {
    */
   private loadConfig(): void {
     // 1. 从默认配置开始
-    let mergedConfig: LiteStoreConfig = { ...(defaultConfig as unknown as LiteStoreConfig) };
+    let mergedConfig = this.sanitizeConfigValue(defaultConfig as LiteStoreConfig);
 
     // 2. 从环境变量加载配置
     mergedConfig = this.mergeConfigFromEnvironment(mergedConfig);
@@ -123,18 +124,12 @@ export class ConfigManager {
     // 4. 应用程序化配置
     mergedConfig = this.mergeConfig(mergedConfig, this.customConfig);
 
-    // Update当前配置
-    this.currentConfig = mergedConfig;
+    assertValidStorageFolderName(mergedConfig.storageFolder);
 
-    // Sync storageFolder 到 PathHelper，避免循环依赖
-    try {
-      const { pathHelper } = require('../../utils/PathHelper');
-      if (pathHelper && mergedConfig.storageFolder) {
-        pathHelper.setStorageFolder(mergedConfig.storageFolder);
-      }
-    } catch {
-      // Ignore PathHelper loading errors
-    }
+    // Update current config and its root together so a rejected configuration
+    // cannot leave one singleton pointed at a different directory.
+    pathHelper.setStorageFolder(mergedConfig.storageFolder);
+    this.currentConfig = mergedConfig;
 
     logger.success('Configuration loaded successfully');
   }
@@ -353,7 +348,19 @@ export class ConfigManager {
    * @returns LiteStoreConfig 当前配置
    */
   public getConfig(): LiteStoreConfig {
-    return { ...this.currentConfig };
+    return this.sanitizeConfigValue(this.currentConfig);
+  }
+
+  private applyCustomConfig(nextConfig: DeepPartial<LiteStoreConfig>): void {
+    const previousConfig = this.customConfig;
+    this.customConfig = nextConfig;
+
+    try {
+      this.loadConfig();
+    } catch (error) {
+      this.customConfig = previousConfig;
+      throw error;
+    }
   }
 
   /**
@@ -361,8 +368,7 @@ export class ConfigManager {
    * @param customConfig 自定义配置
    */
   public setConfig(customConfig: DeepPartial<LiteStoreConfig>): void {
-    this.customConfig = this.sanitizeConfigValue(customConfig);
-    this.loadConfig();
+    this.applyCustomConfig(this.sanitizeConfigValue(customConfig));
   }
 
   /**
@@ -370,16 +376,14 @@ export class ConfigManager {
    * @param partialConfig 部分配置
    */
   public updateConfig(partialConfig: DeepPartial<LiteStoreConfig>): void {
-    this.customConfig = this.mergeConfig(this.customConfig, this.sanitizeConfigValue(partialConfig));
-    this.loadConfig();
+    this.applyCustomConfig(this.mergeConfig(this.customConfig, this.sanitizeConfigValue(partialConfig)));
   }
 
   /**
    * 重置配置到默认值
    */
   public resetConfig(): void {
-    this.customConfig = this.createConfigContainer<DeepPartial<LiteStoreConfig>>();
-    this.loadConfig();
+    this.applyCustomConfig(this.createConfigContainer<DeepPartial<LiteStoreConfig>>());
   }
 
   /**
@@ -399,14 +403,15 @@ export class ConfigManager {
     let value: unknown = this.currentConfig;
 
     for (const key of keys) {
-      if (value && typeof value === 'object' && key in (value as Record<string, unknown>)) {
+      this.assertSafeConfigKey(key);
+      if (value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, key)) {
         value = (value as Record<string, unknown>)[key];
       } else {
         return undefined;
       }
     }
 
-    return value as T;
+    return this.sanitizeConfigValue(value) as T;
   }
 
   /**
@@ -423,7 +428,8 @@ export class ConfigManager {
     keys.forEach(key => this.assertSafeConfigKey(key));
     this.assertSafeConfigKey(lastKey);
 
-    let config = this.customConfig as Record<string, unknown>;
+    const nextConfig = this.sanitizeConfigValue(this.customConfig) as Record<string, unknown>;
+    let config = nextConfig;
     for (const key of keys) {
       if (!Object.prototype.hasOwnProperty.call(config, key) || typeof config[key] !== 'object' || config[key] === null) {
         Object.defineProperty(config, key, {
@@ -441,7 +447,7 @@ export class ConfigManager {
       configurable: true,
       writable: true,
     });
-    this.loadConfig();
+    this.applyCustomConfig(nextConfig as DeepPartial<LiteStoreConfig>);
   }
 }
 

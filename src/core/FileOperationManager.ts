@@ -2,11 +2,12 @@
  * @module FileOperationManager
  * @description File operation manager coordinating single and chunked file handling
  * @since 2025-11-28
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import { getFileSystem } from '../utils/fileSystemCompat';
 import { getRootPathSync } from '../utils/ROOTPath';
+import { assertValidTableName } from '../utils/tableName';
 import withTimeout from '../utils/withTimeout';
 import { ChunkedFileHandler } from './file/ChunkedFileHandler';
 import { FileHandlerFactory } from './file/FileHandlerFactory';
@@ -173,6 +174,7 @@ export class FileOperationManager {
    * @param tableName 表名
    */
   async deleteDirectory(tableName: string): Promise<void> {
+    assertValidTableName(tableName);
     const directoryPath = `${getRootPathSync()}${tableName}`;
     await getFileSystem().deleteAsync(directoryPath, { idempotent: true });
   }

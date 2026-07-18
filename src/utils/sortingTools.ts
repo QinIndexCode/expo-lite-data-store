@@ -2,7 +2,7 @@
  * @module sortingTools
  * @description Multiple sorting algorithms for different use cases
  * @since 2025-11-19
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 /**

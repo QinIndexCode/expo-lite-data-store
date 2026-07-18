@@ -82,11 +82,12 @@ Do not create a release tag until the corresponding `main` CI run is green.
    node -p "require('./package.json').version"
    ```
 
-6. Create and push an annotated tag with exactly the same version. Replace the example with the version printed above:
+6. Create and push an annotated tag with exactly the same version:
 
    ```bash
-   git tag -a v2.0.2 -m "Release v2.0.2"
-   git push origin v2.0.2
+   VERSION="$(node -p "require('./package.json').version")"
+   git tag -a "v${VERSION}" -m "Release v${VERSION}"
+   git push origin "v${VERSION}"
    ```
 
 7. Watch `Release package` and verify the registry after it succeeds:

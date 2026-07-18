@@ -42,11 +42,13 @@ describe('crypto iterations in Expo Go', () => {
     // HKDF mock: just returns requested length of zeros
     const hkdfDeriveMock = (_ikm: Uint8Array, _salt: Uint8Array, dkLen: number) => new Uint8Array(dkLen);
     const hmacMock = (_data: string | Uint8Array, _key: Uint8Array) => new Uint8Array(32);
+    const hashBytesMock = (_data: string | Uint8Array, _algorithm: 'SHA-256' | 'SHA-512') => new Uint8Array(32);
     jest.doMock('../../utils/cryptoProvider', () => ({
       pbkdf2: pbkdf2Mock,
       randomBytes: randomBytesMock,
       hkdfDerive: hkdfDeriveMock,
       hmac: hmacMock,
+      hashBytes: hashBytesMock,
     }));
 
     const { configManager } = require('../../core/config/ConfigManager');
@@ -73,11 +75,13 @@ describe('crypto iterations in Expo Go', () => {
     const randomBytesMock = (length: number) => new Uint8Array(length);
     const hkdfDeriveMock = (_ikm: Uint8Array, _salt: Uint8Array, dkLen: number) => new Uint8Array(dkLen);
     const hmacMock = (_data: string | Uint8Array, _key: Uint8Array) => new Uint8Array(32);
+    const hashBytesMock = (_data: string | Uint8Array, _algorithm: 'SHA-256' | 'SHA-512') => new Uint8Array(32);
     jest.doMock('../../utils/cryptoProvider', () => ({
       pbkdf2: pbkdf2Mock,
       randomBytes: randomBytesMock,
       hkdfDerive: hkdfDeriveMock,
       hmac: hmacMock,
+      hashBytes: hashBytesMock,
     }));
 
     const { configManager } = require('../../core/config/ConfigManager');

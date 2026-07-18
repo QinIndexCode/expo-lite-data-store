@@ -2,7 +2,7 @@
  * @module MetadataManager
  * @description Metadata manager for table schema and data tracking
  * @since 2025-11-19
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import { StorageError } from '../../types/storageErrorInfc';
@@ -41,6 +41,8 @@ export interface TableSchema {
   encryptedFields?: string[];
   encrypted?: boolean;
   encryptFullTable?: boolean;
+  /** Whether this encrypted table is bound to the per-access authentication key scope. */
+  requireAuthOnAccess?: boolean;
 }
 
 export interface DatabaseMeta {
@@ -63,17 +65,27 @@ export class MetadataManager {
   private savePromise: Promise<void> | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private loadPromise: Promise<void> | null = null;
+  private metaFilePath: string | null = null;
 
   constructor() {}
 
-  private async getMetaFilePath(): Promise<string> {
+  private async getCurrentRootMetaFilePath(): Promise<string> {
     const rootPath = await ensureStorageRootReady();
     return `${rootPath}meta.ldb`;
   }
 
+  private async getMetaFilePath(): Promise<string> {
+    if (!this.metaFilePath) {
+      this.metaFilePath = await this.getCurrentRootMetaFilePath();
+    }
+
+    return this.metaFilePath;
+  }
+
   private async load() {
     const fileSystem = getFileSystem();
-    const metaFilePath = await this.getMetaFilePath();
+    const metaFilePath = await this.getCurrentRootMetaFilePath();
+    this.metaFilePath = metaFilePath;
     const info = await fileSystem.getInfoAsync(metaFilePath);
 
     if (!info.exists) {
@@ -145,9 +157,8 @@ export class MetadataManager {
     await this.save();
   }
 
-  private async persistSnapshot(snapshot: DatabaseMeta): Promise<void> {
+  private async persistSnapshot(snapshot: DatabaseMeta, metaFilePath: string): Promise<void> {
     const fileSystem = getFileSystem();
-    const metaFilePath = await this.getMetaFilePath();
     const tempMetaFilePath = `${metaFilePath}.tmp`;
     const dirPath = metaFilePath.substring(0, metaFilePath.lastIndexOf('/'));
 
@@ -175,6 +186,7 @@ export class MetadataManager {
   private async flushDirtyState(): Promise<void> {
     while (this.dirty) {
       this.dirty = false;
+      const metaFilePath = await this.getMetaFilePath();
       const snapshot: DatabaseMeta = {
         ...this.cache,
         generatedAt: Date.now(),
@@ -182,7 +194,7 @@ export class MetadataManager {
       };
 
       try {
-        await this.persistSnapshot(snapshot);
+        await this.persistSnapshot(snapshot, metaFilePath);
         this.cache.generatedAt = snapshot.generatedAt;
       } catch (error) {
         this.dirty = true;

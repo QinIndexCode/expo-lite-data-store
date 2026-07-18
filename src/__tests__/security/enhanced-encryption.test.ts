@@ -18,6 +18,7 @@ jest.mock('expo-secure-store', () => ({
 
 describe('Enhanced Encryption Tests', () => {
   const ENCRYPTED_TABLE = 'enhanced_encrypted_table';
+  const ENCRYPTED_OPTIONS = { encrypted: true } as const;
   const TEST_DATA = [
     { id: 1, name: 'User 1', age: 25, active: true, email: 'user1@example.com' },
     { id: 2, name: 'User 2', age: 30, active: false, email: 'user2@example.com' },
@@ -25,14 +26,14 @@ describe('Enhanced Encryption Tests', () => {
   ];
 
   beforeEach(async () => {
-    if (await hasTable(ENCRYPTED_TABLE)) {
-      await deleteTable(ENCRYPTED_TABLE);
+    if (await hasTable(ENCRYPTED_TABLE, ENCRYPTED_OPTIONS)) {
+      await deleteTable(ENCRYPTED_TABLE, ENCRYPTED_OPTIONS);
     }
   });
 
   afterAll(async () => {
-    if (await hasTable(ENCRYPTED_TABLE)) {
-      await deleteTable(ENCRYPTED_TABLE);
+    if (await hasTable(ENCRYPTED_TABLE, ENCRYPTED_OPTIONS)) {
+      await deleteTable(ENCRYPTED_TABLE, ENCRYPTED_OPTIONS);
     }
   });
 
@@ -105,13 +106,13 @@ describe('Enhanced Encryption Tests', () => {
       });
 
       // 开始事务
-      await beginTransaction();
+      await beginTransaction(ENCRYPTED_OPTIONS);
       // 使用insert方法一次性插入多条记录
       await insert(ENCRYPTED_TABLE, [
         { id: 1, name: 'Transaction User 1' },
         { id: 2, name: 'Transaction User 2' }
       ], { encrypted: true });
-      await commit();
+      await commit(ENCRYPTED_OPTIONS);
 
       const users = await findMany(ENCRYPTED_TABLE, {
         where: {},
@@ -127,13 +128,13 @@ describe('Enhanced Encryption Tests', () => {
       await insert(ENCRYPTED_TABLE, { id: 1, name: 'Initial User' }, { encrypted: true });
 
       // 开始事务
-      await beginTransaction();
+      await beginTransaction(ENCRYPTED_OPTIONS);
       await update(ENCRYPTED_TABLE, { name: 'Updated User' }, {
         where: { id: 1 },
         encrypted: true
       });
       await insert(ENCRYPTED_TABLE, { id: 2, name: 'New User' }, { encrypted: true });
-      await rollback();
+      await rollback(ENCRYPTED_OPTIONS);
 
       // 验证回滚后数据未改变
       const users = await findMany(ENCRYPTED_TABLE, {
@@ -146,17 +147,17 @@ describe('Enhanced Encryption Tests', () => {
   });
 
   describe('Error Handling in Encryption', () => {
-    it('should handle invalid encryption parameters gracefully', async () => {
+    it('should reject an explicit plain-surface request for an encrypted table', async () => {
       await createTable(ENCRYPTED_TABLE, {
         encrypted: true
       });
 
-      // 尝试使用不匹配的加密参数
-      const result = await findOne(ENCRYPTED_TABLE, {
-        where: { id: 1 },
-        encrypted: false // 与表创建时的加密设置不匹配
-      });
-      expect(result).toBeNull();
+      await expect(
+        findOne(ENCRYPTED_TABLE, {
+          where: { id: 1 },
+          encrypted: false,
+        })
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
     });
 
     it('should handle missing encryption key gracefully', async () => {
@@ -177,14 +178,14 @@ describe('Enhanced Encryption Tests', () => {
     const FULL_ENCRYPTION_TABLE = 'full_table_encryption_table';
 
     beforeEach(async () => {
-      if (await hasTable(FULL_ENCRYPTION_TABLE)) {
-        await deleteTable(FULL_ENCRYPTION_TABLE);
+      if (await hasTable(FULL_ENCRYPTION_TABLE, ENCRYPTED_OPTIONS)) {
+        await deleteTable(FULL_ENCRYPTION_TABLE, ENCRYPTED_OPTIONS);
       }
     });
 
     afterAll(async () => {
-      if (await hasTable(FULL_ENCRYPTION_TABLE)) {
-        await deleteTable(FULL_ENCRYPTION_TABLE);
+      if (await hasTable(FULL_ENCRYPTION_TABLE, ENCRYPTED_OPTIONS)) {
+        await deleteTable(FULL_ENCRYPTION_TABLE, ENCRYPTED_OPTIONS);
       }
     });
 
@@ -253,14 +254,14 @@ describe('Enhanced Encryption Tests', () => {
     const CONFLICT_TABLE = 'encryption_conflict_table';
 
     beforeEach(async () => {
-      if (await hasTable(CONFLICT_TABLE)) {
-        await deleteTable(CONFLICT_TABLE);
+      if (await hasTable(CONFLICT_TABLE, ENCRYPTED_OPTIONS)) {
+        await deleteTable(CONFLICT_TABLE, ENCRYPTED_OPTIONS);
       }
     });
 
     afterAll(async () => {
-      if (await hasTable(CONFLICT_TABLE)) {
-        await deleteTable(CONFLICT_TABLE);
+      if (await hasTable(CONFLICT_TABLE, ENCRYPTED_OPTIONS)) {
+        await deleteTable(CONFLICT_TABLE, ENCRYPTED_OPTIONS);
       }
     });
 
@@ -313,14 +314,14 @@ describe('Enhanced Encryption Tests', () => {
     const FIELD_ENCRYPTION_TABLE = 'field_level_encryption_integration';
 
     beforeEach(async () => {
-      if (await hasTable(FIELD_ENCRYPTION_TABLE)) {
-        await deleteTable(FIELD_ENCRYPTION_TABLE);
+      if (await hasTable(FIELD_ENCRYPTION_TABLE, ENCRYPTED_OPTIONS)) {
+        await deleteTable(FIELD_ENCRYPTION_TABLE, ENCRYPTED_OPTIONS);
       }
     });
 
     afterAll(async () => {
-      if (await hasTable(FIELD_ENCRYPTION_TABLE)) {
-        await deleteTable(FIELD_ENCRYPTION_TABLE);
+      if (await hasTable(FIELD_ENCRYPTION_TABLE, ENCRYPTED_OPTIONS)) {
+        await deleteTable(FIELD_ENCRYPTION_TABLE, ENCRYPTED_OPTIONS);
       }
     });
 

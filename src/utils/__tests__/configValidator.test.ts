@@ -117,7 +117,7 @@ describe('ConfigValidator', () => {
 
   test('should detect invalid types in configuration', () => {
     // 修改配置为无效类型
-    const currentConfig = { ...configManager.getConfig() };
+    const currentConfig = JSON.parse(JSON.stringify(configManager.getConfig()));
     
     (currentConfig as any).chunkSize = 'invalid';
     (currentConfig as any).storageFolder = 123;
@@ -132,17 +132,20 @@ describe('ConfigValidator', () => {
     (currentConfig as any).api.rateLimit.enabled = 'invalid';
     (currentConfig as any).monitoring.enablePerformanceTracking = 'invalid';
     
-    configManager.setConfig(currentConfig);
+    const getConfigSpy = jest.spyOn(configManager, 'getConfig').mockReturnValue(currentConfig);
+    try {
+      // 验证能检测到所有无效类型，不绕过配置管理器的安全写入边界
+      const result: ConfigValidationResult = ConfigValidator.validateAll();
+      expect(result.isValid).toBe(false);
+      expect(result.errors.length).toBeGreaterThanOrEqual(3);
 
-    // 验证能检测到所有无效类型
-    const result: ConfigValidationResult = ConfigValidator.validateAll();
-    expect(result.isValid).toBe(false);
-    expect(result.errors.length).toBeGreaterThanOrEqual(3);
-
-    // 检查一些关键错误
-    expect(result.errors).toContain('chunkSize must be a number');
-    expect(result.errors).toContain('storageFolder must be a string');
-    expect(result.errors).toContain('encryption.keyIterations must be a number');
+      // 检查一些关键错误
+      expect(result.errors).toContain('chunkSize must be a number');
+      expect(result.errors).toContain('storageFolder must be one non-empty directory name without path separators or traversal');
+      expect(result.errors).toContain('encryption.keyIterations must be a number');
+    } finally {
+      getConfigSpy.mockRestore();
+    }
   });
 
   test('should auto fix invalid configuration', () => {

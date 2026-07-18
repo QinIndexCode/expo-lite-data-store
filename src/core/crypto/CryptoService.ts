@@ -2,7 +2,7 @@
  * @module CryptoService
  * @description Cryptographic service providing key derivation, random bytes, and hashing
  * @since 2025-11-19
- * @version 2.0.1
+ * @version 3.0.0
  */
 import {
   pbkdf2 as providerPbkdf2,

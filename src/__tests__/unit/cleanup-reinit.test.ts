@@ -1,6 +1,7 @@
 import { configManager } from '../../core/config/ConfigManager';
 import { SingleFileHandler } from '../../core/file/SingleFileHandler';
-import { db, findOne, hasTable, insert, plainStorage, read, createTable } from '../../expo-lite-data-store';
+import { plainStorage } from '../../core/db';
+import { db, findOne, hasTable, insert, read, createTable } from '../../expo-lite-data-store';
 import { getRootPath, resetRootPathState } from '../../utils/ROOTPath';
 
 describe('cleanup and reinit runtime state', () => {
@@ -34,6 +35,12 @@ describe('cleanup and reinit runtime state', () => {
       label: 'old-root',
     });
 
+    const firstRoot = await getRootPath();
+    const metadataManager = (plainStorage as any).metadataManager;
+    metadataManager.update(tableName, {
+      count: 2,
+    });
+
     const cachedMiss = await findOne(tableName, {
       where: {
         id: 'legacy-1',
@@ -48,6 +55,9 @@ describe('cleanup and reinit runtime state', () => {
     await db.init();
 
     expect(await hasTable(tableName)).toBe(false);
+
+    const persistedOldMeta = JSON.parse((global as any).__expo_file_system_mock__.mockFileSystem[`${firstRoot}meta.ldb`]);
+    expect(persistedOldMeta.tables[tableName].count).toBe(2);
 
     const nextRoot = await getRootPath();
     const handler = new SingleFileHandler(`${nextRoot}${tableName}.ldb`);
@@ -75,5 +85,21 @@ describe('cleanup and reinit runtime state', () => {
       id: 'legacy-1',
       label: 'fresh-root',
     });
+  });
+
+  it('rejects operations after a live storageFolder change until cleanup and reinitialization', async () => {
+    await createTable(tableName);
+
+    configManager.updateConfig({
+      storageFolder: 'qa-root-switched',
+    });
+
+    await expect(hasTable(tableName)).rejects.toMatchObject({
+      code: 'STORAGE_ROOT_CHANGED',
+    });
+
+    await plainStorage.cleanup();
+    await db.init();
+    expect(await hasTable(tableName)).toBe(false);
   });
 });

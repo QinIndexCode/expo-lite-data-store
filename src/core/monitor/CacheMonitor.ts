@@ -2,7 +2,7 @@
  * @module CacheMonitor
  * @description Cache monitor tracking cache statistics and health
  * @since 2025-11-28
- * @version 2.0.1
+ * @version 3.0.0
  */
 import { CacheManager, CacheStats } from '../cache/CacheManager';
 

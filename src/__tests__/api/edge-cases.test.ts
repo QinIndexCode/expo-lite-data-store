@@ -13,6 +13,7 @@ import {
   hasTable, 
   beginTransaction, 
   commit, 
+  rollback,
   bulkWrite, 
   countTable 
 } from '../../expo-lite-data-store';
@@ -262,8 +263,8 @@ describe('Edge Cases and Error Handling Tests', () => {
     const PLAIN_TABLE = 'mixed_plain_table';
 
     beforeEach(async () => {
-      if (await hasTable(ENCRYPTED_TABLE)) {
-        await deleteTable(ENCRYPTED_TABLE);
+      if (await hasTable(ENCRYPTED_TABLE, { encrypted: true })) {
+        await deleteTable(ENCRYPTED_TABLE, { encrypted: true });
       }
       if (await hasTable(PLAIN_TABLE)) {
         await deleteTable(PLAIN_TABLE);
@@ -271,8 +272,8 @@ describe('Edge Cases and Error Handling Tests', () => {
     });
 
     afterAll(async () => {
-      if (await hasTable(ENCRYPTED_TABLE)) {
-        await deleteTable(ENCRYPTED_TABLE);
+      if (await hasTable(ENCRYPTED_TABLE, { encrypted: true })) {
+        await deleteTable(ENCRYPTED_TABLE, { encrypted: true });
       }
       if (await hasTable(PLAIN_TABLE)) {
         await deleteTable(PLAIN_TABLE);
@@ -296,24 +297,23 @@ describe('Edge Cases and Error Handling Tests', () => {
       expect(plainUser?.name).toBe('Plain User');
     });
 
-    it('should handle transactions across multiple tables', async () => {
+    it('should reject a cross-surface operation within an encrypted transaction', async () => {
       // 创建加密表和非加密表
       await createTable(ENCRYPTED_TABLE, { encrypted: true });
       await createTable(PLAIN_TABLE, { encrypted: false });
 
-      await beginTransaction({});
-      
-      // 在事务中操作两个表
-      await insert(ENCRYPTED_TABLE, { id: 1, name: 'Encrypted User' }, { encrypted: true });
-      await insert(PLAIN_TABLE, { id: 1, name: 'Plain User' });
-      
-      await commit({});
+      await beginTransaction({ encrypted: true });
+      try {
+        await insert(ENCRYPTED_TABLE, { id: 1, name: 'Encrypted User' }, { encrypted: true });
+        await expect(insert(PLAIN_TABLE, { id: 1, name: 'Plain User' }, { encrypted: false })).rejects.toThrow(
+          'Transaction security options must match the active transaction'
+        );
+      } finally {
+        await rollback({ encrypted: true });
+      }
 
-      const encryptedUser = await findOne(ENCRYPTED_TABLE, { where: { id: 1 }, encrypted: true });
-      const plainUser = await findOne(PLAIN_TABLE, { where: { id: 1 } });
-
-      expect(encryptedUser).toBeDefined();
-      expect(plainUser).toBeDefined();
+      expect(await findOne(ENCRYPTED_TABLE, { where: { id: 1 }, encrypted: true })).toBeNull();
+      expect(await findOne(PLAIN_TABLE, { where: { id: 1 } })).toBeNull();
     });
   });
 

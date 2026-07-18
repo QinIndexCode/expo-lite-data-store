@@ -1,7 +1,7 @@
 // src/core/api/__tests__/ValidationWrapper.test.ts
 // ValidationWrapper 单元测试
 
-import { ValidationWrapper } from '../ValidationWrapper';
+import { API_INPUT_LIMITS, ValidationWrapper } from '../ValidationWrapper';
 import { StorageError } from '../../../types/storageErrorInfc';
 
 describe('ValidationWrapper', () => {
@@ -142,6 +142,18 @@ describe('ValidationWrapper', () => {
         ]);
       }).toThrow(StorageError);
     });
+
+    it('应该限制记录数和序列化负载大小', () => {
+      expect(() => {
+        validationWrapper.validateWriteData(
+          Array.from({ length: API_INPUT_LIMITS.maxWriteRecords + 1 }, (_, id) => ({ id }))
+        );
+      }).toThrow(StorageError);
+
+      expect(() => {
+        validationWrapper.validateWriteData({ payload: 'x'.repeat(API_INPUT_LIMITS.maxSerializedPayloadBytes) });
+      }).toThrow(StorageError);
+    });
   });
 
   describe('validateFilter 测试', () => {
@@ -243,6 +255,25 @@ describe('ValidationWrapper', () => {
         validationWrapper.validateBulkOperations([
           'string' as any
         ]);
+      }).toThrow(StorageError);
+    });
+
+    it('应该限制批处理操作和有效记录数', () => {
+      expect(
+        validationWrapper.validateBulkOperations([
+          { type: 'insert', data: [{ id: 1 }, { id: 2 }] },
+          { type: 'update', data: { status: 'done' }, where: { id: 1 } },
+          { type: 'delete', where: { id: 2 } },
+        ])
+      ).toBe(4);
+
+      expect(() => {
+        validationWrapper.validateBulkOperations(
+          Array.from({ length: API_INPUT_LIMITS.maxBulkOperations + 1 }, (_, id) => ({
+            type: 'delete' as const,
+            where: { id },
+          }))
+        );
       }).toThrow(StorageError);
     });
   });

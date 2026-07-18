@@ -2,7 +2,7 @@
  * @module defaultConfig
  * @description Default configuration for expo-lite-data-store
  * @since 2025-11-19
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import { LiteStoreConfig } from './types/config';

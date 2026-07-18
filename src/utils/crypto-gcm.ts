@@ -4,11 +4,12 @@
  *
  * @module crypto-gcm
  * @since 2026-04-01
- * @version 2.0.1
+ * @version 3.0.0
  */
 
 import { gcm } from '@noble/ciphers/aes';
-import { pbkdf2, randomBytes } from './cryptoProvider';
+import { hashBytes, pbkdf2, randomBytes } from './cryptoProvider';
+import { normalizePbkdf2Iterations } from './cryptoIterations';
 import { CryptoError } from './crypto-errors';
 import { performanceMonitor } from '../core/monitor/PerformanceMonitor';
 import { configManager } from '../core/config/ConfigManager';
@@ -44,13 +45,13 @@ const isExpoGo = (): boolean => {
  */
 const getGCMIterations = (): number => {
   const configIterations = configManager.getConfig().encryption.keyIterations;
+  const boundedIterations = normalizePbkdf2Iterations(configIterations, 10000);
 
   if (isExpoGo()) {
-    const reduced = Math.min(configIterations, 20000);
-    return Math.max(10000, reduced);
+    return Math.min(boundedIterations, 20000);
   }
 
-  return Math.max(100000, configIterations);
+  return Math.max(100000, boundedIterations);
 };
 
 /**
@@ -117,7 +118,8 @@ const deriveGCMKey = async (masterKey: string, salt: Uint8Array): Promise<Uint8A
   const iterations = getGCMIterations();
 
   const saltStr = bytesToBase64(salt);
-  const cacheKey = `gcm_${masterKey.slice(0, 16)}_${saltStr}_${iterations}`;
+  const masterKeyDigest = bytesToBase64(hashBytes(masterKey, 'SHA-256'));
+  const cacheKey = `gcm_${masterKeyDigest}_${saltStr}_${iterations}`;
 
   // Check cache first
   const cached = gcmKeyCache.get(cacheKey);
