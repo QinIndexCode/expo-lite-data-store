@@ -12,14 +12,27 @@ import {
   rollback,
 } from '../../expo-lite-data-store';
 
-const mockGetItemAsync = jest.fn().mockResolvedValue('mock-encrypted-key');
-const mockSetItemAsync = jest.fn().mockResolvedValue(undefined);
-const mockDeleteItemAsync = jest.fn().mockResolvedValue(undefined);
+type SecureStoreOptions = {
+  authenticationPrompt?: string;
+  requireAuthentication?: boolean;
+};
+
+type GetItemAsync = (key: string, options?: SecureStoreOptions) => Promise<string | null>;
+type SetItemAsync = (key: string, value: string, options?: SecureStoreOptions) => Promise<void>;
+type DeleteItemAsync = (key: string, options?: SecureStoreOptions) => Promise<void>;
+
+const mockGetItemAsync = jest
+  .fn<ReturnType<GetItemAsync>, Parameters<GetItemAsync>>()
+  .mockResolvedValue('mock-encrypted-key');
+const mockSetItemAsync = jest.fn<ReturnType<SetItemAsync>, Parameters<SetItemAsync>>().mockResolvedValue(undefined);
+const mockDeleteItemAsync = jest
+  .fn<ReturnType<DeleteItemAsync>, Parameters<DeleteItemAsync>>()
+  .mockResolvedValue(undefined);
 
 jest.mock('expo-secure-store', () => ({
-  getItemAsync: () => mockGetItemAsync(),
-  setItemAsync: (key: string, value: string) => mockSetItemAsync(key, value),
-  deleteItemAsync: (key: string) => mockDeleteItemAsync(key),
+  getItemAsync: (...args: Parameters<GetItemAsync>) => mockGetItemAsync(...args),
+  setItemAsync: (...args: Parameters<SetItemAsync>) => mockSetItemAsync(...args),
+  deleteItemAsync: (...args: Parameters<DeleteItemAsync>) => mockDeleteItemAsync(...args),
 }));
 
 describe('enhanced encryption', () => {
@@ -205,6 +218,7 @@ describe('enhanced encryption', () => {
     it('round-trips a record encrypted as a full table', async () => {
       await createTable(FULL_ENCRYPTION_TABLE, {
         encrypted: true,
+        encryptFullTable: true,
       });
 
       const testData = {
@@ -232,6 +246,7 @@ describe('enhanced encryption', () => {
     it('queries multiple records encrypted as a full table', async () => {
       await createTable(FULL_ENCRYPTION_TABLE, {
         encrypted: true,
+        encryptFullTable: true,
       });
 
       const users = [
@@ -274,6 +289,7 @@ describe('enhanced encryption', () => {
     it('updates a full-table encrypted record through the encrypted surface', async () => {
       await createTable(CONFLICT_TABLE, {
         encrypted: true,
+        encryptFullTable: true,
       });
 
       await insert(
@@ -316,6 +332,16 @@ describe('enhanced encryption', () => {
 
       expect(updatedUser).not.toBeNull();
       expect(updatedUser?.name).toBe('Updated User');
+    });
+
+    it('keeps an existing encryption policy when createTable omits policy details', async () => {
+      await createTable(CONFLICT_TABLE, {
+        encrypted: true,
+        encryptFullTable: true,
+      });
+
+      await expect(createTable(CONFLICT_TABLE, { encrypted: true })).resolves.toBeUndefined();
+      expect(await hasTable(CONFLICT_TABLE, { encrypted: true })).toBe(true);
     });
   });
 

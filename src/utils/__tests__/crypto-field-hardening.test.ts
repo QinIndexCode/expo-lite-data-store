@@ -12,11 +12,13 @@ import {
 import {
   clearKeyCache,
   decrypt,
+  decryptBulk,
   decryptFields,
   decryptFieldsBulk,
   encrypt,
   encryptFields,
   encryptFieldsBulk,
+  getKeyCacheStats,
   getMasterKey,
   getMasterKeyGeneration,
   resetMasterKey,
@@ -37,7 +39,33 @@ type SecureStoreMock = {
   setItemAsync: (key: string, value: string, options?: SecureStoreOptions) => Promise<void>;
 };
 
+type ExpoConstantsRuntime = {
+  appOwnership?: string;
+};
+
+type TamperableCtrPayload = Record<string, unknown> & {
+  iv: string;
+};
+
 const getSecureStoreMock = (): SecureStoreMock => require('expo-secure-store') as SecureStoreMock;
+const getExpoConstants = (): ExpoConstantsRuntime => require('expo-constants') as ExpoConstantsRuntime;
+
+const isTamperableCtrPayload = (value: unknown): value is TamperableCtrPayload => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  return typeof (value as Record<string, unknown>).iv === 'string';
+};
+
+const parseCtrPayload = (serializedPayload: string): TamperableCtrPayload => {
+  const payload: unknown = JSON.parse(serializedPayload) as unknown;
+  if (!isTamperableCtrPayload(payload)) {
+    throw new Error('Expected a CTR payload containing an IV');
+  }
+
+  return payload;
+};
 
 const createLegacyCtrPayload = (plainText: string, masterKey: string): string => {
   const salt = Uint8Array.from({ length: 16 }, (_, index) => index + 1);
@@ -99,6 +127,24 @@ describe('field encryption failure handling', () => {
     await expect(decryptFieldsBulk(encryptedRecords, fieldConfig)).resolves.toEqual([record]);
   });
 
+  it('decrypts mixed legacy CTR and GCM batches without depending on item order', async () => {
+    const masterKey = 'mixed-bulk-format-master-key';
+    const legacyCiphertext = createLegacyCtrPayload('legacy-value', masterKey);
+    const gcmCiphertext = await encryptGCM('gcm-value', masterKey);
+
+    await expect(decryptBulk([legacyCiphertext, gcmCiphertext], masterKey)).resolves.toEqual([
+      'legacy-value',
+      'gcm-value',
+    ]);
+    await expect(decryptBulk([gcmCiphertext, legacyCiphertext], masterKey)).resolves.toEqual([
+      'gcm-value',
+      'legacy-value',
+    ]);
+    await expect(decryptBulk(['not-valid-ciphertext', gcmCiphertext], masterKey)).rejects.toMatchObject({
+      code: 'DECRYPT_FAILED',
+    });
+  });
+
   it('rejects unsafe field names with operation-specific crypto errors', async () => {
     const unsafeFieldConfig = {
       fields: ['__proto__'],
@@ -149,7 +195,7 @@ describe('field encryption failure handling', () => {
     configManager.updateConfig({ encryption: { algorithm: 'AES-CTR', keyIterations: 10000 } });
     const masterKey = 'ctr-integrity-test-master-key';
     const encrypted = await encrypt('integrity-check', masterKey);
-    const payload = JSON.parse(Buffer.from(encrypted, 'base64').toString('utf8'));
+    const payload = parseCtrPayload(Buffer.from(encrypted, 'base64').toString('utf8'));
     const iv = Buffer.from(payload.iv, 'base64');
     iv[0] ^= 1;
     payload.iv = iv.toString('base64');
@@ -163,7 +209,7 @@ describe('field encryption failure handling', () => {
 
   it('does not reuse an unauthenticated legacy key for strict access', async () => {
     const secureStore = getSecureStoreMock();
-    const constants = require('expo-constants');
+    const constants = getExpoConstants();
     const originalGetItemAsync = secureStore.getItemAsync;
     const originalSetItemAsync = secureStore.setItemAsync;
     const originalDeleteItemAsync = secureStore.deleteItemAsync;
@@ -199,7 +245,7 @@ describe('field encryption failure handling', () => {
 
   it('serializes first strict master-key provisioning without caching the resolved key', async () => {
     const secureStore = getSecureStoreMock();
-    const constants = require('expo-constants');
+    const constants = getExpoConstants();
     const originalGetItemAsync = secureStore.getItemAsync;
     const originalSetItemAsync = secureStore.setItemAsync;
     const originalAppOwnership = constants.appOwnership;
@@ -348,5 +394,21 @@ describe('field encryption failure handling', () => {
     await encrypt('cache-boundary', 'root-key-0');
 
     expect(nativePbkdf2).toHaveBeenCalledTimes(52);
+  });
+
+  it('reuses a CTR per-record derived key for the matching master key and salt', async () => {
+    configManager.updateConfig({ encryption: { algorithm: 'AES-CTR', keyIterations: 10000 } });
+    clearKeyCache();
+
+    const masterKey = 'ctr-derived-cache-master-key';
+    const encrypted = await encrypt('cache-hit', masterKey);
+    const afterEncrypt = getKeyCacheStats();
+
+    await expect(decrypt(encrypted, masterKey)).resolves.toBe('cache-hit');
+
+    const afterDecrypt = getKeyCacheStats();
+    expect(afterDecrypt.hits).toBe(afterEncrypt.hits + 1);
+    expect(afterDecrypt.misses).toBe(afterEncrypt.misses);
+    expect(afterDecrypt.size).toBe(afterEncrypt.size);
   });
 });

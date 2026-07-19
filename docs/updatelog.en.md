@@ -2,6 +2,16 @@
 
 [README Entry](../README.md) | [简体中文](./updatelog.zh-CN.md) | [Consumer Guide](../README.en.md)
 
+### Unreleased - post-3.0.0 hardening
+
+> Status: These changes were made after the published `3.0.0` package and are not part of that release.
+> Storage Coordination: Same-path file operations and DataWriter table writes use shared in-process FIFO queues with 30-second acquisition limits. Metadata managers independently share a path-keyed FIFO, reread the latest snapshot, apply `createdAt`-guarded mutations, advance a cross-adapter epoch, and retain failed mutations for retry. Timed-out waiters preserve later queue handoff.
+> Recovery and Deletion: Table-bound v2 single-file markers record both generations' tokens, hashes, and physical counts; temporary evidence must match durable metadata and the committed primary exactly. Metadata backup recovery is allowed only for a missing primary, never a damaged one, and stale-backup removal must succeed. Chunked overwrite journals and single-to-chunked mode commits are bounded; metadata absence is authoritative after deletion, and same-name creation purges orphans.
+> Integrity and Security: Incremental indexes stage touched-bucket deltas while rebuilds stage complete maps; both validate `UNIQUE` before storage and publish only after success. Dynamic all-fields encryption has an explicit metadata marker; full-table logical counts commit with physical generations and decrypted cache entries are ciphertext-bound. Mixed legacy CTR/current GCM bulk payloads decrypt in provider groups while preserving order. Encrypted-table policy is persisted, transactions are owner-bound, and direct commit/restoration writes require a module-private symbol capability.
+> Query and Memory Boundaries: Pagination accepts only non-negative safe integers, all sort algorithms keep nullish values last, cache invalidation uses bounded namespace versions, and AutoSync retains dirty entries while transactions defer writes.
+> Root Migration Safety: An unreadable or malformed current `meta.ldb` is treated as occupied, while an empty bootstrap root is removed before legacy migration so correctness does not depend on moving over an existing directory.
+> Runtime Hygiene: Removed unused storage abstractions, moved permission probing out of the write hot path, and made logging level-controlled with quiet tests by default.
+
 ### 📅 2026-07-18 `v3.0.0` Security Boundary, Reliability, and Release Contract
 
 > Breaking API: Removed the public `plainStorage` export and unsupported `dist` deep-import paths; consumers now use the root `db` facade or named APIs.
@@ -13,7 +23,7 @@
 
 ### 📅 2026-07-15 Storage Reliability and CI/CD Recovery
 
-> Storage Reliability: Hardened serialized atomic metadata publication, chunk-append recovery ordering, incomplete-chunk rejection, transaction rollback semantics, encrypted migration, and full-table encrypted logical counts
+> Storage Reliability: Hardened serialized recoverable metadata publication, chunk-append recovery ordering, incomplete-chunk rejection, transaction rollback semantics, encrypted migration, and full-table encrypted logical counts
 > Workflow Replacement: Replaced the manually disabled publish workflow with a new main push/PR CI workflow and a separately registered tag-only release workflow
 > Release Safety: Added exact tag/version matching, main-branch ancestry validation, an explicit `NPM_TOKEN` prerequisite, the complete `prepublishOnly` gate, package inspection, and npm provenance
 > Maintainer Documentation: Added bilingual CI/CD operations guides covering secrets, release sequencing, GitHub CLI observation, and safe failure recovery
@@ -50,7 +60,7 @@
 > Documentation: Standardized the consumer and maintainer documentation set across README, API, runtime QA, changelog, and update log
 > Verification: `npm run prepublishOnly`, `npm test -- --runInBand`, `npm run typecheck`, and `npm pack --json --dry-run --ignore-scripts` all passed on Windows
 
-### 📅 2026-04-02 `v2.0.0-beta.5` Encryption Upgrade and Architecture Optimization
+### 📅 2026-04-04 `v2.0.0-beta.5` Encryption Upgrade and Architecture Optimization
 
 > Encryption Upgrade: Added AES-256-GCM encryption mode, compliant with NIST SP 800-38D and OWASP MASVS 2026
 > Auto Migration: encrypt/decrypt auto-detects data version; new data defaults to GCM, old data remains compatible
@@ -67,7 +77,7 @@
 > New Files: .prettierignore, COMMENT_SPECIFICATION docs (Chinese and English)
 > Tests: All 365 tests passing, added GCM encryption tests
 
-### 📅 2026-01-28 `v2.0.0-beta.2`  Expo Go Crypto Performance and Provider Hardening
+### 📅 2026-01-28 `v2.0.0-beta.3`  Expo Go Crypto Performance and Provider Hardening
 
 > Expo Go Performance: Reduced PBKDF2 iterations to speed up development workflows
 > Native KDF: Added react-native-quick-crypto for real-device KDF acceleration

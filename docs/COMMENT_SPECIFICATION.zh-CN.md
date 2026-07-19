@@ -61,7 +61,7 @@ TODO 必须带有稳定的负责人或跟踪引用，并说明剩余工作：
 
 ## 测试风格
 
-- 以被测单元组织 `describe`；`describe`、`it` 和 `test` 标题统一使用英文，直接描述可观察结果和条件，例如 `it('rejects traversal segments in table names', ...)`，避免使用 `should ...` 这类预期式措辞。
+- 使用 `describe` 组织分组、`it` 编写用例；标题统一使用英文，直接描述可观察结果和条件，例如 `it('rejects traversal segments in table names', ...)`。不要混用 `test(...)`，不要提交 focused 或 skipped 用例，也不要使用 `should ...` 这类预期式措辞。
 - 每个测试遵循 arrange、act、assert 顺序，并用空行分隔阶段；只有 fixture 或断言目的不直观时才添加注释。
 - 优先使用有类型的 fixture、helper 和泛型 mock。禁止显式 `any`；不可信边界使用 `unknown`，并在使用前收窄。
 - 在 `afterEach` 或 `finally` 中恢复 spy、环境变量、计时器和模块状态；删除测试创建的临时目录与生成文件。

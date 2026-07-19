@@ -36,6 +36,12 @@ const compareValues = (left: unknown, right: unknown): number => {
   return String(left).localeCompare(String(right));
 };
 
+const assertPaginationBoundary = (name: 'skip' | 'limit', value: number): void => {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${name} must be a non-negative safe integer`);
+  }
+};
+
 /**
  * Matches a SQL LIKE pattern without compiling user-controlled regular expressions.
  * `%` matches any number of UTF-16 code units and `_` matches exactly one.
@@ -274,22 +280,22 @@ export class QueryEngine {
    * Returns a bounded page without allocating when the requested range is empty.
    */
   static paginate<T>(data: T[], skip = 0, limit?: number): T[] {
-    // Optimization: If skip >= data length, return empty array
+    assertPaginationBoundary('skip', skip);
+    if (limit !== undefined) {
+      assertPaginationBoundary('limit', limit);
+    }
+
     if (skip >= data.length) {
       return [];
     }
 
-    // Optimization: When limit is 0, return empty array
     if (limit === 0) {
-      logger.warn('Warning: limit=0 was passed to paginate, returning empty array as per convention');
       return [];
     }
 
-    // Optimization: Calculate actual end index
     const startIndex = skip;
     const endIndex = limit !== undefined ? Math.min(startIndex + limit, data.length) : data.length;
 
-    // Optimization: If startIndex=0 and endIndex=data length, return original
     if (startIndex === 0 && endIndex === data.length) {
       return data;
     }
@@ -325,21 +331,17 @@ export class QueryEngine {
     data: T[],
     sortBy: SortField<T> | SortField<T>[]
   ): SortAlgorithm {
-    // If user specified algorithm, use directly
     if (requestedAlgorithm && requestedAlgorithm !== 'default') {
       return requestedAlgorithm;
     }
 
-    // Smart algorithm selection
     const dataSize = data.length;
     const sortFields = Array.isArray(sortBy) ? sortBy : [sortBy];
 
-    // Use default algorithm for small datasets
     if (dataSize < QUERY.COUNTING_SORT_THRESHOLD) {
       return 'default';
     }
 
-    // Use merge sort for large datasets (stable and efficient)
     if (dataSize > QUERY.MERGE_SORT_THRESHOLD) {
       return 'merge';
     }
@@ -349,7 +351,6 @@ export class QueryEngine {
       return 'counting';
     }
 
-    // Default to merge sort (balance stability and performance)
     return 'merge';
   }
 
@@ -362,7 +363,7 @@ export class QueryEngine {
     const values = new Set();
     let uniqueCount = 0;
 
-    // Collect unique values, limit check count for performance
+    // Sampling bounds algorithm-selection work on large tables.
     const sampleSize = Math.min(data.length, 1000);
     for (let i = 0; i < sampleSize && uniqueCount < 50; i++) {
       const item = data[i];
@@ -378,7 +379,6 @@ export class QueryEngine {
       }
     }
 
-    // If unique values < 10% of total and below threshold, use counting sort
     return uniqueCount < Math.min(data.length * 0.1, QUERY.COUNTING_SORT_THRESHOLD);
   }
 
@@ -393,12 +393,13 @@ export class QueryEngine {
   ): T[] {
     if (!sortBy || data.length === 0) return data;
 
-    // Select sorting algorithm
     const selectedAlgorithm = this.selectSortAlgorithm(algorithm, data, sortBy);
     const sortFunction = this.getSortFunction(selectedAlgorithm);
 
     if (Array.isArray(sortBy)) {
-      const sortOrders: SortOrder[] = Array.isArray(order) ? order : new Array(sortBy.length).fill(order ?? 'asc');
+      const sortOrders: SortOrder[] = Array.isArray(order)
+        ? order.map(value => (value === 'desc' ? 'desc' : 'asc'))
+        : new Array<SortOrder>(sortBy.length).fill(order ?? 'asc');
 
       let sortedData = [...data];
       for (let i = sortBy.length - 1; i >= 0; i--) {

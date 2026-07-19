@@ -110,6 +110,14 @@ describe('PerformanceMonitor', () => {
     expect(result.details.performance.thresholds.maxAverageDuration).toBe(500);
   });
 
+  it('does not report a performance failure without samples', () => {
+    const result = monitor.performHealthCheck();
+
+    expect(result.healthy).toBe(true);
+    expect(result.details.performance.successRate).toBe(0);
+    expect(result.message).toContain('No performance samples are available');
+  });
+
   it('resets runtime options to defaults', () => {
     monitor.configure({
       enabled: false,

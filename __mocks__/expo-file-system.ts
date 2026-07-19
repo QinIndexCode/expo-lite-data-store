@@ -11,10 +11,8 @@ interface MockFileInfo {
 
 const mockFileSystem: Record<string, MockFileSystemEntry> = {};
 
-// Mock directory contents
 const mockDirectories: Record<string, string[]> = {};
 
-// Mock EncodingType enum
 enum EncodingType {
   UTF8 = 'utf8',
   Base64 = 'base64',
@@ -22,31 +20,24 @@ enum EncodingType {
   UTF16 = 'utf16',
 }
 
-// Mock makeDirectoryAsync function
 const makeDirectoryAsync = async (uri: string, _options?: { intermediates?: boolean }): Promise<void> => {
-  // Simple mock implementation that creates a directory entry
   mockFileSystem[uri] = { type: 'directory' };
   if (!mockDirectories[uri]) {
     mockDirectories[uri] = [];
   }
 };
 
-// Mock readDirectoryAsync function
 const readDirectoryAsync = async (uri: string): Promise<string[]> => {
-  // Simple mock implementation that returns directory contents
   return mockDirectories[uri] || [];
 };
 
-// Mock writeAsStringAsync function
 const writeAsStringAsync = async (
   uri: string,
   contents: string,
   _options?: { encoding?: EncodingType }
 ): Promise<void> => {
-  // Simple mock implementation that writes file content
   mockFileSystem[uri] = { type: 'file', content: contents };
 
-  // Add to directory contents if not already present
   const directoryUri = uri.substring(0, uri.lastIndexOf('/') + 1);
   const fileName = uri.substring(uri.lastIndexOf('/') + 1);
   if (!mockDirectories[directoryUri]) {
@@ -57,35 +48,28 @@ const writeAsStringAsync = async (
   }
 };
 
-// Mock readAsStringAsync function
 const readAsStringAsync = async (uri: string, _options?: { encoding?: EncodingType }): Promise<string> => {
-  // Simple mock implementation that returns file content
   if (!mockFileSystem[uri] || mockFileSystem[uri].type !== 'file') {
     throw new Error(`File not found: ${uri}`);
   }
   return mockFileSystem[uri].content;
 };
 
-// Mock deleteAsync function
 const deleteAsync = async (uri: string, _options?: { idempotent?: boolean }): Promise<void> => {
-  // Recursive delete: remove all files and subdirectories under the URI
   const uriPrefix = uri.endsWith('/') ? uri : uri + '/';
 
-  // Delete all files under the directory
   for (const [fileUri] of Object.entries(mockFileSystem)) {
     if (fileUri === uri || fileUri.startsWith(uriPrefix)) {
       delete mockFileSystem[fileUri];
     }
   }
 
-  // Delete all subdirectories
   for (const [dirUri] of Object.entries(mockDirectories)) {
     if (dirUri === uri || dirUri.startsWith(uriPrefix)) {
       delete mockDirectories[dirUri];
     }
   }
 
-  // Also remove from parent directory contents
   const parentDirUri = uri.substring(0, uri.lastIndexOf('/'));
   const parentSlashIndex = parentDirUri.lastIndexOf('/');
   const actualParentDir = parentSlashIndex >= 0 ? parentDirUri.substring(0, parentSlashIndex + 1) : parentDirUri + '/';
@@ -95,31 +79,24 @@ const deleteAsync = async (uri: string, _options?: { idempotent?: boolean }): Pr
     mockDirectories[actualParentDir] = mockDirectories[actualParentDir].filter(n => n !== name);
   }
 
-  // Clean up the directory entry itself
   delete mockFileSystem[uri];
   delete mockDirectories[uri];
 };
 
-// Mock moveAsync function
 const moveAsync = async (options: { from: string; to: string }): Promise<void> => {
   const { from, to } = options;
 
-  // Handle directory move: move all files under the directory
   if (mockDirectories[from] || (mockFileSystem[from] && mockFileSystem[from].type === 'directory')) {
-    // Move directory entry in mockFileSystem
     if (mockFileSystem[from]) {
       mockFileSystem[to] = mockFileSystem[from];
       delete mockFileSystem[from];
     } else {
-      // If not in mockFileSystem, create directory entry
       mockFileSystem[to] = { type: 'directory' };
     }
 
-    // Move directory entry in mockDirectories
     mockDirectories[to] = mockDirectories[from] ? [...mockDirectories[from]] : [];
     delete mockDirectories[from];
 
-    // Move all files under the directory
     const fromPrefix = from.endsWith('/') ? from : from + '/';
     const toPrefix = to.endsWith('/') ? to : to + '/';
 
@@ -131,7 +108,6 @@ const moveAsync = async (options: { from: string; to: string }): Promise<void> =
       }
     }
 
-    // Move all subdirectories
     for (const [dirUri, contents] of Object.entries(mockDirectories)) {
       if (dirUri.startsWith(fromPrefix) && dirUri !== from) {
         const newDirUri = toPrefix + dirUri.substring(fromPrefix.length);
@@ -140,11 +116,9 @@ const moveAsync = async (options: { from: string; to: string }): Promise<void> =
       }
     }
   } else if (mockFileSystem[from]) {
-    // Handle single file move
     mockFileSystem[to] = mockFileSystem[from];
     delete mockFileSystem[from];
 
-    // Also update directory contents
     const fromDirUri = from.substring(0, from.lastIndexOf('/') + 1);
     const toDirUri = to.substring(0, to.lastIndexOf('/') + 1);
     const fromFileName = from.substring(from.lastIndexOf('/') + 1);
@@ -163,12 +137,10 @@ const moveAsync = async (options: { from: string; to: string }): Promise<void> =
   }
 };
 
-// Mock getInfoAsync function
 const getInfoAsync = async (
   uri: string,
   _options?: { size?: boolean; md5?: boolean; mtime?: boolean; ctime?: boolean }
 ): Promise<MockFileInfo> => {
-  // Simple mock implementation that returns file/directory info
   const entry = mockFileSystem[uri];
   const exists = entry !== undefined;
   return {
@@ -179,11 +151,9 @@ const getInfoAsync = async (
   };
 };
 
-// Mock documentDirectory
 const documentDirectory = '/mock/documents/';
 
-// Export all mock functions and constants using CommonJS syntax
-module.exports = {
+const expoFileSystemMock = {
   EncodingType,
   makeDirectoryAsync,
   readDirectoryAsync,
@@ -195,5 +165,4 @@ module.exports = {
   documentDirectory,
 };
 
-// Also export as named exports for TypeScript compatibility
-module.exports.default = module.exports;
+module.exports = Object.assign(expoFileSystemMock, { default: expoFileSystemMock });

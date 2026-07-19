@@ -77,7 +77,8 @@ export class ConfigManager {
 
   private sanitizeConfigValue<T>(value: T): T {
     if (Array.isArray(value)) {
-      return value.map(item => this.sanitizeConfigValue(item)) as T;
+      const values: unknown[] = value;
+      return values.map(item => this.sanitizeConfigValue(item)) as T;
     }
 
     if (this.isConfigObject(value)) {
@@ -235,7 +236,6 @@ export class ConfigManager {
             }
 
             if (expoConfig) {
-              // Read config from app.json extra field
               const liteStoreConfig = this.extractLiteStoreConfig(expoConfig);
               if (liteStoreConfig) {
                 logger.info('Configuration loaded from app.json via expo-constants');

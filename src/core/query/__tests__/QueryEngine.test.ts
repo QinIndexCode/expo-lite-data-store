@@ -1,5 +1,18 @@
 import { QueryEngine } from '../QueryEngine';
 import { isQueryOperator, isUpdateOperator } from '../../../utils/specialOperators';
+import { isStorageRecord, type UpdatePayload } from '../../../types/storageTypes';
+
+const parsePrototypeUpdatePayload = (serialized: string): UpdatePayload<{ id: string }> => {
+  const parsed: unknown = JSON.parse(serialized) as unknown;
+  if (
+    !isStorageRecord(parsed) ||
+    !isStorageRecord(parsed.$set) ||
+    !Object.prototype.hasOwnProperty.call(parsed.$set, '__proto__')
+  ) {
+    throw new Error('Expected a record update payload containing an own __proto__ field');
+  }
+  return parsed;
+};
 
 describe('QueryEngine', () => {
   const testData = [
@@ -10,7 +23,7 @@ describe('QueryEngine', () => {
     { id: 5, name: 'test5', age: 40, score: 80, active: false, tags: ['a', 'b', 'c'] },
   ];
 
-  describe('Filtering Functionality Tests', () => {
+  describe('filtering', () => {
     it('matches equality conditions', () => {
       const result = QueryEngine.filter(testData, { id: 1 });
       expect(result).toEqual([testData[0]]);
@@ -89,7 +102,7 @@ describe('QueryEngine', () => {
     });
   });
 
-  describe('Compound Query Tests', () => {
+  describe('compound queries', () => {
     it('matches AND conditions', () => {
       const result = QueryEngine.filter(testData, { $and: [{ active: true }, { age: { $gt: 25 } }] });
       expect(result.length).toBe(2);
@@ -128,7 +141,7 @@ describe('QueryEngine', () => {
     });
   });
 
-  describe('Pagination Functionality Tests', () => {
+  describe('pagination', () => {
     it('paginates data with an offset and limit', () => {
       const result = QueryEngine.paginate(testData, 1, 2);
       expect(result).toEqual([testData[1], testData[2]]);
@@ -157,7 +170,7 @@ describe('QueryEngine', () => {
     });
   });
 
-  describe('Sorting Functionality Tests', () => {
+  describe('sorting', () => {
     it('sorts data in ascending order', () => {
       const result = QueryEngine.sort(testData, 'age', 'asc');
       expect(result[0].age).toBe(20);
@@ -187,7 +200,7 @@ describe('QueryEngine', () => {
     });
   });
 
-  describe('Aggregation Functionality Tests', () => {
+  describe('aggregation', () => {
     it('calculates a sum', () => {
       const result = QueryEngine.sum(testData, 'age');
       expect(result).toBe(20 + 25 + 30 + 35 + 40);
@@ -224,7 +237,7 @@ describe('QueryEngine', () => {
     });
   });
 
-  describe('Grouping Functionality Tests', () => {
+  describe('grouping', () => {
     it('groups data by a field', () => {
       const result = QueryEngine.groupBy(testData, 'active');
       expect(Object.keys(result)).toEqual(['true', 'false']);
@@ -252,7 +265,7 @@ describe('QueryEngine', () => {
     });
   });
 
-  describe('Edge Case Tests', () => {
+  describe('edge cases', () => {
     it('does not mutate source arrays when applying array update operators', () => {
       const original = { id: 'record-1', tags: ['existing'] };
 
@@ -270,7 +283,7 @@ describe('QueryEngine', () => {
     });
 
     it('rejects prototype keys in update payloads', () => {
-      const payload = JSON.parse('{"$set":{"__proto__":{"isAdmin":true}}}');
+      const payload = parsePrototypeUpdatePayload('{"$set":{"__proto__":{"isAdmin":true}}}');
 
       expect(() => QueryEngine.update({ id: 'record-1' }, payload)).toThrow('Unsafe update field: __proto__');
     });
@@ -304,7 +317,7 @@ describe('QueryEngine', () => {
     });
   });
 
-  describe('Combined Functionality Tests', () => {
+  describe('combined operations', () => {
     it('combines filtering, sorting, and pagination', () => {
       let result = QueryEngine.filter(testData, { active: true });
       result = QueryEngine.sort(result, 'age', 'desc');

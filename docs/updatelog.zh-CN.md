@@ -2,6 +2,16 @@
 
 [README 入口](../README.md) | [English](./updatelog.en.md) | [消费者文档](../README.zh-CN.md)
 
+### Unreleased - `3.0.0` 发布后加固
+
+> 状态：以下变更发生在 npm `3.0.0` 发布之后，不属于该已发布版本。
+> 存储协调：同路径文件操作和 DataWriter 表写入使用共享的进程内 FIFO，锁等待上限为 30 秒。元数据管理器另行共享按路径键控的 FIFO，重读最新快照、应用受 `createdAt` 保护的 mutation、推进跨 adapter epoch，并保留失败 mutation 供重试；超时等待者不会破坏后续队列交接。
+> 恢复与删除：绑定表名的 v2 单文件 marker 记录前后代 token、hash 与物理计数；临时证据必须与持久化 metadata 和已提交主文件完全匹配。metadata backup 仅在主文件缺失时恢复，主文件损坏时绝不回退，且必须成功移除旧 backup。chunked overwrite 日志和 single-to-chunked mode 提交均有明确边界；删除后的 metadata 缺失是权威状态，同名建表会清除孤立工件。
+> 完整性与安全：增量索引暂存受影响 bucket delta，重建暂存完整映射；两者都在存储前校验 `UNIQUE`，成功后才发布。动态全字段加密使用显式 metadata marker；整表逻辑计数与物理代际同次提交，解密缓存绑定精确 ciphertext。混合 legacy CTR / 当前 GCM bulk payload 会分组解密并保持顺序。加密表策略持久化，事务绑定 owner，直接提交/恢复写需要模块私有 symbol capability。
+> 查询与内存边界：分页仅接受非负安全整数；所有排序算法把 nullish 值放在末尾；缓存失效使用有界命名空间版本；事务延迟 AutoSync 写入时仍保留脏条目。
+> 根目录迁移安全：不可读或格式损坏的当前 `meta.ldb` 会被视为已占用；legacy 迁移前会删除空 bootstrap 根目录，避免正确性依赖 move 覆盖既有目录。
+> 运行时卫生：删除未使用的存储抽象，把权限探测移出写入热路径，并让日志按级别输出、测试默认静默。
+
 ### 📅 2026-07-18 `v3.0.0` 安全边界、存储可靠性与工件卫生
 
 > 破坏性 API 收口：移除 `plainStorage` 公开导出和包内深层导入；使用者统一从根入口调用 `db` facade 或命名 API
@@ -12,7 +22,7 @@
 
 ### 📅 2026-07-15 存储可靠性与 CI/CD 恢复
 
-> 存储可靠性：加固元数据串行原子发布、分片追加恢复顺序、不完整 chunk 拒绝、事务回滚语义、加密迁移和整表加密逻辑计数
+> 存储可靠性：加固元数据串行可恢复发布、分片追加恢复顺序、不完整 chunk 拒绝、事务回滚语义、加密迁移和整表加密逻辑计数
 > Workflow 替换：用 main push/PR 主 CI 和单独注册的 tag-only release workflow 替换被手动禁用的旧发布流程
 > 发布安全：加入 tag/版本精确匹配、main 分支归属校验、显式 `NPM_TOKEN` 前置条件、完整 `prepublishOnly` 门禁、包内容检查和 npm provenance
 > 维护者文档：增加中英文 CI/CD 运维手册，覆盖 Secret、发布顺序、GitHub CLI 观察和安全故障恢复
@@ -40,7 +50,7 @@
 > 继续完善：将 `package-lock.json` 纳入版本控制并对齐 Expo 56 peer/dev 依赖版本下限，消除 dev audit 中的 critical；新增 `audit:prod` 与 `audit:no-high` 发布门禁
 > 压力测试：`test:stress` 改为默认有界、可用 `LDS_STRESS_*` 环境变量放大、并使用可复现随机种子；该压力回归现已纳入 `test:all`
 
-### 📅 2026-04-26 `v2.0.0` 正式版发布加固与发布验证
+### 📅 2026-04-23 `v2.0.0` 正式版发布加固与发布验证
 
 > 正式发布：在完成 build、typecheck、全量 Jest、Expo consumer smoke 和打包验证后，将包提升为稳定版 `2.0.0`
 > 消费者契约：正式定义 Expo SDK 54 下受支持的 `npx expo install ...` 安装流程，并记录可选的 native flagship 加密依赖路径
@@ -49,7 +59,7 @@
 > 文档统一：统一 README、API、运行时 QA、变更日志和更新日志的消费者与维护者文档
 > 验证结果：`npm run prepublishOnly`、`npm test -- --runInBand`、`npm run typecheck` 和 `npm pack --json --dry-run --ignore-scripts` 已在 Windows 环境通过
 
-### 📅 2026-04-02 `v2.0.0-beta.5` 加密方案升级与架构优化
+### 📅 2026-04-04 `v2.0.0-beta.5` 加密方案升级与架构优化
 
 > 加密升级：新增 AES-256-GCM 加密模式，符合 NIST SP 800-38D 和 OWASP MASVS 2026 标准
 > 自动迁移：encrypt/decrypt 自动检测数据版本，新数据默认使用 GCM，旧数据保持兼容
@@ -66,7 +76,7 @@
 > 新增文件：.prettierignore、COMMENT_SPECIFICATION 文档（中英文）
 > 测试：365 个测试全部通过，新增 GCM 加密测试
 
-### 📅 2026-01-28 `v2.0.0-beta.2`  Expo Go 加密性能与 Provider 加固
+### 📅 2026-01-28 `v2.0.0-beta.3`  Expo Go 加密性能与 Provider 加固
 
 > Expo Go 性能：降低 PBKDF2 迭代次数，加快开发迭代速度
 > 原生 KDF：新增 react-native-quick-crypto，提升实际设备的 KDF 性能

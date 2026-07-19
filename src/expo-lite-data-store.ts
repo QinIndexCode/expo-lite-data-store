@@ -32,11 +32,21 @@ import type { KeyCacheStats } from './utils/crypto';
 import { StorageError } from './types/storageErrorInfc';
 import * as CryptoService from './core/crypto/CryptoService';
 
-const normalizeSecurity = (opts?: { encrypted?: boolean; requireAuthOnAccess?: boolean }) => {
+const normalizeSecurity = (opts?: {
+  encrypted?: boolean;
+  requireAuthOnAccess?: boolean;
+  encryptFullTable?: boolean;
+  encryptedFields?: string[];
+}) => {
   const requireAuthOnAccess = opts?.requireAuthOnAccess ?? false;
   // Per-access authentication is meaningful only for encrypted storage. Do not
-  // let an explicit encrypted:false silently route this request to plain storage.
-  const encrypted = requireAuthOnAccess || opts?.encrypted === true;
+  // let an explicit encrypted:false or full-table mode silently route this request
+  // to plain storage.
+  const encrypted =
+    requireAuthOnAccess ||
+    opts?.encrypted === true ||
+    opts?.encryptFullTable === true ||
+    (opts?.encryptedFields?.length ?? 0) > 0;
   return { encrypted, requireAuthOnAccess };
 };
 
@@ -58,10 +68,14 @@ export type UpdateOptions<T extends object = StorageRecord> = CommonOptions & {
 let activeTransactionSecurity: TransactionSecurity | null = null;
 const tablePolicyLocks = new Map<string, Promise<void>>();
 
-const hasExplicitSecurityOptions = (options?: CommonOptions): boolean =>
+const hasExplicitSecurityOptions = (
+  options?: CommonOptions & { encryptFullTable?: boolean; encryptedFields?: string[] }
+): boolean =>
   !!options &&
   (Object.prototype.hasOwnProperty.call(options, 'encrypted') ||
-    Object.prototype.hasOwnProperty.call(options, 'requireAuthOnAccess'));
+    Object.prototype.hasOwnProperty.call(options, 'requireAuthOnAccess') ||
+    Object.prototype.hasOwnProperty.call(options, 'encryptFullTable') ||
+    Object.prototype.hasOwnProperty.call(options, 'encryptedFields'));
 
 const matchesTransactionSecurity = (left: TransactionSecurity, right: TransactionSecurity): boolean =>
   left.encrypted === right.encrypted && left.requireAuthOnAccess === right.requireAuthOnAccess;
@@ -120,7 +134,14 @@ const withTablePolicyLock = async <T>(tableName: string, operation: () => Promis
 
 type TableMetadataInspector = {
   ensureInitialized?: () => Promise<void>;
-  getTableMeta?: (tableName: string) => { encrypted?: boolean; requireAuthOnAccess?: boolean } | undefined;
+  getTableMeta?: (tableName: string) =>
+    | {
+        encrypted?: boolean;
+        encryptFullTable?: boolean;
+        encryptedFields?: string[];
+        requireAuthOnAccess?: boolean;
+      }
+    | undefined;
   listTables?: () => Promise<string[]>;
 };
 
@@ -129,7 +150,13 @@ const assertTableAccessPolicy = async (tableName: string, security: TransactionS
   await inspector.ensureInitialized?.();
   const tableMeta = inspector.getTableMeta?.(tableName);
 
-  if (tableMeta?.encrypted === true && !security.encrypted) {
+  const requiresEncryption =
+    tableMeta?.encrypted === true ||
+    tableMeta?.encryptFullTable === true ||
+    (tableMeta?.encryptedFields?.length ?? 0) > 0 ||
+    tableMeta?.requireAuthOnAccess === true;
+
+  if (requiresEncryption && !security.encrypted) {
     throw new StorageError(`Table '${tableName}' requires encrypted storage access`, 'PERMISSION_DENIED', {
       details: 'The table is encrypted and cannot be accessed through the plain storage facade.',
       suggestion: 'Repeat the operation with encrypted: true.',
@@ -223,13 +250,10 @@ export const createTable = async <T extends object = StorageRecord>(
   options: CreateTableOptions<NonInfer<T>> = {}
 ): Promise<void> => {
   return runTableOperation(tableName, options, async ({ encrypted, requireAuthOnAccess, adapter }) => {
-    const { encryptedFields = [], encryptFullTable = false, ...tableOptions } = options ?? {};
     return adapter.createTable<T>(tableName, {
-      ...tableOptions,
+      ...options,
       encrypted,
       requireAuthOnAccess,
-      encryptedFields,
-      encryptFullTable,
     });
   });
 };

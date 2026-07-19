@@ -1,11 +1,9 @@
-// Detect ANSI color code support
 const supportsColor =
   typeof process !== 'undefined' &&
   process.env.NODE_ENV !== 'test' &&
   typeof process.stdout !== 'undefined' &&
   process.stdout.isTTY === true;
 
-// ANSI color codes (used only when supported)
 const reset = supportsColor ? '\x1b[0m' : '';
 const red = supportsColor ? '\x1b[31m' : '';
 const green = supportsColor ? '\x1b[32m' : '';
@@ -14,77 +12,79 @@ const blue = supportsColor ? '\x1b[34m' : '';
 const magenta = supportsColor ? '\x1b[35m' : '';
 const cyan = supportsColor ? '\x1b[36m' : '';
 
-const shouldLogMessage = (): boolean =>
-  typeof process === 'undefined' ||
-  process.env.NODE_ENV !== 'test' ||
-  process.env.EXPO_LITE_DATA_STORE_TEST_LOGS === '1';
+type LogLevel = 'silent' | 'error' | 'warn' | 'info' | 'debug';
 
-/**
- * Colored console logger singleton
- */
+const logLevelPriority: Record<LogLevel, number> = {
+  silent: 0,
+  error: 1,
+  warn: 2,
+  info: 3,
+  debug: 4,
+};
+
+const isLogLevel = (value: string | undefined): value is LogLevel =>
+  value === 'silent' || value === 'error' || value === 'warn' || value === 'info' || value === 'debug';
+
+const getLogLevel = (): LogLevel => {
+  if (typeof process === 'undefined') {
+    return 'warn';
+  }
+
+  if (process.env.NODE_ENV === 'test') {
+    return process.env.EXPO_LITE_DATA_STORE_TEST_LOGS === '1' ? 'debug' : 'silent';
+  }
+
+  const configuredLevel = process.env.EXPO_LITE_DATA_STORE_LOG_LEVEL?.toLowerCase();
+  return isLogLevel(configuredLevel) ? configuredLevel : 'warn';
+};
+
+const shouldLogMessage = (level: Exclude<LogLevel, 'silent'>): boolean =>
+  logLevelPriority[getLogLevel()] >= logLevelPriority[level];
+
 class Logger {
-  /**
-   * Success message (green)
-   */
   success(message: string, ...args: unknown[]): void {
-    if (!shouldLogMessage()) {
+    if (!shouldLogMessage('info')) {
       return;
     }
     console.log(green + message + reset, ...args);
   }
 
-  /**
-   * Error message (red)
-   */
   error(message: string, ...args: unknown[]): void {
-    if (!shouldLogMessage()) {
+    if (!shouldLogMessage('error')) {
       return;
     }
     console.error(red + message + reset, ...args);
   }
 
-  /**
-   * Warning message (yellow)
-   */
   warn(message: string, ...args: unknown[]): void {
-    if (!shouldLogMessage()) {
+    if (!shouldLogMessage('warn')) {
       return;
     }
     console.warn(yellow + message + reset, ...args);
   }
 
-  /**
-   * Info message (blue)
-   */
   info(message: string, ...args: unknown[]): void {
-    if (!shouldLogMessage()) {
+    if (!shouldLogMessage('info')) {
       return;
     }
     console.log(blue + message + reset, ...args);
   }
 
-  /**
-   * Debug message (cyan)
-   */
   debug(message: string, ...args: unknown[]): void {
-    if (!shouldLogMessage()) {
+    if (!shouldLogMessage('debug')) {
       return;
     }
     console.debug(cyan + message + reset, ...args);
   }
 
-  /**
-   * Highlight message (magenta)
-   */
   highlight(message: string, ...args: unknown[]): void {
-    if (!shouldLogMessage()) {
+    if (!shouldLogMessage('info')) {
       return;
     }
     console.log(magenta + message + reset, ...args);
   }
 }
 
-// Singleton instance
 const logger = new Logger();
 
 export default logger;

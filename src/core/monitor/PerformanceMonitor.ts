@@ -333,10 +333,12 @@ export class PerformanceMonitor {
 
     const stats = this.getOverallStats();
     const thresholds = this.getThresholds();
+    const hasPerformanceSamples = stats.totalOperations > 0;
     const performanceHealthy =
-      stats.successRate >= thresholds.minSuccessRate &&
-      stats.averageDuration <= thresholds.maxAverageDuration &&
-      stats.p95Duration <= thresholds.maxP95Duration;
+      !hasPerformanceSamples ||
+      (stats.successRate >= thresholds.minSuccessRate &&
+        stats.averageDuration <= thresholds.maxAverageDuration &&
+        stats.p95Duration <= thresholds.maxP95Duration);
 
     const resources = {
       memoryUsage:
@@ -364,7 +366,11 @@ export class PerformanceMonitor {
           encryption: true,
         },
       },
-      message: performanceHealthy ? 'System is healthy' : 'System health check failed',
+      message: !hasPerformanceSamples
+        ? 'No performance samples are available; no performance failure was detected'
+        : performanceHealthy
+          ? 'System is healthy'
+          : 'System health check failed',
     };
   }
 }

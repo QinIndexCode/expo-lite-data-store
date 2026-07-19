@@ -45,3 +45,34 @@ export default function withTimeout<T>(
       throw error;
     });
 }
+
+/**
+ * Observes a deadline without abandoning an in-flight, non-cancellable
+ * mutation. The returned promise settles only after the underlying operation,
+ * so callers can safely roll back before releasing their lock.
+ */
+export async function withMutationTimeout<T>(
+  promise: Promise<T>,
+  ms = configManager.getConfig().timeout,
+  operation = 'file mutation'
+): Promise<T> {
+  let deadlineReached = false;
+  const timeoutId = setTimeout(() => {
+    deadlineReached = true;
+  }, ms);
+
+  try {
+    const result = await promise;
+    if (deadlineReached) {
+      throw new StorageError(`${operation} timeout`, 'TIMEOUT');
+    }
+    return result;
+  } catch (cause) {
+    if (deadlineReached && !(cause instanceof StorageError && cause.code === 'TIMEOUT')) {
+      throw new StorageError(`${operation} timeout`, 'TIMEOUT', { cause });
+    }
+    throw cause;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}

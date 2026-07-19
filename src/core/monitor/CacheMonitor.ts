@@ -62,7 +62,7 @@ export class CacheMonitor {
 
   getMemoryUsageTrend(): { timestamp: number; memoryUsage: number }[] {
     return this.history.map((stats, index) => ({
-      // CacheStats has no timestamp, so historical times use the sampling interval.
+      // CacheStats has no timestamp, so these values are relative estimates rather than event times.
       timestamp: Date.now() - (this.history.length - index) * 60000,
       memoryUsage: stats.memoryUsage,
     }));

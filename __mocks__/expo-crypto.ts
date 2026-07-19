@@ -22,7 +22,7 @@ const digestStringAsync = async (
   let hash = 0;
   for (const byte of dataBytes) {
     hash = (hash << 5) - hash + byte;
-    hash = hash & hash; // Convert to 32-bit integer
+    hash = hash & hash; // Bitwise coercion keeps the accumulator within signed 32-bit range.
   }
   return Math.abs(hash).toString(16).padStart(32, '0');
 };
@@ -31,7 +31,7 @@ const digest = async (_algorithm: CryptoDigestAlgorithm, data: Uint8Array): Prom
   let hash = 0;
   for (const byte of data) {
     hash = (hash << 5) - hash + byte;
-    hash = hash & hash; // Convert to 32-bit integer
+    hash = hash & hash; // Bitwise coercion keeps the accumulator within signed 32-bit range.
   }
   const hashBytes = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
@@ -48,7 +48,7 @@ const randomUUID = (): string => {
   });
 };
 
-module.exports = {
+const expoCryptoMock = {
   CryptoDigestAlgorithm,
   getRandomBytes,
   digestStringAsync,
@@ -56,4 +56,4 @@ module.exports = {
   randomUUID,
 };
 
-module.exports.default = module.exports;
+module.exports = Object.assign(expoCryptoMock, { default: expoCryptoMock });

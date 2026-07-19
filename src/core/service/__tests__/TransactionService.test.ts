@@ -1,4 +1,9 @@
-import { TransactionService, TransactionError } from '../TransactionService';
+import {
+  getLogicalRecordCount,
+  hasInternalDirectWrite,
+  TransactionService,
+  TransactionError,
+} from '../TransactionService';
 
 type WriteFn = Parameters<TransactionService['commit']>[0];
 type DeleteFn = Parameters<TransactionService['commit']>[1];
@@ -40,6 +45,33 @@ describe('TransactionService', () => {
       await expect(service.beginTransaction()).rejects.toThrow(TransactionError);
       await expect(service.beginTransaction()).rejects.toThrow('Transaction already in progress');
     });
+
+    it('rejects transaction work from a different owner without ending the transaction', async () => {
+      const owner = {};
+      const otherOwner = {};
+      await service.beginTransaction(owner);
+
+      expect(() => service.saveSnapshot('users', [], true, otherOwner)).toThrow(
+        'active transaction belongs to a different storage adapter'
+      );
+      await expect(service.getCurrentTransactionData('users', createReadFn([]), otherOwner)).rejects.toMatchObject({
+        code: 'TRANSACTION_IN_PROGRESS',
+      });
+      await expect(
+        service.commit(
+          createWriteFn(),
+          createDeleteFn(),
+          createBulkWriteFn(),
+          createUpdateFn(),
+          undefined,
+          undefined,
+          otherOwner
+        )
+      ).rejects.toMatchObject({ code: 'TRANSACTION_IN_PROGRESS' });
+
+      expect(service.isInTransaction()).toBe(true);
+      await service.rollback(createWriteFn(), undefined, false, owner);
+    });
   });
 
   describe('commit', () => {
@@ -60,11 +92,8 @@ describe('TransactionService', () => {
       await service.commit(writeFn, deleteFn, bulkWriteFn, updateFn);
 
       expect(writeFn).toHaveBeenCalledTimes(1);
-      expect(writeFn).toHaveBeenCalledWith(
-        'users',
-        [{ id: 1, name: 'Alice' }],
-        expect.objectContaining({ directWrite: true })
-      );
+      expect(writeFn).toHaveBeenCalledWith('users', [{ id: 1, name: 'Alice' }], expect.any(Object));
+      expect(hasInternalDirectWrite(writeFn.mock.calls[0]?.[2])).toBe(true);
       expect(service.isInTransaction()).toBe(false);
     });
 
@@ -78,8 +107,9 @@ describe('TransactionService', () => {
       expect(writeFn).toHaveBeenCalledWith(
         'users',
         [{ id: 2, name: 'Bob' }],
-        expect.objectContaining({ mode: 'overwrite', directWrite: true })
+        expect.objectContaining({ mode: 'overwrite' })
       );
+      expect(hasInternalDirectWrite(writeFn.mock.calls[0]?.[2])).toBe(true);
     });
 
     it('executes queued update operations', async () => {
@@ -93,12 +123,8 @@ describe('TransactionService', () => {
       await service.commit(writeFn, deleteFn, bulkWriteFn, updateFn);
 
       expect(updateFn).toHaveBeenCalledTimes(1);
-      expect(updateFn).toHaveBeenCalledWith(
-        'users',
-        { name: 'Bob' },
-        { id: 1 },
-        expect.objectContaining({ directWrite: true })
-      );
+      expect(updateFn).toHaveBeenCalledWith('users', { name: 'Bob' }, { id: 1 }, expect.any(Object));
+      expect(hasInternalDirectWrite(updateFn.mock.calls[0]?.[3])).toBe(true);
     });
 
     it('executes queued delete operations', async () => {
@@ -112,7 +138,8 @@ describe('TransactionService', () => {
       await service.commit(writeFn, deleteFn, bulkWriteFn, updateFn);
 
       expect(deleteFn).toHaveBeenCalledTimes(1);
-      expect(deleteFn).toHaveBeenCalledWith('users', { id: 1 }, expect.objectContaining({ directWrite: true }));
+      expect(deleteFn).toHaveBeenCalledWith('users', { id: 1 }, expect.any(Object));
+      expect(hasInternalDirectWrite(deleteFn.mock.calls[0]?.[2])).toBe(true);
     });
 
     it('executes queued bulk write operations', async () => {
@@ -160,8 +187,21 @@ describe('TransactionService', () => {
       service.saveSnapshot('users', snapshotData);
       await service.rollback(writeFn);
 
-      expect(writeFn).toHaveBeenCalledWith('users', snapshotData, { mode: 'overwrite', directWrite: true });
+      expect(writeFn).toHaveBeenCalledWith('users', snapshotData, expect.objectContaining({ mode: 'overwrite' }));
+      expect(hasInternalDirectWrite(writeFn.mock.calls[0]?.[2])).toBe(true);
       expect(service.isInTransaction()).toBe(false);
+    });
+
+    it('restores a snapshot with its persisted logical record count', async () => {
+      const writeFn = createWriteFn();
+      const envelope = [{ __enc: 'encrypted-envelope' }];
+
+      await service.beginTransaction();
+      service.saveSnapshot('secure_records', envelope, true, undefined, 7);
+      await service.rollback(writeFn);
+
+      expect(writeFn).toHaveBeenCalledWith('secure_records', envelope, expect.any(Object));
+      expect(getLogicalRecordCount(writeFn.mock.calls[0]?.[2])).toBe(7);
     });
 
     it('resets state when a write fails', async () => {
@@ -170,6 +210,23 @@ describe('TransactionService', () => {
       await service.beginTransaction();
       service.saveSnapshot('users', [{ id: 1 }]);
       await expect(service.rollback(writeFn)).rejects.toThrow('Write failed');
+      expect(service.isInTransaction()).toBe(false);
+    });
+
+    it('continues restoring other tables after one snapshot restore fails', async () => {
+      await service.beginTransaction();
+      service.saveSnapshot('users', [{ id: 1 }]);
+      service.saveSnapshot('posts', [{ id: 2 }]);
+      const writeFn = jest.fn<ReturnType<WriteFn>, Parameters<WriteFn>>().mockImplementation(async tableName => {
+        if (tableName === 'posts') {
+          throw new Error('posts restore failed');
+        }
+        return successfulWriteResult;
+      });
+
+      await expect(service.rollback(writeFn)).rejects.toMatchObject({ code: 'TRANSACTION_ROLLBACK_FAILED' });
+      expect(writeFn).toHaveBeenCalledTimes(2);
+      expect(writeFn).toHaveBeenCalledWith('users', [{ id: 1 }], expect.any(Object));
       expect(service.isInTransaction()).toBe(false);
     });
   });

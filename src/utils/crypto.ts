@@ -3,7 +3,6 @@ import logger from './logger';
 import { performanceMonitor } from '../core/monitor/PerformanceMonitor';
 import { configManager } from '../core/config/ConfigManager';
 
-// Use standard ES module imports
 import { ctr } from '@noble/ciphers/aes';
 import {
   hash as providerHash,
@@ -27,7 +26,7 @@ import { loadOptionalExpoModule, loadRequiredExpoModule } from './expoModuleLoad
 import { StorageError } from '../types/storageErrorInfc';
 import type { StorageRecord } from '../types/storageTypes';
 
-// Re-export for backward compatibility
+// Keep the legacy module path available to existing consumers.
 export { CryptoError };
 export type { KeyCacheStats } from './crypto-types';
 
@@ -35,12 +34,6 @@ type ExpoCryptoModule = typeof import('expo-crypto');
 type ExpoSecureStoreModule = typeof import('expo-secure-store');
 type ExpoConstantsModule = typeof import('expo-constants').default;
 
-/**
- * Converts Uint8Array to Base64 string using Buffer or btoa.
- *
- * @param bytes Uint8Array to convert
- * @returns Base64 encoded string
- */
 const bytesToBase64 = (bytes: Uint8Array): string => {
   if (typeof Buffer !== 'undefined') {
     return Buffer.from(bytes).toString('base64');
@@ -50,12 +43,6 @@ const bytesToBase64 = (bytes: Uint8Array): string => {
   }
 };
 
-/**
- * Converts Base64 string to Uint8Array using Buffer or atob.
- *
- * @param base64 Base64 encoded string
- * @returns Uint8Array of decoded bytes
- */
 const base64ToBytes = (base64: string): Uint8Array => {
   if (typeof Buffer !== 'undefined') {
     return new Uint8Array(Buffer.from(base64, 'base64'));
@@ -110,26 +97,6 @@ const getExpoConstants = (): ExpoConstantsModule | undefined => {
 };
 
 /**
- * Converts Uint8Array to Base64 string using Buffer or btoa.
- *
- * @param bytes Uint8Array to convert
- * @returns Base64 encoded string
- */
-const uint8ArrayToBase64 = (arr: Uint8Array): string => {
-  return bytesToBase64(arr);
-};
-
-/**
- * Converts Base64 string to Uint8Array using secure conversion.
- *
- * @param str Base64 encoded string
- * @returns Uint8Array of decoded bytes
- */
-const base64ToUint8Array = (str: string): Uint8Array => {
-  return base64ToBytes(str);
-};
-
-/**
  * Serializes object to JSON and then encodes to Base64.
  *
  * @param obj Object to serialize
@@ -147,10 +114,27 @@ const jsonToBase64 = (obj: unknown): string => {
  * @param str Base64 encoded JSON string
  * @returns Deserialized object
  */
-const base64ToJson = <T>(str: string): T => {
+const base64ToJson = (str: string): unknown => {
   const bytes = base64ToBytes(str);
   const jsonStr = new TextDecoder().decode(bytes);
-  return JSON.parse(jsonStr) as T;
+  return JSON.parse(jsonStr) as unknown;
+};
+
+const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isEncryptedPayload = (value: unknown): value is EncryptedPayload => {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+
+  return (
+    (value.version === undefined || value.version === CTR_PAYLOAD_VERSION) &&
+    typeof value.salt === 'string' &&
+    typeof value.iv === 'string' &&
+    typeof value.ciphertext === 'string' &&
+    typeof value.hmac === 'string'
+  );
 };
 
 const MASTER_KEY_ALIAS = 'expo_litedb_master_key_v2025';
@@ -233,15 +217,7 @@ const ensureAuthOnAccessSupported = async (): Promise<ExpoSecureStoreModule> => 
   return secureStore;
 };
 
-/**
- * Gets the number of iterations for PBKDF2 key derivation.
- * Dynamically adjusts based on the environment:
- * - Expo Go: 20,000 iterations (balance of performance and security)
- * - Production: 100,000 iterations (default)
- * - High-performance devices: Up to 120,000 iterations (optional)
- *
- * @returns number Number of iterations to use
- */
+/** Bounds configured PBKDF2 iterations and caps Expo Go at 20,000 for responsiveness. */
 const getIterations = (): number => {
   const configIterations = configManager.getConfig().encryption.keyIterations;
   const boundedIterations = normalizePbkdf2Iterations(configIterations, 10000);
@@ -306,15 +282,11 @@ const provisionAuthMasterKey = async (
   await authMasterKeyProvisioning;
 };
 
-/** Bounded LRU cache for derived keys. */
+/** Stores derived keys with bounded expiration and LRU eviction. */
 class SmartKeyCache {
-  /** Internal cache storage */
   private cache = new Map<string, CachedKeyEntry>();
-  /** Maximum cache size */
   private maxSize: number;
-  /** Maximum age for cache entries (milliseconds) */
   private maxAge: number;
-  /** Cache statistics */
   private stats: KeyCacheStats = {
     hits: 0,
     misses: 0,
@@ -322,30 +294,12 @@ class SmartKeyCache {
     size: 0,
   };
 
-  /**
-   * Creates a new SmartKeyCache instance
-   *
-   * @constructor
-   * @param maxSize Maximum number of entries to store in cache (default: 500)
-   * @param maxAge Maximum age for cache entries in milliseconds (default: 1 hour)
-   *
-   * @example
-   * ```typescript
-   * const keyCache = new SmartKeyCache(); // Use default values from config
-   * ```
-   */
   constructor(maxSize?: number, maxAge?: number) {
     const config = configManager.getConfig();
     this.maxSize = maxSize ?? config.encryption.maxCacheSize ?? 100;
     this.maxAge = maxAge ?? config.encryption.cacheTimeout ?? 30 * 60 * 1000;
   }
 
-  /**
-   * Sets a key-value pair in the cache, evicting LRU entry if necessary
-   *
-   * @param key Cache key
-   * @param value Cached key entry
-   */
   set(key: string, value: CachedKeyEntry): void {
     if (this.cache.size >= this.maxSize) {
       this.evictLRU();
@@ -355,12 +309,6 @@ class SmartKeyCache {
     this.stats.size = this.cache.size;
   }
 
-  /**
-   * Gets a cached entry by key, updating access statistics
-   *
-   * @param key Cache key
-   * @returns Cached key entry if found, undefined otherwise
-   */
   get(key: string): CachedKeyEntry | undefined {
     const entry = this.cache.get(key);
     if (entry) {
@@ -373,27 +321,11 @@ class SmartKeyCache {
     return undefined;
   }
 
-  /**
-   * Checks if a key exists in the cache
-   *
-   * @param key Cache key
-   * @returns True if key exists, false otherwise
-   */
-  has(key: string): boolean {
-    return this.cache.has(key);
-  }
-
-  /**
-   * Clears all entries from the cache
-   */
   clear(): void {
     this.cache.clear();
     this.stats.size = 0;
   }
 
-  /**
-   * Cleans up expired entries from the cache
-   */
   cleanup(): void {
     const now = Date.now();
     for (const [key, entry] of this.cache.entries()) {
@@ -404,17 +336,13 @@ class SmartKeyCache {
     this.stats.size = this.cache.size;
   }
 
-  /**
-   * Evicts the least recently used entry from the cache
-   */
   private evictLRU(): void {
     let lruKey: string | undefined;
-    let lruScore = Infinity;
+    let oldestAccessTime = Infinity;
 
     for (const [key, entry] of this.cache.entries()) {
-      const score = entry.accessCount * (Date.now() - entry.lastAccessTime);
-      if (score < lruScore) {
-        lruScore = score;
+      if (entry.lastAccessTime < oldestAccessTime) {
+        oldestAccessTime = entry.lastAccessTime;
         lruKey = key;
       }
     }
@@ -425,29 +353,10 @@ class SmartKeyCache {
     }
   }
 
-  /**
-   * Gets the current cache size
-   *
-   * @returns Current number of entries in the cache
-   */
-  size(): number {
-    return this.cache.size;
-  }
-
-  /**
-   * Gets the current cache statistics
-   *
-   * @returns Key cache statistics
-   */
   getStats(): KeyCacheStats {
     return { ...this.stats };
   }
 
-  /**
-   * Gets the current cache hit rate
-   *
-   * @returns Cache hit rate as a decimal (0 to 1)
-   */
   getHitRate(): number {
     const total = this.stats.hits + this.stats.misses;
     return total > 0 ? this.stats.hits / total : 0;
@@ -548,6 +457,15 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
 
     const iterations = getIterations();
     const rootCacheKey = `${iterations}:${bytesToBase64(providerHashBytes(masterKey, 'SHA-256'))}`;
+    const cacheKey = `${rootCacheKey}:${bytesToBase64(salt)}`;
+    const cachedEntry = keyCache.get(cacheKey);
+    if (cachedEntry) {
+      return {
+        aesKey: cachedEntry.aesKey,
+        hmacKey: cachedEntry.hmacKey,
+      };
+    }
+
     let rootKey = getRootKeyCacheEntry(rootCacheKey);
 
     if (!rootKey) {
@@ -561,25 +479,15 @@ const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey:
     const aesKey = derivedBytes.slice(0, 32);
     const hmacKey = derivedBytes.slice(32, 64);
 
-    const result = { aesKey, hmacKey };
+    keyCache.set(cacheKey, {
+      aesKey,
+      hmacKey,
+      accessCount: 1,
+      lastAccessTime: Date.now(),
+      createdAt: Date.now(),
+    });
 
-    const saltStr = bytesToBase64(salt);
-    const cacheKey = `${masterKey.slice(0, 16)}_${saltStr}`;
-    const cachedEntry = keyCache.get(cacheKey);
-    if (!cachedEntry) {
-      keyCache.set(cacheKey, {
-        aesKey,
-        hmacKey,
-        accessCount: 1,
-        lastAccessTime: Date.now(),
-        createdAt: Date.now(),
-      });
-    } else {
-      cachedEntry.accessCount++;
-      cachedEntry.lastAccessTime = Date.now();
-    }
-
-    return result;
+    return { aesKey, hmacKey };
   } catch (error) {
     throw new CryptoError(`Key derivation failed`, 'KEY_DERIVE_FAILED', error);
   }
@@ -671,12 +579,11 @@ const getCtrHmacInput = (payload: Pick<EncryptedPayload, 'version' | 'salt' | 'i
 export const encrypt = async (plainText: string, masterKey: string): Promise<string> => {
   const algorithm = configManager.getConfig().encryption.algorithm || 'auto';
 
-  // Use GCM for 'auto' or 'AES-GCM' (new data defaults to GCM)
+  // New data uses GCM unless callers explicitly select the legacy CTR mode.
   if (algorithm === 'AES-GCM' || algorithm === 'auto') {
     return encryptGCM(plainText, masterKey);
   }
 
-  // Fallback to CTR+HMAC for explicit 'AES-CTR'
   return encryptCTR(plainText, masterKey);
 };
 
@@ -691,8 +598,8 @@ const encryptCTR = async (plainText: string, masterKey: string): Promise<string>
 
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltBytes);
 
-    const saltStr = uint8ArrayToBase64(saltBytes);
-    const ivStr = uint8ArrayToBase64(ivBytes);
+    const saltStr = bytesToBase64(saltBytes);
+    const ivStr = bytesToBase64(ivBytes);
 
     const plainTextBytes = new TextEncoder().encode(plainText);
     const cipher = ctr(aesKey, ivBytes);
@@ -750,13 +657,11 @@ const encryptCTR = async (plainText: string, masterKey: string): Promise<string>
 export const decrypt = async (encryptedBase64: string, masterKey: string): Promise<string> => {
   const startTime = Date.now();
   try {
-    // Auto-detect encryption version by parsing the payload
     const jsonBytes = base64ToBytes(encryptedBase64);
     const jsonStr = new TextDecoder().decode(jsonBytes);
-    const payload = JSON.parse(jsonStr);
+    const payload: unknown = JSON.parse(jsonStr) as unknown;
 
-    // Check if this is a GCM payload
-    if (payload && payload.version === 'gcm-v1') {
+    if (isObjectRecord(payload) && payload.version === 'gcm-v1') {
       const result = await decryptGCM(encryptedBase64, masterKey);
       performanceMonitor.record({
         operation: 'decrypt',
@@ -768,7 +673,6 @@ export const decrypt = async (encryptedBase64: string, masterKey: string): Promi
       return result;
     }
 
-    // Fallback to CTR+HMAC decryption
     return decryptCTR(encryptedBase64, masterKey);
   } catch (error) {
     performanceMonitor.record({
@@ -788,21 +692,14 @@ export const decrypt = async (encryptedBase64: string, masterKey: string): Promi
  */
 const decryptCTR = async (encryptedBase64: string, masterKey: string): Promise<string> => {
   try {
-    const payload: EncryptedPayload = base64ToJson(encryptedBase64);
+    const payload = base64ToJson(encryptedBase64);
 
-    if (
-      !payload ||
-      typeof payload.salt !== 'string' ||
-      typeof payload.iv !== 'string' ||
-      typeof payload.ciphertext !== 'string' ||
-      typeof payload.hmac !== 'string' ||
-      (payload.version !== undefined && payload.version !== CTR_PAYLOAD_VERSION)
-    ) {
+    if (!isEncryptedPayload(payload)) {
       throw new CryptoError('Unsupported or invalid CTR payload', 'DECRYPT_FAILED');
     }
 
-    const saltUint8Array = base64ToUint8Array(payload.salt);
-    const ivBytes = base64ToUint8Array(payload.iv);
+    const saltUint8Array = base64ToBytes(payload.salt);
+    const ivBytes = base64ToBytes(payload.iv);
 
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
 
@@ -917,7 +814,7 @@ export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promis
   }
 };
 
-// resetMasterKey for logout/reset
+/** Removes persisted master-key aliases and invalidates derived-key caches. */
 export const resetMasterKey = async (): Promise<void> => {
   let removedKeyMaterial = false;
 
@@ -972,7 +869,7 @@ export const precomputeCommonKeys = async (): Promise<void> => {
 export const generateMasterKey = async (): Promise<string> => {
   try {
     const bytes = getSecureRandomBytes(32);
-    return uint8ArrayToBase64(bytes);
+    return bytesToBase64(bytes);
   } catch (error) {
     logger.error('Failed to generate secure random bytes:', error);
     const isTestEnvironment = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
@@ -983,7 +880,7 @@ export const generateMasterKey = async (): Promise<string> => {
     for (let i = 0; i < 32; i++) {
       bytes[i] = Math.floor(Math.random() * 256);
     }
-    return uint8ArrayToBase64(bytes);
+    return bytesToBase64(bytes);
   }
 };
 
@@ -1035,12 +932,12 @@ const encryptBulkCTR = async (plainTexts: string[], masterKey: string): Promise<
   try {
     const saltBytes = getSecureRandomBytes(16);
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltBytes);
-    const saltStr = uint8ArrayToBase64(saltBytes);
+    const saltStr = bytesToBase64(saltBytes);
     const encryptedResults: BulkEncryptionResult[] = [];
 
     for (const plainText of plainTexts) {
       const ivBytes = getSecureRandomBytes(16);
-      const ivStr = uint8ArrayToBase64(ivBytes);
+      const ivStr = bytesToBase64(ivBytes);
       const plainTextBytes = new TextEncoder().encode(plainText);
       const cipher = ctr(aesKey, ivBytes);
       const ciphertextBytes = cipher.encrypt(plainTextBytes);
@@ -1081,18 +978,50 @@ const encryptBulkCTR = async (plainTexts: string[], masterKey: string): Promise<
 export const decryptBulk = async (encryptedTexts: string[], masterKey: string): Promise<string[]> => {
   if (encryptedTexts.length === 0) return [];
 
-  // GCM payloads are self-identifying; legacy payloads use CTR.
-  try {
-    const jsonBytes = base64ToBytes(encryptedTexts[0]);
-    const jsonStr = new TextDecoder().decode(jsonBytes);
-    const firstPayload = JSON.parse(jsonStr);
+  const gcmEntries: Array<{ index: number; ciphertext: string }> = [];
+  const ctrEntries: Array<{ index: number; ciphertext: string }> = [];
 
-    if (firstPayload && firstPayload.version === 'gcm-v1') {
-      return decryptGCMBulk(encryptedTexts, masterKey);
+  encryptedTexts.forEach((ciphertext, index) => {
+    let isGcm = false;
+    try {
+      const jsonBytes = base64ToBytes(ciphertext);
+      const jsonStr = new TextDecoder().decode(jsonBytes);
+      const payload: unknown = JSON.parse(jsonStr) as unknown;
+      isGcm = isObjectRecord(payload) && payload.version === 'gcm-v1';
+    } catch {
+      // Invalid or legacy payloads follow the CTR path for its existing error contract.
     }
-  } catch {}
 
-  return decryptBulkCTR(encryptedTexts, masterKey);
+    (isGcm ? gcmEntries : ctrEntries).push({ index, ciphertext });
+  });
+
+  const decrypted = new Array<string>(encryptedTexts.length);
+  await Promise.all([
+    gcmEntries.length > 0
+      ? decryptGCMBulk(
+          gcmEntries.map(entry => entry.ciphertext),
+          masterKey
+        ).then(values => {
+          values.forEach((value, resultIndex) => {
+            const entry = gcmEntries[resultIndex];
+            if (entry) decrypted[entry.index] = value;
+          });
+        })
+      : Promise.resolve(),
+    ctrEntries.length > 0
+      ? decryptBulkCTR(
+          ctrEntries.map(entry => entry.ciphertext),
+          masterKey
+        ).then(values => {
+          values.forEach((value, resultIndex) => {
+            const entry = ctrEntries[resultIndex];
+            if (entry) decrypted[entry.index] = value;
+          });
+        })
+      : Promise.resolve(),
+  ]);
+
+  return decrypted;
 };
 
 /**
@@ -1103,21 +1032,14 @@ const decryptBulkCTR = async (encryptedTexts: string[], masterKey: string): Prom
 
   try {
     const decryptPromises = encryptedTexts.map(async encryptedText => {
-      const payload: EncryptedPayload = base64ToJson(encryptedText);
+      const payload = base64ToJson(encryptedText);
 
-      if (
-        !payload ||
-        typeof payload.salt !== 'string' ||
-        typeof payload.iv !== 'string' ||
-        typeof payload.ciphertext !== 'string' ||
-        typeof payload.hmac !== 'string' ||
-        (payload.version !== undefined && payload.version !== CTR_PAYLOAD_VERSION)
-      ) {
+      if (!isEncryptedPayload(payload)) {
         throw new CryptoError('Unsupported or invalid CTR payload', 'DECRYPT_FAILED');
       }
 
-      const saltUint8Array = base64ToUint8Array(payload.salt);
-      const ivBytes = base64ToUint8Array(payload.iv);
+      const saltUint8Array = base64ToBytes(payload.salt);
+      const ivBytes = base64ToBytes(payload.iv);
 
       const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
 
@@ -1187,14 +1109,14 @@ const serializeFieldValue = (value: unknown): string => {
 const deserializeFieldValue = (value: string): unknown => {
   if (value.startsWith(FIELD_VALUE_PREFIX)) {
     try {
-      return JSON.parse(value.slice(FIELD_VALUE_PREFIX.length));
+      return JSON.parse(value.slice(FIELD_VALUE_PREFIX.length)) as unknown;
     } catch (error) {
       throw new CryptoError('Field encryption payload is invalid', 'DECRYPT_FAILED', error);
     }
   }
 
   try {
-    return JSON.parse(value);
+    return JSON.parse(value) as unknown;
   } catch {
     return value;
   }

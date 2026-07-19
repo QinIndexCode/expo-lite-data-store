@@ -239,6 +239,37 @@ describe('CacheManager', () => {
 
       expect(fetchFn).toHaveBeenCalledTimes(1);
     });
+
+    it('preserves the per-key queue when cleanup stops the background timer', async () => {
+      let resolveFetch!: (value: string) => void;
+      let signalFetchStarted!: () => void;
+      const fetchStarted = new Promise<void>(resolve => {
+        signalFetchStarted = resolve;
+      });
+      const fetchFn = jest.fn(
+        () =>
+          new Promise<string>(resolve => {
+            signalFetchStarted();
+            resolveFetch = resolve;
+          })
+      );
+
+      const first = cacheManager.getSafe('queued-key', fetchFn);
+      const second = cacheManager.getSafe('queued-key', fetchFn);
+      cacheManager.cleanup();
+      const third = cacheManager.getSafe('queued-key', fetchFn);
+
+      await fetchStarted;
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+
+      resolveFetch('queued-value');
+      await expect(Promise.all([first, second, third])).resolves.toEqual([
+        'queued-value',
+        'queued-value',
+        'queued-value',
+      ]);
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('cache penetration protection', () => {

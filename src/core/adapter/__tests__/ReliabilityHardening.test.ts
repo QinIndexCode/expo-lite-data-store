@@ -2,16 +2,19 @@
 
 import { MetadataManager } from '../../meta/MetadataManager';
 import { FileSystemStorageAdapter } from '../FileSystemStorageAdapter';
+import { CacheManager } from '../../cache/CacheManager';
 import { configManager } from '../../config/ConfigManager';
 import { SingleFileHandler } from '../../file/SingleFileHandler';
 import { DataWriter } from '../../data/DataWriter';
 import { getFileSystem } from '../../../utils/fileSystemCompat';
 import { getRootPathSync } from '../../../utils/ROOTPath';
 import logger from '../../../utils/logger';
-import type { StorageRecord } from '../../../types/storageTypes';
+import { isStorageRecord, type StorageRecord } from '../../../types/storageTypes';
+import { StorageError } from '../../../types/storageErrorInfc';
 
 type AdapterPrivateAccess = {
   dataWriter: DataWriter;
+  cacheManager: CacheManager;
 };
 
 const getAdapterPrivateAccess = (adapter: FileSystemStorageAdapter): AdapterPrivateAccess =>
@@ -23,6 +26,61 @@ const readMockFileText = (path: string): string => {
     throw new Error(`Expected a file at ${path}`);
   }
   return entry;
+};
+
+type PersistedDataFile = {
+  data: StorageRecord[];
+  hash: string;
+};
+
+type PersistedMetadata = {
+  tables: StorageRecord;
+};
+
+const isStorageRecordArray = (value: unknown): value is StorageRecord[] =>
+  Array.isArray(value) && value.every(isStorageRecord);
+
+const parsePersistedDataFile = (serialized: string): PersistedDataFile => {
+  const parsed: unknown = JSON.parse(serialized) as unknown;
+  if (!isStorageRecord(parsed) || !isStorageRecordArray(parsed.data)) {
+    throw new Error('Expected persisted data to contain record entries');
+  }
+  if (typeof parsed.hash !== 'string') {
+    throw new Error('Expected persisted data to contain an integrity hash');
+  }
+  return { data: parsed.data, hash: parsed.hash };
+};
+
+const parsePersistedMetadata = (serialized: string): PersistedMetadata => {
+  const parsed: unknown = JSON.parse(serialized) as unknown;
+  if (!isStorageRecord(parsed) || !isStorageRecord(parsed.tables)) {
+    throw new Error('Expected persisted metadata to contain table records');
+  }
+  return { tables: parsed.tables };
+};
+
+const getPersistedTable = (metadata: PersistedMetadata, tableName: string): StorageRecord => {
+  const table = metadata.tables[tableName];
+  if (!isStorageRecord(table)) {
+    throw new Error(`Expected persisted metadata for '${tableName}'`);
+  }
+  return table;
+};
+
+const getPersistedCount = (metadata: PersistedMetadata, tableName: string): number => {
+  const count = getPersistedTable(metadata, tableName).count;
+  if (typeof count !== 'number') {
+    throw new Error(`Expected a numeric record count for '${tableName}'`);
+  }
+  return count;
+};
+
+const getPersistedBoolean = (metadata: PersistedMetadata, tableName: string, field: string): boolean => {
+  const value = getPersistedTable(metadata, tableName)[field];
+  if (typeof value !== 'boolean') {
+    throw new Error(`Expected '${field}' to be boolean for '${tableName}'`);
+  }
+  return value;
 };
 
 describe('FileSystemStorageAdapter reliability hardening', () => {
@@ -55,8 +113,12 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
 
     const filePath = '/mock/documents/lite-data-store/corrupted_table.ldb';
     const fileSystem = global.__expo_file_system_mock__.mockFileSystem;
-    const parsed = JSON.parse(readMockFileText(filePath));
-    parsed.data[0].value = 'tampered';
+    const parsed = parsePersistedDataFile(readMockFileText(filePath));
+    const firstRecord = parsed.data[0];
+    if (!firstRecord) {
+      throw new Error('Expected persisted data to include a first record');
+    }
+    firstRecord.value = 'tampered';
     fileSystem[filePath] = JSON.stringify(parsed);
 
     await expect(adapter.read('corrupted_table', { bypassCache: true })).rejects.toMatchObject({
@@ -145,6 +207,31 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
     await adapter.deleteTable('transaction_discard');
   });
 
+  it('rejects a forged directWrite property and discards the staged write on rollback', async () => {
+    const tableName = 'transaction_forged_direct_write';
+    await adapter.createTable(tableName, { initialData: [{ id: 1, value: 'original' }] });
+    await adapter.beginTransaction();
+
+    const forgedOptions = Object.assign({ mode: 'append' as const }, { directWrite: true });
+    await adapter.write(tableName, { id: 2, value: 'must-remain-staged' }, forgedOptions);
+    await adapter.rollback();
+
+    await expect(adapter.read(tableName, { bypassCache: true })).resolves.toEqual([{ id: 1, value: 'original' }]);
+    await adapter.deleteTable(tableName);
+  });
+
+  it('applies a queued bulk write exactly once during commit', async () => {
+    const tableName = 'transaction_bulk_once';
+    await adapter.createTable(tableName, { initialData: [{ id: 1 }] });
+
+    await adapter.beginTransaction();
+    await adapter.bulkWrite(tableName, [{ type: 'insert', data: { id: 2 } }]);
+    await adapter.commit();
+
+    await expect(adapter.read(tableName, { bypassCache: true })).resolves.toEqual([{ id: 1 }, { id: 2 }]);
+    await adapter.deleteTable(tableName);
+  });
+
   it('updates only matched rows when records do not have id fields', async () => {
     await adapter.createTable('no_id_update_rows', {
       initialData: [
@@ -217,9 +304,31 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
     const metaText = fileSystem['/mock/documents/lite-data-store/meta.ldb'];
     expect(metaText).toBeDefined();
 
-    const persistedMeta = JSON.parse(readMockFileText('/mock/documents/lite-data-store/meta.ldb'));
-    expect(persistedMeta.tables.metadata_flush_table.count).toBe(2);
+    const persistedMeta = parsePersistedMetadata(readMockFileText('/mock/documents/lite-data-store/meta.ldb'));
+    expect(getPersistedCount(persistedMeta, 'metadata_flush_table')).toBe(2);
     await adapter.deleteTable('metadata_flush_table');
+  });
+
+  it('surfaces cleanup flush failures and preserves pending metadata for a successful retry', async () => {
+    const tableName = 'cleanup_metadata_flush_table';
+    await adapter.createTable(tableName, { initialData: [{ id: 1 }] });
+    metadataManager.update(tableName, { isHighRisk: true, updatedAt: Date.now() });
+
+    const saveSpy = jest
+      .spyOn(metadataManager, 'saveImmediately')
+      .mockRejectedValueOnce(new Error('simulated cleanup metadata flush failure'));
+
+    await expect(adapter.cleanup()).rejects.toThrow('simulated cleanup metadata flush failure');
+    await expect(adapter.cleanup()).resolves.toBeUndefined();
+    saveSpy.mockRestore();
+
+    const reloadedMetadata = new MetadataManager();
+    try {
+      await reloadedMetadata.waitForLoad();
+      expect(reloadedMetadata.get(tableName)).toMatchObject({ isHighRisk: true });
+    } finally {
+      reloadedMetadata.cleanup();
+    }
   });
 
   it('records the actual chunk count for chunked initial data', async () => {
@@ -263,8 +372,8 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
       requireAuthOnAccess: true,
     });
 
-    const persistedMeta = JSON.parse(readMockFileText(`${getRootPathSync()}meta.ldb`));
-    expect(persistedMeta.tables[tableName].requireAuthOnAccess).toBe(true);
+    const persistedMeta = parsePersistedMetadata(readMockFileText(`${getRootPathSync()}meta.ldb`));
+    expect(getPersistedBoolean(persistedMeta, tableName, 'requireAuthOnAccess')).toBe(true);
     await adapter.deleteTable(tableName);
   });
 
@@ -330,5 +439,52 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
     await expect(fileSystem.getInfoAsync(`${rootPath}${tableName}.ldb`)).resolves.toMatchObject({ exists: false });
     await expect(fileSystem.getInfoAsync(`${rootPath}${tableName}.ldb.tmp`)).resolves.toMatchObject({ exists: false });
     await expect(fileSystem.getInfoAsync(`${rootPath}${tableName}/`)).resolves.toMatchObject({ exists: false });
+  });
+
+  it('keeps a failed physical delete logically absent, invalidates cache, and allows cleanup retry', async () => {
+    const tableName = 'delete_physical_cleanup_retry';
+    const filePath = `${getRootPathSync()}${tableName}.ldb`;
+    const fileSystem = getFileSystem();
+    await adapter.createTable(tableName, { mode: 'single', initialData: [{ id: 1, value: 'old' }] });
+    await adapter.read(tableName);
+
+    const cacheManager = getAdapterPrivateAccess(adapter).cacheManager;
+    const namespaceBeforeDelete = cacheManager.getNamespaceVersion(tableName);
+    const deleteAsync = fileSystem.deleteAsync.bind(fileSystem);
+    let failAuthoritativeDelete = true;
+    const deleteSpy = jest.spyOn(fileSystem, 'deleteAsync').mockImplementation(async (path, options) => {
+      if (path === filePath && failAuthoritativeDelete) {
+        failAuthoritativeDelete = false;
+        throw new Error('simulated physical table cleanup failure');
+      }
+      await deleteAsync(path, options);
+    });
+
+    try {
+      let deletionError: unknown;
+      try {
+        await adapter.deleteTable(tableName);
+      } catch (error) {
+        deletionError = error;
+      }
+      expect(deletionError).toBeInstanceOf(StorageError);
+      if (!(deletionError instanceof StorageError)) {
+        throw new Error('Expected a StorageError for incomplete physical cleanup');
+      }
+      expect(deletionError.code).toBe('TABLE_DELETE_FAILED');
+      expect(deletionError.details).toContain('logically absent');
+      await expect(adapter.hasTable(tableName)).resolves.toBe(false);
+      await expect(fileSystem.getInfoAsync(filePath)).resolves.toMatchObject({ exists: true });
+      expect(cacheManager.getNamespaceVersion(tableName)).not.toBe(namespaceBeforeDelete);
+      await expect(adapter.migrateToChunked(tableName)).rejects.toMatchObject({ code: 'TABLE_NOT_FOUND' });
+      await expect(adapter.hasTable(tableName)).resolves.toBe(false);
+      await expect(fileSystem.getInfoAsync(filePath)).resolves.toMatchObject({ exists: true });
+
+      await expect(adapter.deleteTable(tableName)).resolves.toBeUndefined();
+      await expect(fileSystem.getInfoAsync(filePath)).resolves.toMatchObject({ exists: false });
+    } finally {
+      deleteSpy.mockRestore();
+      await adapter.deleteTable(tableName).catch(() => undefined);
+    }
   });
 });

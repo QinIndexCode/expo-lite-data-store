@@ -20,9 +20,6 @@ const getExpoConstants = (): ExpoConstantsRuntime | null => {
   return cachedExpoConstants;
 };
 
-/**
- * Detects if running in Expo Go
- */
 const isExpoGo = (): boolean => {
   try {
     return getExpoConstants()?.appOwnership === 'expo';
@@ -31,9 +28,6 @@ const isExpoGo = (): boolean => {
   }
 };
 
-/**
- * Gets iteration count with Expo Go adjustment
- */
 const getGCMIterations = (): number => {
   const configIterations = configManager.getConfig().encryption.keyIterations;
   const boundedIterations = normalizePbkdf2Iterations(configIterations, 10000);
@@ -45,40 +39,40 @@ const getGCMIterations = (): number => {
   return Math.max(100000, boundedIterations);
 };
 
-/**
- * GCM encrypted payload structure
- */
 export interface GCMEncryptedPayload {
-  /** Base64 encoded salt (16 bytes) */
+  /** Base64-encoded salt (16 bytes). */
   salt: string;
-  /** Base64 encoded nonce (12 bytes, GCM standard) */
+  /** Base64-encoded nonce (12 bytes, the GCM standard size). */
   iv: string;
-  /** Base64 encoded ciphertext */
+  /** Base64-encoded ciphertext. */
   ciphertext: string;
-  /** Base64 encoded authentication tag (16 bytes) */
+  /** Base64-encoded authentication tag (16 bytes). */
   tag: string;
-  /** Version identifier */
+  /** Payload version identifier. */
   version: 'gcm-v1';
 }
 
-/**
- * Key size for AES-256
- */
-const AES_KEY_SIZE = 32; // 256 bits = 32 bytes
+const isGCMEncryptedPayload = (value: unknown): value is GCMEncryptedPayload => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
 
-/**
- * GCM nonce size (recommended 12 bytes)
- */
+  const payload = value as Record<string, unknown>;
+  return (
+    payload.version === 'gcm-v1' &&
+    typeof payload.salt === 'string' &&
+    typeof payload.iv === 'string' &&
+    typeof payload.ciphertext === 'string' &&
+    typeof payload.tag === 'string'
+  );
+};
+
+const AES_KEY_SIZE = 32;
+
 const GCM_NONCE_SIZE = 12;
 
-/**
- * Salt size for key derivation
- */
 const SALT_SIZE = 16;
 
-/**
- * Converts Uint8Array to Base64 string
- */
 const bytesToBase64 = (bytes: Uint8Array): string => {
   if (typeof Buffer !== 'undefined') {
     return Buffer.from(bytes).toString('base64');
@@ -87,9 +81,6 @@ const bytesToBase64 = (bytes: Uint8Array): string => {
   return btoa(binaryString);
 };
 
-/**
- * Converts Base64 string to Uint8Array
- */
 const base64ToBytes = (base64: string): Uint8Array => {
   if (typeof Buffer !== 'undefined') {
     return new Uint8Array(Buffer.from(base64, 'base64'));
@@ -102,9 +93,6 @@ const base64ToBytes = (base64: string): Uint8Array => {
   return bytes;
 };
 
-/**
- * Derives AES key from master key and salt using PBKDF2
- */
 const deriveGCMKey = async (masterKey: string, salt: Uint8Array): Promise<Uint8Array> => {
   const iterations = getGCMIterations();
 
@@ -112,7 +100,6 @@ const deriveGCMKey = async (masterKey: string, salt: Uint8Array): Promise<Uint8A
   const masterKeyDigest = bytesToBase64(hashBytes(masterKey, 'SHA-256'));
   const cacheKey = `gcm_${masterKeyDigest}_${saltStr}_${iterations}`;
 
-  // Check cache first
   const cached = gcmKeyCache.get(cacheKey);
   if (cached) {
     return cached;
@@ -121,7 +108,6 @@ const deriveGCMKey = async (masterKey: string, salt: Uint8Array): Promise<Uint8A
   try {
     const derivedBytes = pbkdf2(masterKey, salt, iterations, AES_KEY_SIZE, 'sha256');
 
-    // Cache the derived key
     gcmKeyCache.set(cacheKey, derivedBytes);
 
     return derivedBytes;
@@ -130,9 +116,7 @@ const deriveGCMKey = async (masterKey: string, salt: Uint8Array): Promise<Uint8A
   }
 };
 
-/**
- * Simple LRU cache for GCM keys
- */
+/** Bounded LRU cache for derived GCM keys. */
 class GCMKeyCache {
   private cache = new Map<string, Uint8Array>();
   private maxSize = 100;
@@ -140,7 +124,6 @@ class GCMKeyCache {
   get(key: string): Uint8Array | undefined {
     const value = this.cache.get(key);
     if (value) {
-      // Move to end (most recently used)
       this.cache.delete(key);
       this.cache.set(key, value);
     }
@@ -149,7 +132,6 @@ class GCMKeyCache {
 
   set(key: string, value: Uint8Array): void {
     if (this.cache.size >= this.maxSize) {
-      // Evict least recently used (first item)
       const firstKey = this.cache.keys().next().value;
       if (firstKey) {
         this.cache.delete(firstKey);
@@ -169,43 +151,25 @@ class GCMKeyCache {
 
 const gcmKeyCache = new GCMKeyCache();
 
-/**
- * Encrypts text using AES-256-GCM
- *
- * @param plainText Plain text to encrypt
- * @param masterKey Master key for encryption
- * @returns Promise<string> Encrypted text in Base64 format
- *
- * @throws CryptoError If encryption fails
- *
- * @example
- * ```typescript
- * const encrypted = await encryptGCM('secret text', 'master password');
- * ```
- */
+/** Encrypts text with AES-256-GCM and returns a Base64 payload. */
 export const encryptGCM = async (plainText: string, masterKey: string): Promise<string> => {
   const startTime = Date.now();
 
   try {
-    // Generate random salt and nonce
     const saltBytes = randomBytes(SALT_SIZE);
     const nonceBytes = randomBytes(GCM_NONCE_SIZE);
 
-    // Derive AES key
     const aesKey = await deriveGCMKey(masterKey, saltBytes);
 
-    // Encrypt using AES-256-GCM
     const plainTextBytes = new TextEncoder().encode(plainText);
     const cipher = gcm(aesKey, nonceBytes);
     const ciphertextBytes = cipher.encrypt(plainTextBytes);
 
-    // GCM produces ciphertext with tag appended (last 16 bytes)
-    // Split ciphertext and tag
-    const tagSize = 16; // 128-bit tag
+    // Noble appends the 128-bit tag to the ciphertext; the payload stores it separately.
+    const tagSize = 16;
     const actualCiphertext = ciphertextBytes.slice(0, -tagSize);
     const tag = ciphertextBytes.slice(-tagSize);
 
-    // Build payload
     const payload: GCMEncryptedPayload = {
       salt: bytesToBase64(saltBytes),
       iv: bytesToBase64(nonceBytes),
@@ -214,7 +178,6 @@ export const encryptGCM = async (plainText: string, masterKey: string): Promise<
       version: 'gcm-v1',
     };
 
-    // Serialize to JSON then Base64
     const jsonStr = JSON.stringify(payload);
     const result = bytesToBase64(new TextEncoder().encode(jsonStr));
 
@@ -240,49 +203,35 @@ export const encryptGCM = async (plainText: string, masterKey: string): Promise<
   }
 };
 
-/**
- * Decrypts text using AES-256-GCM
- *
- * @param encryptedBase64 Encrypted text in Base64 format
- * @param masterKey Master key for decryption
- * @returns Promise<string> Decrypted plain text
- *
- * @throws CryptoError If decryption fails or authentication fails
- *
- * @example
- * ```typescript
- * const decrypted = await decryptGCM(encryptedText, 'master password');
- * ```
- */
+/** Authenticates and decrypts a Base64 AES-256-GCM payload. */
 export const decryptGCM = async (encryptedBase64: string, masterKey: string): Promise<string> => {
   const startTime = Date.now();
 
   try {
-    // Parse payload
     const jsonBytes = base64ToBytes(encryptedBase64);
     const jsonStr = new TextDecoder().decode(jsonBytes);
-    const payload: GCMEncryptedPayload = JSON.parse(jsonStr);
-
-    // Verify version
-    if (payload.version !== 'gcm-v1') {
-      throw new Error(`Unsupported GCM version: ${payload.version}`);
+    const parsed: unknown = JSON.parse(jsonStr) as unknown;
+    if (!isGCMEncryptedPayload(parsed)) {
+      throw new CryptoError('Unsupported or invalid GCM payload', 'DECRYPT_FAILED');
     }
+    const payload = parsed;
 
-    // Convert from Base64
     const saltBytes = base64ToBytes(payload.salt);
     const nonceBytes = base64ToBytes(payload.iv);
     const ciphertextBytes = base64ToBytes(payload.ciphertext);
     const tagBytes = base64ToBytes(payload.tag);
 
-    // Derive AES key
+    if (saltBytes.length !== SALT_SIZE || nonceBytes.length !== GCM_NONCE_SIZE || tagBytes.length !== 16) {
+      throw new CryptoError('GCM payload has invalid binary field lengths', 'DECRYPT_FAILED');
+    }
+
     const aesKey = await deriveGCMKey(masterKey, saltBytes);
 
-    // Combine ciphertext and tag for GCM decryption
+    // Noble expects the authentication tag appended to the ciphertext.
     const combinedBytes = new Uint8Array(ciphertextBytes.length + tagBytes.length);
     combinedBytes.set(ciphertextBytes);
     combinedBytes.set(tagBytes, ciphertextBytes.length);
 
-    // Decrypt using AES-256-GCM
     const cipher = gcm(aesKey, nonceBytes);
     const plainTextBytes = cipher.decrypt(combinedBytes);
     const result = new TextDecoder().decode(plainTextBytes);
@@ -313,33 +262,21 @@ export const decryptGCM = async (encryptedBase64: string, masterKey: string): Pr
   }
 };
 
-/**
- * Clears the GCM key cache (useful for logout or reset)
- */
+/** Clears derived GCM keys after logout or key reset. */
 export const clearGCMKeyCache = (): void => {
   gcmKeyCache.clear();
 };
 
-/**
- * Gets GCM key cache size
- */
 export const getGCMKeyCacheSize = (): number => {
   return gcmKeyCache.size;
 };
 
-/**
- * Bulk encrypt multiple texts using AES-256-GCM
- * Reuses key derivation for better performance
- *
- * @param plainTexts Array of plain texts to encrypt
- * @param masterKey Master key for encryption
- * @returns Promise<string[]> Array of encrypted texts
- */
+/** Encrypts a batch while reusing one derived key and a fresh nonce per item. */
 export const encryptGCMBulk = async (plainTexts: string[], masterKey: string): Promise<string[]> => {
   if (plainTexts.length === 0) return [];
 
   try {
-    // Generate single salt and nonce for all items (for bulk operations)
+    // Reuse the derivation salt, but generate an independent nonce for every item.
     const saltBytes = randomBytes(SALT_SIZE);
     const aesKey = await deriveGCMKey(masterKey, saltBytes);
 
@@ -373,13 +310,7 @@ export const encryptGCMBulk = async (plainTexts: string[], masterKey: string): P
   }
 };
 
-/**
- * Bulk decrypt multiple texts using AES-256-GCM
- *
- * @param encryptedTexts Array of encrypted texts
- * @param masterKey Master key for decryption
- * @returns Promise<string[]> Array of decrypted texts
- */
+/** Decrypts a batch of AES-256-GCM payloads. */
 export const decryptGCMBulk = async (encryptedTexts: string[], masterKey: string): Promise<string[]> => {
   if (encryptedTexts.length === 0) return [];
 

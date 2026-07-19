@@ -75,6 +75,7 @@ describe('legacy folder migration', () => {
   });
 
   it('merges legacy data when the default root already exists but only contains empty bootstrap metadata', async () => {
+    const fileSystem = getFileSystem();
     configManager.updateConfig({
       storageFolder: 'expo-lite-data',
     });
@@ -88,12 +89,23 @@ describe('legacy folder migration', () => {
       label: 'legacy-bootstrap',
     });
 
-    configManager.resetConfig();
-    await plainStorage.cleanup();
-    await db.init();
+    const moveAsync = fileSystem.moveAsync.bind(fileSystem);
+    const moveSpy = jest.spyOn(fileSystem, 'moveAsync').mockImplementation(async options => {
+      if ((await fileSystem.getInfoAsync(options.to)).exists) {
+        throw new Error(`Destination already exists: ${options.to}`);
+      }
+      await moveAsync(options);
+    });
+
+    try {
+      configManager.resetConfig();
+      await plainStorage.cleanup();
+      await db.init();
+    } finally {
+      moveSpy.mockRestore();
+    }
 
     const migratedRoot = await getRootPath();
-    const fileSystem = getFileSystem();
     const [legacyRootInfo, migratedTableInfo] = await Promise.all([
       fileSystem.getInfoAsync(legacyRoot),
       fileSystem.getInfoAsync(`${migratedRoot}${tableName}.ldb`),
@@ -111,5 +123,33 @@ describe('legacy folder migration', () => {
       id: 'legacy-2',
       label: 'legacy-bootstrap',
     });
+  });
+
+  it('preserves a corrupted current root instead of treating it as empty', async () => {
+    const fileSystem = getFileSystem();
+    const defaultRoot = await getRootPath();
+
+    configManager.updateConfig({ storageFolder: 'expo-lite-data' });
+    await plainStorage.cleanup();
+    await db.init();
+    const legacyRoot = await getRootPath();
+    await createTable(tableName);
+    await insert(tableName, { id: 'legacy-preserved' });
+
+    global.__expo_file_system_mock__.mockFileSystem[`${defaultRoot}meta.ldb`] = 'corrupted-current-metadata';
+    configManager.resetConfig();
+    resetRootPathState();
+
+    await expect(getRootPath()).resolves.toBe(defaultRoot);
+
+    const [legacyRootInfo, migratedTableInfo] = await Promise.all([
+      fileSystem.getInfoAsync(legacyRoot),
+      fileSystem.getInfoAsync(`${defaultRoot}${tableName}.ldb`),
+    ]);
+    expect(legacyRootInfo.exists).toBe(true);
+    expect(migratedTableInfo.exists).toBe(false);
+    expect(global.__expo_file_system_mock__.mockFileSystem[`${defaultRoot}meta.ldb`]).toBe(
+      'corrupted-current-metadata'
+    );
   });
 });

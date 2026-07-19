@@ -1,8 +1,5 @@
 import { StorageErrorCode } from './storageErrorCode';
 
-/**
- * Error category enum
- */
 export enum ErrorCategory {
   TABLE = 'table',
   FILE = 'file',
@@ -15,33 +12,15 @@ export enum ErrorCategory {
   UNKNOWN = 'unknown',
 }
 
-/**
- * Storage error class providing detailed error messages and suggestions
- */
 export class StorageError extends Error {
-  /**
-   * Error category
-   */
   public readonly category: ErrorCategory;
 
-  /**
-   * Error details
-   */
   public readonly details?: string;
 
-  /**
-   * Suggested resolution
-   */
   public readonly suggestion?: string;
 
-  /**
-   * Error timestamp
-   */
   public readonly timestamp: number;
 
-  /**
-   * Original error cause
-   */
   public readonly cause?: Error;
 
   constructor(
@@ -64,9 +43,6 @@ export class StorageError extends Error {
     this.category = this.getCategoryFromCode(code);
   }
 
-  /**
-   * Get error category from error code
-   */
   private getCategoryFromCode(code: StorageErrorCode): ErrorCategory {
     if (code.startsWith('TABLE_')) {
       return ErrorCategory.TABLE;
@@ -89,9 +65,6 @@ export class StorageError extends Error {
     }
   }
 
-  /**
-   * Convert to JSON format for logging
-   */
   toJSON(): object {
     return {
       name: this.name,

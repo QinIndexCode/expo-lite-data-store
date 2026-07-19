@@ -1,13 +1,7 @@
 import type { UpdatePayload } from '../types/storageTypes';
 
-/**
- * Query operator type definition
- */
 export type QueryOperator = '$and' | '$or' | '$eq' | '$ne' | '$gt' | '$gte' | '$lt' | '$lte' | '$in' | '$nin' | '$like';
 
-/**
- * Update operator type definition.
- */
 export type UpdateOperator = '$inc' | '$set' | '$unset' | '$push' | '$pull' | '$addToSet';
 
 const UNSAFE_UPDATE_FIELD_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
@@ -36,7 +30,6 @@ const safeObjectEntries = (value: unknown): Array<[string, unknown]> => {
  * Supported query and update operators.
  */
 export const SPECIAL_OPERATORS = {
-  // Query operators
   QUERY: {
     $and: true,
     $or: true,
@@ -50,7 +43,6 @@ export const SPECIAL_OPERATORS = {
     $nin: true,
     $like: true,
   },
-  // Update operators
   UPDATE: {
     $inc: true,
     $set: true,
@@ -61,38 +53,26 @@ export const SPECIAL_OPERATORS = {
   },
 };
 
-/**
- * Returns whether a key is a query operator.
- */
 export function isQueryOperator(key: string): key is QueryOperator {
   return Object.prototype.hasOwnProperty.call(SPECIAL_OPERATORS.QUERY, key);
 }
 
-/**
- * Returns whether a key is an update operator.
- */
 export function isUpdateOperator(key: string): key is UpdateOperator {
   return Object.prototype.hasOwnProperty.call(SPECIAL_OPERATORS.UPDATE, key);
 }
 
-/**
- * Returns whether a key is a supported special operator.
- */
 export function isSpecialOperator(key: string): boolean {
   return isQueryOperator(key) || isUpdateOperator(key);
 }
 
-/**
- * Separates ordinary fields from update operators.
- */
 export function separateUpdateOperators(updateData: object): {
   regularFields: Record<string, unknown>;
   operators: Partial<Record<UpdateOperator, unknown>>;
 } {
-  const regularFields: Record<string, unknown> = Object.create(null);
-  const operators: Partial<Record<UpdateOperator, unknown>> = Object.create(null);
+  const regularFields = Object.create(null) as Record<string, unknown>;
+  const operators = Object.create(null) as Partial<Record<UpdateOperator, unknown>>;
 
-  for (const [key, value] of Object.entries(updateData)) {
+  for (const [key, value] of safeObjectEntries(updateData)) {
     if (isUpdateOperator(key)) {
       operators[key] = value;
     } else {
@@ -109,8 +89,8 @@ export function separateUpdateOperators(updateData: object): {
  * original record.
  */
 export function processUpdateOperators<T extends object>(originalData: T, updateData: UpdatePayload<T>): T {
-  const result: Record<string, unknown> = Object.create(null);
-  for (const [field, value] of Object.entries(originalData)) {
+  const result = Object.create(null) as Record<string, unknown>;
+  for (const [field, value] of safeObjectEntries(originalData)) {
     result[field] = value;
   }
   const { regularFields, operators } = separateUpdateOperators(updateData);
@@ -147,7 +127,7 @@ export function processUpdateOperators<T extends object>(originalData: T, update
       const existing = result[field];
       // The result starts as a shallow record copy, so clone mutable values
       // before applying an operator that appends to them.
-      const values = Array.isArray(existing) ? [...existing] : [];
+      const values: unknown[] = Array.isArray(existing) ? Array.from(existing) : [];
       result[field] = values;
       values.push(value);
     }
@@ -174,7 +154,7 @@ export function processUpdateOperators<T extends object>(originalData: T, update
   if (operators.$addToSet) {
     for (const [field, value] of safeObjectEntries(operators.$addToSet)) {
       const existing = result[field];
-      const values = Array.isArray(existing) ? [...existing] : [];
+      const values: unknown[] = Array.isArray(existing) ? Array.from(existing) : [];
       result[field] = values;
       if (!values.includes(value)) {
         values.push(value);

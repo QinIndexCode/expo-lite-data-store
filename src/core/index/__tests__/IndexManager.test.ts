@@ -102,11 +102,80 @@ describe('IndexManager', () => {
       expect(() => indexManager.addToIndex(testTableName, data2)).toThrow(StorageError);
     });
 
-    it('ignores data without an ID', () => {
-      indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
+    it('disables query acceleration while a matching record has no stable ID', async () => {
+      await indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
 
-      const data = { name: 'test', age: 25 };
-      expect(() => indexManager.addToIndex(testTableName, data)).not.toThrow();
+      const stableRecord = { id: '1', name: 'test', age: 25 };
+      const noIdRecord = { name: 'test', age: 30 };
+      indexManager.addToIndex(testTableName, stableRecord);
+      indexManager.addToIndex(testTableName, noIdRecord);
+
+      expect(indexManager.hasIndex(testTableName, 'name')).toBe(false);
+      expect(indexManager.queryIndex(testTableName, 'name', 'test')).toEqual([]);
+
+      indexManager.removeFromIndex(testTableName, noIdRecord);
+
+      expect(indexManager.hasIndex(testTableName, 'name')).toBe(true);
+      expect(indexManager.queryIndex(testTableName, 'name', 'test')).toEqual(['1']);
+    });
+
+    it('enforces unique indexes for records without a stable ID', async () => {
+      await indexManager.createIndex(testTableName, 'name', IndexType.UNIQUE);
+
+      indexManager.addToIndex(testTableName, { name: 'duplicate', age: 25 });
+
+      expect(() => indexManager.addToIndex(testTableName, { name: 'duplicate', age: 30 })).toThrow(StorageError);
+    });
+
+    it('treats non-finite numeric IDs as unstable without bypassing unique constraints', async () => {
+      await indexManager.createIndex(testTableName, 'name', IndexType.UNIQUE);
+
+      indexManager.addToIndex(testTableName, { id: Number.POSITIVE_INFINITY, name: 'duplicate' });
+
+      expect(indexManager.hasIndex(testTableName, 'name')).toBe(false);
+      expect(indexManager.queryIndex(testTableName, 'name', 'duplicate')).toEqual([]);
+      expect(() => indexManager.addToIndex(testTableName, { id: Number.NaN, name: 'duplicate' })).toThrow(StorageError);
+    });
+
+    it('keeps negative zero compatible with its persisted zero representation', async () => {
+      await indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
+
+      indexManager.addToIndex(testTableName, { id: -0, name: 'zero' });
+
+      const indexedIds = new Set(indexManager.queryIndex(testTableName, 'name', 'zero'));
+      expect(indexedIds.has(0)).toBe(true);
+      expect(indexManager.hasIndex(testTableName, 'name')).toBe(true);
+    });
+
+    it('uses _id when id is absent and prefers id when both exist', async () => {
+      await indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
+
+      indexManager.addToIndex(testTableName, { _id: 'legacy-1', name: 'legacy' });
+      indexManager.addToIndex(testTableName, { id: 'primary-1', _id: 'legacy-2', name: 'primary' });
+
+      expect(indexManager.queryIndex(testTableName, 'name', 'legacy')).toEqual(['legacy-1']);
+      expect(indexManager.queryIndex(testTableName, 'name', 'primary')).toEqual(['primary-1']);
+    });
+
+    it('keeps the index map and hot bucket by reference during append updates', async () => {
+      await indexManager.createIndex(testTableName, 'name', IndexType.NORMAL);
+      indexManager.addToIndex(testTableName, { id: '1', name: 'alpha' });
+      indexManager.addToIndex(testTableName, { id: '2', name: 'beta' });
+
+      const index = indexManager.getTableIndexes(testTableName)[0];
+      if (!index) {
+        throw new Error('Expected the test index to exist');
+      }
+      const indexData = index.data;
+      const untouchedBucket = index.data.get(JSON.stringify(['alpha']));
+      const hotBucket = index.data.get(JSON.stringify(['beta']));
+
+      indexManager.addToIndex(testTableName, { id: '3', name: 'beta' });
+
+      expect(index.data).toBe(indexData);
+      expect(index.data.get(JSON.stringify(['alpha']))).toBe(untouchedBucket);
+      expect(index.data.get(JSON.stringify(['beta']))).toBe(hotBucket);
+      expect(indexManager.queryIndex(testTableName, 'name', 'beta')).toEqual(['2', '3']);
     });
   });
 
@@ -178,6 +247,28 @@ describe('IndexManager', () => {
 
       expect(indexManager.hasIndex(testTableName, 'name')).toBe(true);
       expect(indexManager.hasIndex(testTableName, 'age')).toBe(false);
+    });
+
+    it('uses an index on existing data only after a complete rebuild', async () => {
+      meta.update(testTableName, { count: 1 });
+      await indexManager.createIndex(testTableName, 'name');
+
+      expect(indexManager.hasIndex(testTableName, 'name')).toBe(false);
+
+      indexManager.rebuildIndexes(testTableName, [{ id: '1', name: 'test' }]);
+
+      expect(indexManager.hasIndex(testTableName, 'name')).toBe(true);
+      expect(indexManager.queryIndex(testTableName, 'name', 'test')).toEqual(['1']);
+    });
+
+    it('keeps a rebuilt index out of query acceleration when a row has no stable ID', async () => {
+      meta.update(testTableName, { count: 2 });
+      await indexManager.createIndex(testTableName, 'name');
+
+      indexManager.rebuildIndexes(testTableName, [{ id: '1', name: 'test' }, { name: 'test' }]);
+
+      expect(indexManager.hasIndex(testTableName, 'name')).toBe(false);
+      expect(indexManager.queryIndex(testTableName, 'name', 'test')).toEqual([]);
     });
   });
 

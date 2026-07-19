@@ -108,6 +108,30 @@ export class CacheManager {
 
   private expiryHeap: [number, string][] = [];
 
+  private namespaceVersions = new Map<string, number>();
+
+  private namespaceVersionCounter = 0;
+
+  private allocateNamespaceVersion(namespace: string): number {
+    if (this.namespaceVersionCounter >= Number.MAX_SAFE_INTEGER) {
+      this.clear();
+      this.namespaceVersionCounter = 0;
+    }
+
+    if (this.namespaceVersions.has(namespace)) {
+      this.namespaceVersions.delete(namespace);
+    } else if (this.namespaceVersions.size >= this.config.maxSize) {
+      const oldestNamespace = this.namespaceVersions.keys().next();
+      if (!oldestNamespace.done) {
+        this.namespaceVersions.delete(oldestNamespace.value);
+      }
+    }
+
+    const version = ++this.namespaceVersionCounter;
+    this.namespaceVersions.set(namespace, version);
+    return version;
+  }
+
   private heapPush(expiry: number, key: string): void {
     this.expiryHeap.push([expiry, key]);
     this.heapifyUp(this.expiryHeap.length - 1);
@@ -160,7 +184,6 @@ export class CacheManager {
   }
 
   constructor(config: Partial<CacheConfig> = {}) {
-    // Default config
     this.config = {
       strategy: CacheStrategy.LRU,
       maxSize: config.maxSize || CacheManager.getDefaultMaxSize(),
@@ -176,8 +199,6 @@ export class CacheManager {
     this.stats.maxSize = this.config.maxSize;
     this.stats.maxMemoryUsage = this.config.maxMemoryUsage || 0;
 
-    // Periodically clean expired cache
-    // Timer cleaned by afterEach cleanup() in test
     this.startCleanupTimer();
   }
 
@@ -186,7 +207,6 @@ export class CacheManager {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
     }
-    this.mutex.clear();
   }
 
   private addToLRUHead(key: string, item: CacheItem): void {
@@ -242,14 +262,12 @@ export class CacheManager {
       oldFreqSet.delete(key);
       if (oldFreqSet.size === 0) {
         this.lfuFreqMap.delete(oldFreq);
-        // If current is min freq, update min freq
         if (oldFreq === this.lfuMinFreq) {
           this.lfuMinFreq++;
         }
       }
     }
 
-    // Increase access count
     item.accessCount++;
     const newFreq = item.accessCount;
     if (!this.lfuFreqMap.has(newFreq)) {
@@ -259,7 +277,6 @@ export class CacheManager {
   }
 
   private removeLFUItem(): string | undefined {
-    // Find min frequency set
     const minFreqSet = this.lfuFreqMap.get(this.lfuMinFreq);
     if (!minFreqSet || minFreqSet.size === 0) return undefined;
     const keyResult = minFreqSet.values().next();
@@ -269,7 +286,6 @@ export class CacheManager {
     if (key) {
       minFreqSet.delete(key);
 
-      // If set empty, delete frequency
       if (minFreqSet.size === 0) {
         this.lfuFreqMap.delete(this.lfuMinFreq);
       }
@@ -279,11 +295,9 @@ export class CacheManager {
   }
 
   private startCleanupTimer(): void {
-    // If timer exists, clean first
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
     }
-    // Use cleanup interval from config
     this.cleanupTimer = setInterval(() => {
       this.cleanupExpired();
     }, CacheManager.getDefaultCleanupInterval());
@@ -300,13 +314,12 @@ export class CacheManager {
       const key = top[1];
       const item = this.cache.get(key);
 
-      // May be deleted by other logic, skip
       if (!item) continue;
       // A key can be refreshed before an older heap entry expires. Only the
       // heap entry matching the current item expiry is allowed to evict it.
       if (item.expiry !== top[0]) continue;
 
-      const itemSize = this.calculateDataSize(item.data);
+      const itemSize = this.getCacheItemSize(item);
       this.stats.memoryUsage -= itemSize;
 
       if (this.config.strategy === CacheStrategy.LRU) {
@@ -341,7 +354,7 @@ export class CacheManager {
       return 0;
     }
 
-    // Approximate: use JSON string length * 2（UTF-16）
+    // JSON length times two is a bounded approximation of UTF-16 storage.
     try {
       const jsonStr = JSON.stringify(data);
       return jsonStr.length * 2;
@@ -351,6 +364,10 @@ export class CacheManager {
       }
       return 64;
     }
+  }
+
+  private getCacheItemSize(item: CacheItem): number {
+    return item.compressed ? this.calculateDataSize(item.data) : item.originalSize;
   }
 
   private updateStats(): void {
@@ -371,12 +388,10 @@ export class CacheManager {
   }
 
   private evictItem(force: boolean = false): void {
-    // If not forced eviction and cache not full, return
     if (!force && this.cache.size <= this.config.maxSize) {
       return;
     }
 
-    // If cache empty, cannot evict
     if (this.cache.size === 0) {
       return;
     }
@@ -385,14 +400,12 @@ export class CacheManager {
 
     switch (this.config.strategy) {
       case CacheStrategy.LRU:
-        // Remove oldest item from LRU list tail
         if (this.lruTail && this.lruTail.key) {
           evictKey = this.lruTail.key;
           this.removeFromLRU(evictKey);
         }
         break;
       case CacheStrategy.LFU:
-        // Remove min frequency item from LFU
         evictKey = this.removeLFUItem();
         break;
     }
@@ -400,7 +413,7 @@ export class CacheManager {
     if (evictKey) {
       const item = this.cache.get(evictKey);
       if (item) {
-        const itemSize = this.calculateDataSize(item.data);
+        const itemSize = this.getCacheItemSize(item);
         this.stats.memoryUsage -= itemSize;
       }
       this.cache.delete(evictKey);
@@ -410,21 +423,19 @@ export class CacheManager {
   }
 
   private cleanupByMemoryUsage(): void {
-    // If max memory not configured, return directly
     if (!this.config.maxMemoryUsage) {
       return;
     }
     const threshold = this.config.maxMemoryUsage * (this.config.memoryThreshold || 0.8);
 
-    // If memory usage below threshold, return directly
     if (this.stats.memoryUsage <= threshold) {
       return;
     }
 
-    // Target memory usage for cleanup (70% of threshold)
+    // Evict below the trigger point to avoid cleanup thrashing near the threshold.
     const targetUsage = this.config.maxMemoryUsage * 0.7;
     while (this.stats.memoryUsage > targetUsage && this.cache.size > 0) {
-      this.evictItem(true); // Force eviction for memory cleanup
+      this.evictItem(true);
     }
   }
 
@@ -439,7 +450,6 @@ export class CacheManager {
     }
     item.lastAccess = Date.now();
 
-    // Update cache structure by strategy
     if (this.config.strategy === CacheStrategy.LRU) {
       this.moveToLRUHead(key);
     } else if (this.config.strategy === CacheStrategy.LFU) {
@@ -453,7 +463,6 @@ export class CacheManager {
     const now = Date.now();
     const originalDataSize = this.calculateDataSize(data);
 
-    // If key exists, remove old item and subtract size
     if (this.cache.has(key)) {
       const oldItem = this.cache.get(key);
       if (oldItem) {
@@ -484,7 +493,6 @@ export class CacheManager {
     const processedData = data;
     const compressed = false;
 
-    // Calculate the final data size
     const finalDataSize = originalDataSize;
 
     const cacheItem: CacheItem = {
@@ -500,15 +508,12 @@ export class CacheManager {
     this.cache.set(key, cacheItem);
     this.stats.writes++;
 
-    // Add expiry to min heap for fast cleanup
     this.heapPush(cacheItem.expiry, key);
     this.stats.memoryUsage += finalDataSize;
 
-    // Update cache structure by strategy
     if (this.config.strategy === CacheStrategy.LRU) {
       this.addToLRUHead(key, cacheItem);
     } else if (this.config.strategy === CacheStrategy.LFU) {
-      // New item access frequency is 1
       if (!this.lfuFreqMap.has(1)) {
         this.lfuFreqMap.set(1, new Set());
       }
@@ -516,7 +521,6 @@ export class CacheManager {
       this.lfuMinFreq = 1;
     }
 
-    // If cache full, evict old item
     this.evictItem();
     this.cleanupByMemoryUsage();
 
@@ -546,14 +550,12 @@ export class CacheManager {
 
   delete(key: string): void {
     if (this.cache.has(key)) {
-      // Subtract size of item to delete
       const item = this.cache.get(key);
       if (item) {
-        const itemSize = this.calculateDataSize(item.data);
+        const itemSize = this.getCacheItemSize(item);
         this.stats.memoryUsage -= itemSize;
       }
 
-      // Remove from LRU or LFU
       if (this.config.strategy === CacheStrategy.LRU) {
         this.removeFromLRU(key);
       } else if (this.config.strategy === CacheStrategy.LFU) {
@@ -581,11 +583,10 @@ export class CacheManager {
   clear(): void {
     this.cache.clear();
     this.expiryHeap = [];
-    // Clear LRU data structures
+    this.namespaceVersions.clear();
     this.lruHead = null;
     this.lruTail = null;
     this.lruNodeMap.clear();
-    // Clear LFU data structures
     this.lfuFreqMap.clear();
     this.lfuMinFreq = 0;
     this.stats.memoryUsage = 0;
@@ -624,39 +625,56 @@ export class CacheManager {
     return this.cache.size;
   }
 
+  /** Returns the current generation for a bounded cache namespace. */
+  getNamespaceVersion(namespace: string): number {
+    return this.namespaceVersions.get(namespace) ?? this.allocateNamespaceVersion(namespace);
+  }
+
+  /** Makes every existing key in a namespace unreachable without scanning the cache. */
+  invalidateNamespace(namespace: string): number {
+    // Remove the legacy tracking entry once; new reads never recreate it.
+    this.delete(`${namespace}_cache_keys`);
+    return this.allocateNamespaceVersion(namespace);
+  }
+
   has(key: string): boolean {
     return this.getCacheItem(key) !== undefined;
   }
 
   private async lock(key: string): Promise<() => void> {
-    while (this.mutex.has(key)) {
-      await this.mutex.get(key);
-    }
-
-    let resolve: () => void;
-    const promise = new Promise<void>(res => {
-      resolve = res;
+    const previousTail = this.mutex.get(key) ?? Promise.resolve();
+    let releaseGate!: () => void;
+    const gate = new Promise<void>(resolve => {
+      releaseGate = resolve;
     });
+    const currentTail = previousTail.then(() => gate);
 
-    this.mutex.set(key, promise);
+    this.mutex.set(key, currentTail);
+    await previousTail;
 
+    let released = false;
     return () => {
-      resolve!();
-      this.mutex.delete(key);
+      if (released) {
+        return;
+      }
+
+      released = true;
+      releaseGate();
+      if (this.mutex.get(key) === currentTail) {
+        this.mutex.delete(key);
+      }
     };
   }
 
   async getSafe<T>(key: string, fetchFn: () => Promise<T>, expiry?: number): Promise<T> {
-    // Try to get from cache first
     let data = this.get<T>(key);
     if (data !== undefined) {
       return data;
     }
 
-    // Lock to prevent cache stampede
     const unlock = await this.lock(key);
     try {
-      // Re-check cache to prevent duplicate fetch
+      // Recheck under the lock so concurrent callers do not duplicate the fetch.
       data = this.get<T>(key);
       if (data !== undefined) {
         return data;

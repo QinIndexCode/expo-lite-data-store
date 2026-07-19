@@ -1,37 +1,22 @@
 import type { TableSchema } from '../core/meta/MetadataManager';
 
-/**
- * Metadata manager interface defining core functionality to reduce module coupling
- */
 export interface IMetadataManager {
-  /**
-   * Get metadata for a table
-   */
   get(tableName: string): TableSchema | undefined;
 
-  /**
-   * Get the path for a table
-   */
+  /** Read the latest durable table metadata without replacing local pending state. */
+  getPersisted?(tableName: string): Promise<TableSchema | undefined>;
+
+  /** Refresh from a newer in-process durable generation while retaining local pending mutations. */
+  getLatest?(tableName: string): Promise<TableSchema | undefined>;
+
   getPath(tableName: string): string;
 
-  /**
-   * Update metadata for a table
-   */
   update(tableName: string, updates: Partial<TableSchema>): void;
 
-  /**
-   * Delete metadata for a table
-   */
   delete(tableName: string): void;
 
-  /**
-   * Get all table names
-   */
   allTables(): string[];
 
-  /**
-   * Get record count for a table
-   */
   count(tableName: string): number;
 
   /**

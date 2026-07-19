@@ -21,6 +21,34 @@ const getCommentTrivia = (content: string): string[] => {
   return Array.from(comments.values());
 };
 
+type TestCall = {
+  runner: 'describe' | 'it' | 'test';
+  title: string | undefined;
+};
+
+const getTestCalls = (fileName: string, content: string): TestCall[] => {
+  const sourceFile = ts.createSourceFile(fileName, content, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  const calls: TestCall[] = [];
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      const runner = node.expression.text;
+      if (runner === 'describe' || runner === 'it' || runner === 'test') {
+        const titleNode = node.arguments[0];
+        calls.push({
+          runner,
+          title: titleNode && ts.isStringLiteralLike(titleNode) ? titleNode.text : undefined,
+        });
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return calls;
+};
+
 describe('developer documentation contract', () => {
   const repoRoot = path.resolve(__dirname, '../../..');
   const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
@@ -96,13 +124,18 @@ describe('developer documentation contract', () => {
   ]);
 
   it('defines explicit release baseline scripts', () => {
-    expect(packageJson.scripts).toEqual(
-      expect.objectContaining({
-        'qa:baseline:expo-go': expect.any(String),
-        'qa:baseline:native-flagship': expect.any(String),
-        'qa:baseline:release': expect.any(String),
-      })
-    );
+    expect(packageJson.scripts['qa:baseline:expo-go']).toEqual(expect.stringMatching(/.+/u));
+    expect(packageJson.scripts['qa:baseline:native-flagship']).toEqual(expect.stringMatching(/.+/u));
+    expect(packageJson.scripts['qa:baseline:release']).toEqual(expect.stringMatching(/.+/u));
+  });
+
+  it('keeps the lightweight brand heading aligned across README entries', () => {
+    const expectedHeading = '# 🍃 expo-lite-data-store';
+    const firstLine = (content: string): string => content.split(/\r?\n/u, 1)[0] ?? '';
+
+    expect(firstLine(readmeEntry)).toBe(expectedHeading);
+    expect(firstLine(readmeEn)).toBe(expectedHeading);
+    expect(firstLine(readmeZh)).toBe(expectedHeading);
   });
 
   it('collects comments after template interpolations', () => {
@@ -162,6 +195,26 @@ describe('developer documentation contract', () => {
 
       for (const comment of getCommentTrivia(content)) {
         expect(comment).not.toMatch(cjkComment);
+      }
+    }
+  });
+
+  it('keeps test definitions on the repository runner and title convention', () => {
+    const testFiles = Array.from(new Set([...trackedMarkdown, ...untrackedMarkdown])).filter(
+      file => file.startsWith('src/') && file.endsWith('.test.ts') && fs.existsSync(path.join(repoRoot, file))
+    );
+    const cjkTitle = /[\p{Script=Han}]/u;
+    const focusedOrSkippedCall = /\b(?:describe|it|test)\.(?:only|skip)\s*\(/u;
+
+    for (const file of testFiles) {
+      const content = fs.readFileSync(path.join(repoRoot, file), 'utf8');
+
+      expect(content).not.toMatch(focusedOrSkippedCall);
+      for (const call of getTestCalls(file, content)) {
+        expect(call.runner).not.toBe('test');
+        expect(call.title).toBeDefined();
+        expect(call.title).not.toMatch(cjkTitle);
+        expect(call.title).not.toMatch(/^should\b/iu);
       }
     }
   });
@@ -322,14 +375,19 @@ describe('developer documentation contract', () => {
   });
 
   it('keeps contributing and security policies bilingual and repository-specific', () => {
+    const englishBareDocPolicy =
+      'Bare `.md` files are repository indexes, GitHub-convention policy/template entry points, or internal maintenance documents';
+    const chineseBareDocPolicy = '裸 `.md` 文件只作为仓库索引页、GitHub 约定的政策/模板入口或内部维护文档';
+
     expect(contributing).toContain('npm run smoke:expo-consumer');
     expect(contributing).toContain('qa:baseline:expo-go');
     expect(contributing).toContain('Formal English guides use the `.en.md` filename.');
-    expect(contributing).toContain('Bare `.md` files are repository indexes or internal maintenance documents');
+    expect(readmeEntry).toContain(englishBareDocPolicy);
+    expect(contributing).toContain(englishBareDocPolicy);
     expect(contributingZh).toContain('npm run smoke:expo-consumer');
     expect(contributingZh).toContain('qa:baseline:expo-go');
     expect(contributingZh).toContain('正式英文文档使用 `.en.md`');
-    expect(contributingZh).toContain('裸 `.md` 文件只作为仓库索引页或内部维护文档');
+    expect(contributingZh).toContain(chineseBareDocPolicy);
     expect(security).toContain('qinindexcode@gmail.com');
     expect(security).toContain('AUTH_ON_ACCESS_UNSUPPORTED');
     expect(security).toContain('[Contributing Guide](./CONTRIBUTING.en.md)');
@@ -352,8 +410,12 @@ describe('developer documentation contract', () => {
   it('keeps bug report templates aligned with Expo runtime triage needs', () => {
     expect(bugTemplate).toContain('summary.json');
     expect(bugTemplate).toContain('react-native-quick-crypto');
+    expect(bugTemplate).toContain('Do not report suspected security vulnerabilities in a public issue');
+    expect(bugTemplate).toContain(`${githubBlobBase}/SECURITY.en.md`);
     expect(bugTemplateZh).toContain('summary.json');
     expect(bugTemplateZh).toContain('react-native-quick-crypto');
+    expect(bugTemplateZh).toContain('请勿通过公开 Issue 披露疑似安全漏洞');
+    expect(bugTemplateZh).toContain(`${githubBlobBase}/SECURITY.zh-CN.md`);
   });
 
   it('does not leak historical package names into current markdown docs', () => {

@@ -1,4 +1,4 @@
-import withTimeout from '../withTimeout';
+import withTimeout, { withMutationTimeout } from '../withTimeout';
 import { StorageError } from '../../types/storageErrorInfc';
 
 describe('withTimeout', () => {
@@ -87,5 +87,30 @@ describe('withTimeout', () => {
       expect(error).toBeInstanceOf(StorageError);
       expect((error as StorageError).code).toBe('TIMEOUT');
     }
+  });
+
+  it('drains a non-cancellable mutation before reporting its timeout', async () => {
+    let settleMutation!: () => void;
+    const mutation = new Promise<void>(resolve => {
+      settleMutation = resolve;
+    });
+    const result = withMutationTimeout(mutation, 1000, 'test mutation');
+    let resultSettled = false;
+    void result.then(
+      () => {
+        resultSettled = true;
+      },
+      () => {
+        resultSettled = true;
+      }
+    );
+
+    jest.advanceTimersByTime(1000);
+    await Promise.resolve();
+    expect(resultSettled).toBe(false);
+
+    settleMutation();
+    await expect(result).rejects.toMatchObject({ code: 'TIMEOUT' });
+    expect(resultSettled).toBe(true);
   });
 });

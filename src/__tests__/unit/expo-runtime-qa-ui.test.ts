@@ -1,8 +1,17 @@
 import fs from 'fs';
 import path from 'path';
-const parser = require('@babel/parser');
 
-const { buildRunnerAppSource } = require('../../../scripts/expo-runtime-runner-template.cjs');
+type BabelParser = {
+  parse: (source: string, options: { sourceType: 'module'; plugins: string[] }) => unknown;
+};
+
+type ExpoRuntimeRunnerTemplate = {
+  buildRunnerAppSource: (options: { channel: string }) => string;
+};
+
+const parser = require('@babel/parser') as unknown as BabelParser;
+const { buildRunnerAppSource } =
+  require('../../../scripts/expo-runtime-runner-template.cjs') as unknown as ExpoRuntimeRunnerTemplate;
 
 const parseSource = (source: string) =>
   parser.parse(source, {

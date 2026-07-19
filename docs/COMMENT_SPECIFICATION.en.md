@@ -61,7 +61,7 @@ Do not leave anonymous, date-based, or already-resolved TODOs in maintained code
 
 ## Test Style
 
-- Write `describe`, `it`, and `test` titles in English as direct observable outcomes under a condition: `it('rejects traversal segments in table names', ...)`. Avoid expectation phrasing such as `should ...`.
+- Use `describe` for groups and `it` for cases. Write titles in English as direct observable outcomes under a condition: `it('rejects traversal segments in table names', ...)`. Do not mix in `test(...)`, commit focused or skipped cases, or use expectation phrasing such as `should ...`.
 - Keep each test in arrange, act, assert order. Use blank lines to separate the phases; add comments only when a fixture or assertion has a non-obvious purpose.
 - Prefer typed fixtures, helpers, and generic mocks. Do not use explicit `any`; use `unknown` at untrusted boundaries and narrow it before use.
 - Restore spies, environment variables, timers, and module state in `afterEach` or `finally`. Remove temporary directories and generated files created by a test.

@@ -14,6 +14,8 @@
 
 Pull Request 不会获得 npm 发布凭据，也不能触发包发布。
 
+普通 push 到 `main` 可能触发 CI、CodeQL、Scorecard 和 README 驱动的 wiki sync 等验证/维护 workflow，但绝不会触发 `Release package` 或 npm 发布。只有 push 匹配 release workflow 的版本 tag，并通过全部发布门禁后，才可能执行发布。
+
 ## 推送前本地门禁
 
 普通改动至少执行：

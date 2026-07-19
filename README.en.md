@@ -1,4 +1,4 @@
-# expo-lite-data-store
+# 🍃 expo-lite-data-store
 
 Local structured storage for Expo applications, with runtime-tested support for Expo Go, managed apps, and native development builds on Expo SDK 56.
 
@@ -171,7 +171,13 @@ Use `mode: 'chunked'` when:
 
 When a table is created with `initialData`, the runtime automatically selects chunked mode only when its serialized-size estimate exceeds half of the configured `chunkSize` (more than 2.5 MiB with the default 5 MiB value). Later writes do not implicitly migrate a single-file table; choose `mode: 'chunked'` or use `migrateToChunked()` when that transition is required.
 
-Chunked overwrites and appends use recovery journals and cleanup of partially written chunks. Append metadata is committed before the recovery journal is removed, and reads reject incomplete chunk sets instead of silently returning partial data. Table metadata uses serialized temp-file publication, so overlapping table writes cannot lose a later metadata update.
+Chunked overwrites use a bounded v2 journal that records the previous count and chunk state without copying old rows into the journal. Existing chunks move to `<table>.overwrite-backup/`, and a `.ready` marker distinguishes a fully prepared backup. Removing the overwrite journal is the commit point; if committed-backup cleanup fails, a later access validates the current table before deleting the leftover backup. Chunked appends also use a recovery journal and remove partially written chunks on failure. A pending append is resolved before a pending overwrite, append metadata is committed before its journal is removed, and reads reject incomplete chunk sets instead of silently returning partial data. During single-to-chunked migration, the new chunk set is published and verified before the metadata mode changes; that mode change is the commit point. Failure to remove the obsolete single-file artifacts after that point does not roll the committed mode back.
+
+Single-file tables use recoverable publication. A v2 commit marker is bound to the table name and records both the previous and target storage commit tokens, SHA-256 hashes, and physical record counts. Recovery reads the durable metadata snapshot from disk instead of trusting an adapter's cached token. Canonical v1 markers remain readable for compatibility, but a temporary marker is accepted only when it is a v2 `committed` marker whose table name and target token match durable metadata and whose hash/count match the primary file; every mismatch fails closed and preserves the evidence. Outside a pending marker recovery, a missing or damaged primary can be restored only from a valid retained data backup.
+
+File handlers serialize operations for the same physical table path through an in-process FIFO queue shared across handler instances. Lock acquisition is bounded to 30 seconds. A recoverable mutation that crosses its deadline is observed until the underlying non-cancellable file operation settles, then rolled back before the path lock is released. This coordination does not provide cross-process locking.
+
+Metadata flushes use a separate process-wide FIFO keyed by the metadata file, also with a 30-second acquisition limit. Each flush rereads the latest disk snapshot; updates/deletes require the expected `createdAt` generation, while creation requires the name to remain absent. A stale mutation therefore cannot modify or replace a same-name new generation. A shared mutation epoch makes other adapters refresh metadata, storage representation, read-cache namespaces, and indexes; stable reads retry against the latest mode. A failed or timed-out mutation remains pending for an explicit retry. If the metadata primary is missing, initialization restores only a structurally valid backup; an existing but damaged primary never falls back to a potentially stale backup. Both publication and recovery are complete only after the stale backup is removed. This is still in-process coordination, not a cross-process metadata lock.
 
 ### Declaring columns
 
@@ -185,7 +191,7 @@ Chunked overwrites and appends use recovery journals and cleanup of partially wr
 
 Column metadata is used for validation and table metadata, but records remain plain JavaScript objects in the public API.
 
-Records do not have to contain `id` or `_id`. Those fields are useful as application-level identifiers and for index acceleration when present, but `where`-based update, delete, bulk, and transaction paths match the actual rows returned by the query engine, so no-id rows are handled safely.
+Records do not have to contain `id` or `_id`. Those fields are useful as application-level identifiers and for index acceleration when present, but `where`-based update, delete, bulk, and transaction paths match the actual rows returned by the query engine, so no-id rows are handled safely. In-memory indexes use a string or finite-number `id`, falling back to `_id` only when `id` is not stable. If any indexed row has no stable identifier, acceleration for that index is disabled and the query uses a full scan. Incremental writes stage deltas only for touched index buckets and publish them after storage succeeds.
 
 ### Writing data
 
@@ -240,6 +246,10 @@ const expensiveElectronics = await db.findMany('products', {
   limit: 20,
 });
 ```
+
+`skip` and `limit` must be non-negative safe integers. `limit: 0` returns an empty page; negative, fractional, non-finite, or unsafe values throw a `RangeError` instead of being coerced by array slicing.
+
+All supported sorting algorithms keep `null` and `undefined` values stable at the end for both ascending and descending order.
 
 Supported query operators:
 
@@ -298,6 +308,10 @@ await db.bulkWrite('users', [
 
 This is useful when a workflow needs a single high-level mutation call while still preserving ordered semantics.
 
+### Deleting tables
+
+`deleteTable()` commits the metadata deletion before removing physical files. If that metadata commit fails, the original metadata is restored and physical data is left untouched. After a successful commit, missing metadata is authoritative: leftover files cannot revive the table. If artifact cleanup fails, the table remains logically absent and calling `deleteTable()` again retries cleanup; recreating the same name first purges every orphaned single-file, chunk, journal, marker, and backup artifact.
+
 ### Transactions
 
 Transactions are explicit and stateful:
@@ -323,6 +337,8 @@ Important transaction behavior:
 - calling `beginTransaction()` twice without finishing the first transaction raises `TRANSACTION_IN_PROGRESS`;
 - calling `commit()` or `rollback()` without an active transaction raises `NO_TRANSACTION_IN_PROGRESS`;
 - an explicit rollback discards queued writes without rewriting table files; if a commit fails after partially applying changes, existing tables are restored and tables created by that transaction are removed;
+- commit execution and failed-commit snapshot restoration use a module-private symbol capability for direct writes; a public `directWrite` property cannot bypass transaction staging;
+- AutoSync leaves dirty cache entries queued while a transaction is active and writes them only on a later scheduled or explicit sync after the transaction settles;
 - transactions are an in-process coordination feature, not a crash-durable or cross-process ACID implementation.
 
 ### Count vs verification
@@ -392,6 +408,8 @@ The runtime configuration layer is not a merge of every host source. In an Expo,
 | `LITE_STORE_AUTO_SYNC_ENABLED`                     | `autoSync.enabled`                    |
 | `LITE_STORE_AUTO_SYNC_INTERVAL`                    | `autoSync.interval`                   |
 
+Logger controls are separate from `configManager`. `EXPO_LITE_DATA_STORE_LOG_LEVEL` accepts `silent`, `error`, `warn`, `info`, or `debug`; non-test runtimes default to `warn`. Tests are silent by default so large suites do not flood local disks or CI logs; set `EXPO_LITE_DATA_STORE_TEST_LOGS=1` to enable test `debug` output.
+
 ### Programmatic configuration
 
 ```ts
@@ -438,6 +456,12 @@ You can choose between:
 - full-table encryption through `encryptFullTable: true`;
 - strict access-authentication intent through `requireAuthOnAccess: true`.
 
+A non-empty `encryptedFields` list selects the encrypted facade even when `encrypted: true` is omitted. If an encrypted write implicitly creates a table inside a transaction, the resolved field list is carried into commit so the persisted policy matches the encrypted payload.
+
+An encrypted write that creates a previously unknown table persists the selected encryption policy. That policy is not a per-call toggle: changing `encrypted`, `encryptFullTable`, `encryptedFields`, or `requireAuthOnAccess` for an existing encrypted table requires an application-controlled data migration. The runtime fails closed with `MIGRATION_FAILED` instead of silently rewriting data under a different policy.
+
+For newly created field-level tables, the exact metadata pair `encryptAllFields: true` plus `encryptedFields: []` means dynamic all-fields encryption, including fields introduced by later record shapes. Earlier v3 metadata without that marker keeps the historical global-configuration fallback for an empty or missing field list. Full-table encryption stores one physical envelope while committing its logical row count with the same storage generation; transaction snapshots restore both together. Its optional decrypted cache is accepted only when it is bound to the exact current ciphertext, and zero cache timeout disables it.
+
 ### Expo Go boundary
 
 Regular encrypted storage works in Expo Go.
@@ -461,7 +485,9 @@ Stable 3.x runtime logic keeps compatibility with earlier beta output formats, i
 - chunked table layouts;
 - encrypted payload variants produced by earlier beta builds.
 
-This compatibility does not convert regular encrypted data into strict-access data. Enabling `requireAuthOnAccess` for an existing regular encrypted table without an application-controlled data migration fails with `MIGRATION_FAILED`.
+Bulk field decryption detects legacy CTR and current GCM payloads per item, decrypts mixed batches in grouped provider calls, and restores the original item order. This keeps upgraded tables readable when one stored batch contains both formats.
+
+This compatibility does not convert regular encrypted data into strict-access data or any other encryption policy. Enabling `requireAuthOnAccess`, switching field-level and full-table encryption, or changing `encryptedFields` for an existing encrypted table without an application-controlled data migration fails with `MIGRATION_FAILED`. Requesting strict access from an adapter that was not created for it fails with `PERMISSION_DENIED`; the runtime never substitutes a weaker key.
 
 When the stable default root `lite-data-store` does not already exist, the runtime can migrate legacy `expo-lite-data` content automatically.
 

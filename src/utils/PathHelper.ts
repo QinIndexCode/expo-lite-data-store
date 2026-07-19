@@ -1,9 +1,7 @@
 import logger from './logger';
 import { getDocumentDirectory, getFileSystem } from './fileSystemCompat';
+import { isStorageRecord } from '../types/storageTypes';
 
-/**
- * Default storage folder name
- */
 const DEFAULT_STORAGE_FOLDER = 'lite-data-store';
 const LEGACY_STORAGE_FOLDER = 'expo-lite-data';
 
@@ -27,9 +25,6 @@ export function assertValidStorageFolderName(folder: unknown): asserts folder is
   }
 }
 
-/**
- * Path helper class to manage application paths
- */
 export class PathHelper {
   private static instance: PathHelper | null = null;
   private rootPath: string | null = null;
@@ -38,9 +33,6 @@ export class PathHelper {
 
   private constructor() {}
 
-  /**
-   * Get singleton instance
-   */
   static getInstance(): PathHelper {
     if (!PathHelper.instance) {
       PathHelper.instance = new PathHelper();
@@ -48,9 +40,6 @@ export class PathHelper {
     return PathHelper.instance;
   }
 
-  /**
-   * Set storage folder name
-   */
   setStorageFolder(folder: string): void {
     assertValidStorageFolderName(folder);
 
@@ -61,23 +50,14 @@ export class PathHelper {
     }
   }
 
-  /**
-   * Get storage folder name
-   */
   getStorageFolder(): string {
     return this.storageFolder;
   }
 
-  /**
-   * Get root path asynchronously
-   */
   async getRootPath(): Promise<string> {
     return this.ensureStorageReady();
   }
 
-  /**
-   * Get root path synchronously
-   */
   getRootPathSync(): string {
     if (!this.rootPath) {
       this.rootPath = this.buildPath(this.storageFolder);
@@ -117,9 +97,13 @@ export class PathHelper {
         fileSystem.getInfoAsync(rootPath),
         fileSystem.getInfoAsync(legacyPath),
       ]);
+      const rootIsEffectivelyEmpty = rootInfo.exists && (await this.isRootEffectivelyEmpty(rootPath));
 
-      if (legacyInfo.exists && (!rootInfo.exists || (await this.isRootEffectivelyEmpty(rootPath)))) {
+      if (legacyInfo.exists && (!rootInfo.exists || rootIsEffectivelyEmpty)) {
         try {
+          if (rootIsEffectivelyEmpty) {
+            await fileSystem.deleteAsync(rootPath, { idempotent: true });
+          }
           await this.migrateLegacyStorage(legacyPath, rootPath);
         } catch (error) {
           logger.warn(`[PathHelper] Failed to migrate legacy storage folder from ${legacyPath} to ${rootPath}`, error);
@@ -164,10 +148,20 @@ export class PathHelper {
 
     try {
       const metaRaw = await fileSystem.readAsStringAsync(`${rootPath}meta.ldb`);
-      const parsed = JSON.parse(metaRaw);
-      return !parsed?.tables || Object.keys(parsed.tables).length === 0;
+      const parsed: unknown = JSON.parse(metaRaw) as unknown;
+      if (
+        !isStorageRecord(parsed) ||
+        typeof parsed.version !== 'string' ||
+        typeof parsed.generatedAt !== 'number' ||
+        !Number.isSafeInteger(parsed.generatedAt) ||
+        parsed.generatedAt < 0 ||
+        !isStorageRecord(parsed.tables)
+      ) {
+        return false;
+      }
+      return Object.keys(parsed.tables).length === 0;
     } catch {
-      return true;
+      return false;
     }
   }
 
@@ -230,9 +224,7 @@ export class PathHelper {
     return `${documentDirectory}${folder}/`;
   }
 
-  /**
-   * Reset cached path (useful for testing)
-   */
+  /** Clears process-local path state after the configured root changes. */
   reset(): void {
     this.rootPath = null;
     this.storageFolder = DEFAULT_STORAGE_FOLDER;

@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
+type PackageRuntimeExports = Record<string, unknown>;
+
 describe('package exports', () => {
   const packageJsonPath = path.resolve(__dirname, '../../../package.json');
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as {
@@ -29,7 +31,7 @@ describe('package exports', () => {
   });
 
   it('does not expose plainStorage from the built package runtime or types entrypoints', () => {
-    const publicApi = require('expo-lite-data-store');
+    const publicApi = require('expo-lite-data-store') as unknown as PackageRuntimeExports;
     const declarationPath = path.resolve(__dirname, '../../../dist/types/expo-lite-data-store.d.ts');
 
     expect(publicApi).not.toHaveProperty('plainStorage');

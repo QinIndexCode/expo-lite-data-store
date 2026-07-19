@@ -1,17 +1,11 @@
 import { LiteStoreConfig } from './types/config';
 
 export default {
-  /**
-   * Basic Configuration
-   */
   chunkSize: 5 * 1024 * 1024, // 5MB per chunk
   storageFolder: 'lite-data-store',
   sortMethods: 'default' as const,
   timeout: 10000,
 
-  /**
-   * API Configuration
-   */
   api: {
     rateLimit: {
       enabled: false,
@@ -38,7 +32,7 @@ export default {
 
   performance: {
     enableQueryOptimization: true,
-    maxConcurrentOperations: 5, // Recommended range: 3-10, adjust by device performance
+    maxConcurrentOperations: 5,
     enableBatchOptimization: true,
     memoryWarningThreshold: 0.8,
   },
@@ -51,8 +45,8 @@ export default {
   },
 
   monitoring: {
-    enablePerformanceTracking: false, // Not fully supported yet
-    enableHealthChecks: true, // Enable to improve performance and stability
+    enablePerformanceTracking: false,
+    enableHealthChecks: true,
     metricsRetention: 86400000, // 24h
   },
 

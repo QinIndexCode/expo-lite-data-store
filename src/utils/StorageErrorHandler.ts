@@ -3,11 +3,11 @@ import { StorageError } from '../types/storageErrorInfc';
 import logger from './logger';
 
 /**
- * Error handling utility class providing unified error creation and handling
+ * Creates and normalizes storage errors across public operations.
  */
 export class ErrorHandler {
   static createTableError(operation: string, tableName: string, cause?: unknown, details?: string): StorageError {
-    // Print underlying errors in test/dev for table create/delete debugging
+    // Development logs retain the original cause before callers receive a normalized error.
     if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
       logger.error(`[ErrorHandler][createTableError] operation=${operation}, table=${tableName}, cause=`, cause);
     }

@@ -18,7 +18,7 @@ import { RateLimitWrapper } from './RateLimitWrapper';
 import type { RateLimitStatus } from './RateLimiter';
 import { ValidationWrapper } from './ValidationWrapper';
 
-/** Coordinates validation, throttling, storage, and response formatting. */
+/** Coordinates validation, throttling, storage, and response formatting for API calls. */
 export class ApiWrapper {
   private apiRouter: ApiRouter;
   private rateLimitWrapper: RateLimitWrapper;
@@ -257,7 +257,11 @@ export class ApiWrapper {
     }
   }
 
-  /** @deprecated Use insert or overwrite to make write semantics explicit. */
+  /**
+   * Delegates to the legacy write operation.
+   *
+   * @deprecated Use insert or overwrite to make write semantics explicit.
+   */
   async write<T extends object = StorageRecord>(
     tableName: string,
     data: StorageInput<NonInfer<T>>,

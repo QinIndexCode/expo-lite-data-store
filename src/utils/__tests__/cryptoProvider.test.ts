@@ -18,14 +18,14 @@ describe('cryptoProvider', () => {
     __resetNativeCryptoForTest();
   });
 
-  test('randomBytes returns correct length', () => {
+  it('randomBytes returns correct length', () => {
     const len = 32;
     const bytes = providerRandomBytes(len);
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.length).toBe(len);
   });
 
-  test('pbkdf2 matches node crypto (sha256)', () => {
+  it('pbkdf2 matches node crypto (sha256)', () => {
     const password = 'test-password';
     const salt = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
     const iterations = 1000;
@@ -35,7 +35,7 @@ describe('cryptoProvider', () => {
     expect(Buffer.from(actual).toString('hex')).toBe(Buffer.from(expected).toString('hex'));
   });
 
-  test('hmac matches node crypto (sha512)', () => {
+  it('hmac matches node crypto (sha512)', () => {
     const key = new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2]);
     const actual = providerHmac('hmac-payload', key, 'SHA-512');
     const expected = createHmac('sha512', key).update('hmac-payload').digest();
@@ -43,7 +43,7 @@ describe('cryptoProvider', () => {
     expect(Buffer.from(actual).toString('hex')).toBe(expected.toString('hex'));
   });
 
-  test('uses an explicitly registered native crypto module when available', async () => {
+  it('uses an explicitly registered native crypto module when available', async () => {
     const update = jest.fn();
     const hmacUpdate = jest.fn().mockReturnThis();
     const digest = jest.fn(() => 'native-hash');
@@ -87,7 +87,7 @@ describe('cryptoProvider', () => {
     expect(hmacUpdate).toHaveBeenCalledWith('native-data');
   });
 
-  test('accepts native crypto modules that expose a self-referential default export', () => {
+  it('accepts native crypto modules that expose a self-referential default export', () => {
     const nativeModule = {
       pbkdf2Sync: jest.fn(() => Buffer.from([1, 2, 3, 4])),
       randomBytes: jest.fn(() => Buffer.from([9, 8, 7, 6])),
@@ -113,7 +113,7 @@ describe('cryptoProvider', () => {
     expect(Buffer.from(providerRandomBytes(4))).toEqual(Buffer.from([9, 8, 7, 6]));
   });
 
-  test('hash fallback matches node crypto (sha256)', async () => {
+  it('hash fallback matches node crypto (sha256)', async () => {
     const expected = createHash('sha256').update('fallback-data').digest('hex');
     await expect(providerHash('fallback-data', 'SHA-256')).resolves.toBe(expected);
   });

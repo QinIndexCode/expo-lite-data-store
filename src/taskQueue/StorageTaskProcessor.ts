@@ -115,7 +115,7 @@ const getBulkOperations = (payload: StorageRecord): BulkOperation<StorageRecord>
   return payload.operations.map(parseBulkOperation);
 };
 
-/** Processes validated queue payloads through the storage adapter. */
+/** Validates queue payloads before dispatching supported operations to the storage adapter. */
 export class StorageTaskProcessor implements TaskProcessor {
   private storageAdapter: FileSystemStorageAdapter;
 

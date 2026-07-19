@@ -1,3 +1,97 @@
+type PhaseIdentity = {
+  channel: string;
+  mode: string;
+  profile: string;
+  runId: string;
+};
+
+type PhaseEvent = PhaseIdentity & {
+  type: string;
+};
+
+type AdbDevice = {
+  serial: string;
+  state: string;
+  model: string | null;
+  product: string | null;
+  device: string | null;
+  transportId: string | null;
+};
+
+type ExpoAndroidDeviceTarget = {
+  deviceArg: string | null;
+  resolution: string;
+};
+
+type QaConsumerTempOptions = {
+  channel: string;
+  profile: string;
+  platform: string;
+  qaTempRoot: string;
+};
+
+type ExpoDoctorWarningInput = {
+  channel: string;
+  profile: string;
+  caseId: string;
+  combinedOutput: string;
+};
+
+type QaRecord = {
+  caseId: string;
+  status: string;
+  stage?: string;
+  error?: { message: string };
+  metrics?: {
+    provider?: string;
+    summary?: {
+      performanceSummary?: {
+        sampleCount?: number;
+        p95Ms?: number;
+        throughputOpsPerSec?: number;
+      };
+    };
+  };
+  fatalError?: unknown;
+};
+
+type QaChannelSummary = {
+  channel: string;
+  profile: string;
+  records: QaRecord[];
+};
+
+type QaVerdictOptions = {
+  channels?: string[];
+  profiles?: string[];
+  layers?: string[];
+};
+
+type QaVerdict = {
+  status: string;
+  evidence: string[];
+};
+
+type QaVerdicts = {
+  zeroConfigVerdict: QaVerdict;
+  expoGoRuntimeVerdict: QaVerdict;
+  nativeFlagshipVerdict: QaVerdict;
+  performanceAndStabilityVerdict: QaVerdict;
+};
+
+type QaRuntime = {
+  buildPhaseEventMatcher: (identity: PhaseIdentity) => (event: PhaseEvent) => boolean;
+  buildVerdicts: (channelSummaries: QaChannelSummary[], options: QaVerdictOptions) => QaVerdicts;
+  buildNativeRunAndroidArgs: (deviceArg: string | null) => string[];
+  buildQaConsumerTempPrefix: (options: QaConsumerTempOptions) => string;
+  isSinglePackageExpoGoDoctorPeerWarning: (input: ExpoDoctorWarningInput) => boolean;
+  parseAdbDevicesOutput: (output: string) => AdbDevice[];
+  resolveRequestedAdbSerial: (requestedSerial: string, availableSerials: string[]) => string | null;
+  resolveExpoAndroidDeviceTargetFromDevices: (serial: string, devices: AdbDevice[]) => ExpoAndroidDeviceTarget;
+};
+
+const loadQaRuntime = (): QaRuntime => require('../../../scripts/expo-runtime-qa.cjs') as unknown as QaRuntime;
+
 const {
   buildPhaseEventMatcher,
   buildVerdicts,
@@ -7,7 +101,7 @@ const {
   parseAdbDevicesOutput,
   resolveRequestedAdbSerial,
   resolveExpoAndroidDeviceTargetFromDevices,
-} = require('../../../scripts/expo-runtime-qa.cjs');
+} = loadQaRuntime();
 
 describe('expo runtime QA Android device selection', () => {
   it('matches only events from the current lane identity', () => {

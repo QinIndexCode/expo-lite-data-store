@@ -1,11 +1,14 @@
 import { StorageError } from '../../types/storageErrorInfc';
 import { type StorageRecord } from '../../types/storageTypes';
 import { hashHexSync } from '../../utils/cryptoPrimitives';
-import logger from '../../utils/logger';
 import { type FileInfoCompat, getFileSystem } from '../../utils/fileSystemCompat';
+import withTimeout from '../../utils/withTimeout';
 
 export abstract class FileHandlerBase {
-  protected fileInfoCache = new Map<
+  private static readonly PATH_LOCK_TIMEOUT_MS = 30000;
+  private static readonly MAX_FILE_INFO_CACHE_SIZE = 1024;
+  private static readonly pathOperationTails = new Map<string, Promise<void>>();
+  private static readonly fileInfoCache = new Map<
     string,
     {
       info: FileInfoCompat;
@@ -15,9 +18,49 @@ export abstract class FileHandlerBase {
 
   protected readonly CACHE_EXPIRY = 5000;
 
-  protected readonly MAX_MEMORY_PER_CHUNK = 50 * 1024 * 1024;
+  protected async acquirePathLock(path: string): Promise<() => void> {
+    const previous = FileHandlerBase.pathOperationTails.get(path) ?? Promise.resolve();
+    let releaseGate!: () => void;
+    const gate = new Promise<void>(resolve => {
+      releaseGate = resolve;
+    });
+    const tail = previous.then(() => gate);
+    FileHandlerBase.pathOperationTails.set(path, tail);
 
-  protected readonly BATCH_SIZE = 100;
+    try {
+      await withTimeout(previous, FileHandlerBase.PATH_LOCK_TIMEOUT_MS, `acquire file lock ${path}`);
+    } catch (error) {
+      releaseGate();
+      void tail.then(() => {
+        if (FileHandlerBase.pathOperationTails.get(path) === tail) {
+          FileHandlerBase.pathOperationTails.delete(path);
+        }
+      });
+      throw error;
+    }
+
+    let released = false;
+    return () => {
+      if (released) {
+        return;
+      }
+
+      released = true;
+      releaseGate();
+      if (FileHandlerBase.pathOperationTails.get(path) === tail) {
+        FileHandlerBase.pathOperationTails.delete(path);
+      }
+    };
+  }
+
+  protected async runWithPathLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+    const release = await this.acquirePathLock(path);
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
 
   protected validateArrayData(data: unknown): asserts data is StorageRecord[] {
     if (!Array.isArray(data)) {
@@ -30,7 +73,6 @@ export abstract class FileHandlerBase {
 
   protected validateDataItem(item: unknown): item is StorageRecord {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) {
-      logger.warn(`skip invalid data item:`, item);
       return false;
     }
     return true;
@@ -48,30 +90,55 @@ export abstract class FileHandlerBase {
 
   protected async getFileInfo(path: string): Promise<FileInfoCompat> {
     const key = path;
-    const cached = this.fileInfoCache.get(key);
+    const cached = FileHandlerBase.fileInfoCache.get(key);
     if (cached && Date.now() - cached.timestamp < this.CACHE_EXPIRY) {
+      FileHandlerBase.fileInfoCache.delete(key);
+      FileHandlerBase.fileInfoCache.set(key, cached);
       return cached.info;
     }
+    FileHandlerBase.fileInfoCache.delete(key);
 
     try {
       const info = await getFileSystem().getInfoAsync(path);
-      this.fileInfoCache.set(key, {
+      if (FileHandlerBase.fileInfoCache.size >= FileHandlerBase.MAX_FILE_INFO_CACHE_SIZE) {
+        const oldestKey = FileHandlerBase.fileInfoCache.keys().next();
+        if (!oldestKey.done) {
+          FileHandlerBase.fileInfoCache.delete(oldestKey.value);
+        }
+      }
+      FileHandlerBase.fileInfoCache.set(key, {
         info,
         timestamp: Date.now(),
       });
       return info;
     } catch (error) {
-      this.fileInfoCache.delete(key);
+      FileHandlerBase.fileInfoCache.delete(key);
       throw error;
     }
   }
 
-  protected clearFileInfoCache(path?: string): void {
-    if (path) {
-      this.fileInfoCache.delete(path);
-    } else {
-      this.fileInfoCache.clear();
+  static invalidateFileInfoCache(path?: string, includeDescendants = false): void {
+    if (!path) {
+      FileHandlerBase.fileInfoCache.clear();
+      return;
     }
+
+    FileHandlerBase.fileInfoCache.delete(path);
+    if (includeDescendants) {
+      for (const cachedPath of FileHandlerBase.fileInfoCache.keys()) {
+        if (cachedPath.startsWith(path)) {
+          FileHandlerBase.fileInfoCache.delete(cachedPath);
+        }
+      }
+    }
+  }
+
+  protected clearFileInfoCache(path?: string): void {
+    FileHandlerBase.invalidateFileInfoCache(path);
+  }
+
+  protected clearFileInfoCacheTree(path: string): void {
+    FileHandlerBase.invalidateFileInfoCache(path, true);
   }
 
   protected formatWriteError(message: string, cause?: unknown): StorageError {

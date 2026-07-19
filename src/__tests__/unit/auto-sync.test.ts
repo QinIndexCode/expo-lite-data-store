@@ -94,6 +94,94 @@ describe('AutoSyncService', () => {
     expect(dirtyDataAfterSync.size).toBe(0);
   });
 
+  it('defers dirty data while a transaction is active and syncs it afterwards', async () => {
+    await storageAdapter.createTable('test_auto_sync', {
+      mode: 'single',
+      initialData: [{ id: 1, name: 'Test Item 1', value: 'Persisted value' }],
+    });
+    await autoSyncService.updateConfig({ minItems: 1 });
+
+    const cacheManager = getAdapterTestAccess(storageAdapter).cacheManager;
+    cacheManager.set('test_auto_sync_1', { id: 1, name: 'Test Item 1', value: 'Deferred value' }, undefined, true);
+
+    await storageAdapter.beginTransaction();
+    let transactionActive = true;
+    try {
+      await autoSyncService.sync();
+
+      expect(cacheManager.getDirtyData().size).toBe(1);
+      await storageAdapter.rollback();
+      transactionActive = false;
+
+      await expect(storageAdapter.read<AutoSyncRecord>('test_auto_sync', { bypassCache: true })).resolves.toEqual([
+        { id: 1, name: 'Test Item 1', value: 'Persisted value' },
+      ]);
+
+      await autoSyncService.sync();
+
+      await expect(storageAdapter.read<AutoSyncRecord>('test_auto_sync', { bypassCache: true })).resolves.toEqual([
+        { id: 1, name: 'Test Item 1', value: 'Deferred value' },
+      ]);
+      expect(cacheManager.getDirtyData().size).toBe(0);
+    } finally {
+      if (transactionActive) {
+        await storageAdapter.rollback().catch(() => undefined);
+      }
+    }
+  });
+
+  it('finishes a durable sync before a transaction started during the write can proceed', async () => {
+    const persistedRecord = { id: 1, name: 'Test Item 1', value: 'Persisted value' };
+    const dirtyRecord = { id: 1, name: 'Test Item 1', value: 'Durable synced value' };
+    await storageAdapter.createTable('test_auto_sync', {
+      mode: 'single',
+      initialData: [persistedRecord],
+    });
+    await autoSyncService.updateConfig({ minItems: 1 });
+
+    const cacheManager = getAdapterTestAccess(storageAdapter).cacheManager;
+    cacheManager.set('test_auto_sync_1', dirtyRecord, undefined, true);
+
+    let signalWriteStarted: () => void = () => undefined;
+    const writeStarted = new Promise<void>(resolve => {
+      signalWriteStarted = resolve;
+    });
+    let releaseWrite: () => void = () => undefined;
+    const writeReleased = new Promise<void>(resolve => {
+      releaseWrite = resolve;
+    });
+    const originalWrite = storageAdapter.write.bind(storageAdapter);
+    const writeSpy = jest
+      .spyOn(storageAdapter, 'write')
+      .mockImplementation(async (...args: Parameters<FileSystemStorageAdapter['write']>) => {
+        signalWriteStarted();
+        await writeReleased;
+        return originalWrite(...args);
+      });
+
+    try {
+      const syncPromise = autoSyncService.sync();
+      await writeStarted;
+
+      const beginPromise = storageAdapter.beginTransaction();
+      releaseWrite();
+      await syncPromise;
+      await beginPromise;
+      await storageAdapter.rollback();
+
+      await expect(storageAdapter.read<AutoSyncRecord>('test_auto_sync', { bypassCache: true })).resolves.toEqual([
+        dirtyRecord,
+      ]);
+      expect(cacheManager.getDirtyData().size).toBe(0);
+    } finally {
+      releaseWrite();
+      writeSpy.mockRestore();
+      if (storageAdapter.isInTransaction()) {
+        await storageAdapter.rollback().catch(() => undefined);
+      }
+    }
+  });
+
   it('limits each table to batchSize dirty entries and drains the deferred entry below minItems', async () => {
     await storageAdapter.createTable('test_auto_sync', {
       mode: 'single',

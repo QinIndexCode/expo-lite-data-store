@@ -13,7 +13,7 @@ This `README.md` is the package introduction and documentation index for npm and
 
 - English guides end with `.en.md`
 - Simplified Chinese guides end with `.zh-CN.md`
-- Bare `.md` files are repository indexes or internal maintenance documents, not the primary end-user manuals
+- Bare `.md` files are repository indexes, GitHub-convention policy/template entry points, or internal maintenance documents, not the primary end-user manuals
 
 > **v3 migration:** Version `3.0.0` removes the public `plainStorage` export and unsupported package deep imports. Import the root `db` facade or named APIs from `expo-lite-data-store`; see the [v3 API migration notes](./docs/API.en.md#v3-migration) before upgrading.
 

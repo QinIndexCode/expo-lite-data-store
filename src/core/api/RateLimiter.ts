@@ -116,7 +116,7 @@ export class RateLimiter {
     this.config = RateLimiter.normalizeConfig(config);
   }
 
-  /** Consumes one token for a client. */
+  /** Checks and consumes one token for a client when rate limiting is enabled. */
   check(clientId: string): RateLimitStatus {
     if (!this.config.enabled) {
       return {

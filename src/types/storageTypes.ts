@@ -1,10 +1,7 @@
-/**
- * Common options type shared across all API methods.
- */
 export type CommonOptions = {
-  /** Whether to use encrypted storage (defaults to false) */
+  /** Whether to use encrypted storage. Defaults to false. */
   encrypted?: boolean;
-  /** Whether biometric authentication is required for access (defaults to false) */
+  /** Whether access requires biometric authentication. Defaults to false. */
   requireAuthOnAccess?: boolean;
 };
 
@@ -27,9 +24,6 @@ export type StorageInput<T extends object = StorageRecord> = T | T[];
  */
 export type NonInfer<T> = [T][T extends unknown ? 0 : never];
 
-/**
- * Returns whether a runtime value is a non-array record suitable for storage.
- */
 export const isStorageRecord = (value: unknown): value is StorageRecord => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
@@ -41,9 +35,7 @@ export type SortAlgorithm = 'default' | 'fast' | 'counting' | 'merge' | 'slow';
 /** Supports known keys with autocomplete while retaining schemaless record fields. */
 export type SortField<T extends object> = Extract<keyof T, string> | (string & {});
 
-/**
- * Filter condition type that supports multiple filtering mechanisms.
- */
+/** Accepts predicates, partial records, or nested boolean conditions. */
 export type FilterCondition<T extends object = StorageRecord> =
   | ((item: T) => boolean)
   | Partial<T>
@@ -80,43 +72,34 @@ export type BulkOperation<T extends object = StorageRecord> =
       where: FilterCondition<T>;
     };
 
-/**
- * Write result type containing detailed information about a write operation.
- */
 export type WriteResult = {
-  /** Number of records written or affected in this operation */
+  /** Number of records written or affected by this operation. */
   written: number;
-  /** Total number of records after the write operation */
+  /** Total number of records after the write. */
   totalAfterWrite: number;
-  /** Whether chunked writing was used */
+  /** Whether the table uses chunked storage. */
   chunked: boolean;
-  /** Number of chunks used (only present for chunked writes) */
+  /** Number of chunks, when chunked storage is used. */
   chunks?: number;
 };
 
-/**
- * Read options type for configuring data retrieval parameters.
- */
 export type ReadOptions<T extends object = StorageRecord> = CommonOptions & {
-  /** Number of records to skip */
+  /** Number of records to skip. */
   skip?: number;
-  /** Maximum number of records to read */
+  /** Maximum number of records to read. */
   limit?: number;
-  /** Filter condition to apply */
+  /** Filter condition to apply. */
   filter?: FilterCondition<T>;
-  /** Field or fields to sort by */
+  /** Field or fields to sort by. */
   sortBy?: SortField<T> | SortField<T>[];
-  /** Sort order(s) corresponding to sortBy fields */
+  /** Sort order corresponding to each requested field. */
   order?: SortOrder | SortOrder[];
-  /** Sorting algorithm to use */
+  /** Sorting algorithm to use. */
   sortAlgorithm?: SortAlgorithm;
-  /** Whether to bypass cache and read directly from disk */
+  /** Whether to bypass the read cache. */
   bypassCache?: boolean;
 };
 
-/**
- * Create table options type for configuring table creation parameters.
- */
 export type ColumnDefinition =
   | 'string'
   | 'number'
@@ -129,88 +112,69 @@ export type ColumnDefinition =
     };
 
 export type CreateTableOptions<T extends object = StorageRecord> = CommonOptions & {
-  /** Column definitions with column names as keys and data types as values */
+  /** Column definitions keyed by column name. */
   columns?: Record<string, ColumnDefinition>;
-  /** Whether to automatically create intermediate directories */
+  /** Whether to create intermediate directories. */
   intermediates?: boolean;
-  /** Chunk size threshold for chunked writing */
+  /** Chunk size threshold in bytes. */
   chunkSize?: number;
-  /** Initial data to populate the table with */
+  /** Initial records to persist with the table. */
   initialData?: T[];
-  /** Storage mode: single file or chunked */
+  /** Physical storage mode. */
   mode?: 'single' | 'chunked';
-  /** List of fields that require encryption */
+  /** Fields that require encryption. */
   encryptedFields?: string[];
-  /** Whether to use full-table encryption */
+  /** Whether to encrypt the table as one envelope. */
   encryptFullTable?: boolean;
 };
 
-/**
- * Write options type for configuring data writing parameters.
- */
 export type WriteOptions = CommonOptions & {
-  /** Write mode: append or overwrite existing data */
+  /** Whether to append or replace existing records. */
   mode?: 'append' | 'overwrite';
-  /** Whether to force chunked writing */
+  /** Whether to force chunked storage. */
   forceChunked?: boolean;
-  /** Whether to enable full table encryption (mutually exclusive with field-level encryption) */
+  /** Whether to encrypt the table as one envelope instead of encrypting fields. */
   encryptFullTable?: boolean;
 };
 
-/**
- * Internal write option used while a transaction commits or rolls back.
- */
-export type InternalWriteOptions = WriteOptions & {
-  directWrite?: boolean;
-};
+/** Internal alias for write paths that can also carry module-private capabilities. */
+export type InternalWriteOptions = WriteOptions;
 
-/**
- * Table management options type for table-related operations.
- */
 export type TableOptions = CommonOptions;
 
-/**
- * Find options type for configuring findMany operation parameters.
- */
 export type FindOptions<T extends object = StorageRecord> = CommonOptions & {
-  /** Number of records to skip */
+  /** Number of records to skip. */
   skip?: number;
-  /** Maximum number of records to return */
+  /** Maximum number of records to return. */
   limit?: number;
-  /** Field or fields to sort by */
+  /** Field or fields to sort by. */
   sortBy?: SortField<T> | SortField<T>[];
-  /** Sort order(s) corresponding to sortBy fields */
+  /** Sort order corresponding to each requested field. */
   order?: SortOrder | SortOrder[];
-  /** Sorting algorithm to use */
+  /** Sorting algorithm to use. */
   sortAlgorithm?: SortAlgorithm;
 };
 
-/**
- * Table metadata interface containing table information and statistics.
- */
 export interface TableMeta {
-  /** Storage mode: single file or chunked */
+  /** Physical storage mode. */
   mode: 'single' | 'chunked';
-  /** Number of records in the table */
+  /** Number of logical records. */
   count: number;
-  /** Total size of the table in bytes */
+  /** Total table size in bytes. */
   size?: number;
-  /** Chunk size (only present in chunked mode) */
+  /** Chunk size in bytes, when chunked storage is used. */
   chunk?: number;
-  /** Last update timestamp in milliseconds */
+  /** Last update timestamp in milliseconds. */
   updateAt: number;
-  /** Whether the table uses encrypted storage */
+  /** Whether the table uses encrypted storage. */
   encrypted?: boolean;
-  /** Whether biometric authentication is required for access */
+  /** Whether access requires biometric authentication. */
   requireAuthOnAccess?: boolean;
 }
 
-/**
- * Catalog metadata type containing database-wide table information and version.
- */
 export type Catalog = {
-  /** Metadata for all tables with table names as keys */
+  /** Metadata keyed by table name. */
   tables: Record<string, TableMeta>;
-  /** Catalog version number */
+  /** Catalog version number. */
   version: number;
 };

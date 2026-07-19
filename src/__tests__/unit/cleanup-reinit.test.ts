@@ -1,7 +1,6 @@
 /// <reference path="../test-globals.d.ts" />
 
 import { configManager } from '../../core/config/ConfigManager';
-import { SingleFileHandler } from '../../core/file/SingleFileHandler';
 import { MetadataManager } from '../../core/meta/MetadataManager';
 import { plainStorage } from '../../core/db';
 import { db, findOne, hasTable, insert, read, createTable } from '../../expo-lite-data-store';
@@ -9,6 +8,10 @@ import { getRootPath, resetRootPathState } from '../../utils/ROOTPath';
 
 type StorageTestAccess = {
   metadataManager: MetadataManager;
+};
+
+type PersistedMetadata = {
+  tables: Record<string, { count: number }>;
 };
 
 const getStorageTestAccess = (storage: object): StorageTestAccess => storage as unknown as StorageTestAccess;
@@ -67,17 +70,14 @@ describe('cleanup and reinit runtime state', () => {
 
     const persistedOldMeta = JSON.parse(
       global.__expo_file_system_mock__.mockFileSystem[`${firstRoot}meta.ldb`] as string
-    );
+    ) as unknown as PersistedMetadata;
     expect(persistedOldMeta.tables[tableName].count).toBe(2);
 
-    const nextRoot = await getRootPath();
-    const handler = new SingleFileHandler(`${nextRoot}${tableName}.ldb`);
-    await handler.write([
-      {
-        id: 'legacy-1',
-        label: 'fresh-root',
-      },
-    ]);
+    await createTable(tableName);
+    await insert(tableName, {
+      id: 'legacy-1',
+      label: 'fresh-root',
+    });
 
     expect(await read(tableName)).toEqual([
       {

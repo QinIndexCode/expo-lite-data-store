@@ -103,6 +103,28 @@ describe('public API', () => {
       }
     });
 
+    it('routes an encryptedFields table through the encrypted facade', async () => {
+      const encryptedTable = `${TEST_TABLE_PREFIX}fields_${Date.now()}_${++testTableSequence}`;
+
+      try {
+        await createTable(encryptedTable, {
+          encryptedFields: ['secret'],
+          initialData: [{ id: 1, secret: 'classified', visible: 'plain' }],
+        });
+
+        expect(storage.getTableMeta(encryptedTable)).toMatchObject({
+          encrypted: true,
+          encryptedFields: ['secret'],
+        });
+        await expect(read(encryptedTable)).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+        await expect(read(encryptedTable, { encrypted: true, bypassCache: true })).resolves.toEqual([
+          { id: 1, secret: 'classified', visible: 'plain' },
+        ]);
+      } finally {
+        await deleteTable(encryptedTable, { encrypted: true });
+      }
+    });
+
     it('serializes an ordinary insert behind a paused strict table creation', async () => {
       const strictTable = `${TEST_TABLE_PREFIX}strict_policy_lock_${Date.now()}_${++testTableSequence}`;
       let releaseStrictCreate: () => void = () => undefined;
@@ -515,6 +537,68 @@ describe('public API', () => {
       expect(items[0].balance).toBe(1000);
     });
 
+    it('does not allow a public directWrite property to bypass transaction staging', async () => {
+      await beginTransaction({});
+      let transactionActive = true;
+
+      try {
+        const forgedOptions = Object.assign({ mode: 'append' as const }, { directWrite: true });
+        await insert(testTable, { id: 2, name: 'Forged Direct Write', balance: 500 }, forgedOptions);
+
+        await rollback({});
+        transactionActive = false;
+
+        await expect(read(testTable, { bypassCache: true })).resolves.toEqual([
+          { id: 1, name: 'Transaction Test', balance: 1000 },
+        ]);
+      } finally {
+        if (transactionActive) {
+          await rollback({}).catch(() => undefined);
+        }
+      }
+    });
+
+    it('reports transaction counts and append totals from the staged table view', async () => {
+      await beginTransaction({});
+      let transactionActive = true;
+
+      try {
+        const firstInsert = await insert(testTable, { id: 2, name: 'Second Item', balance: 500 });
+        expect(firstInsert.totalAfterWrite).toBe(2);
+        await expect(countTable(testTable)).resolves.toBe(2);
+
+        const secondInsert = await insert(testTable, [
+          { id: 3, name: 'Third Item', balance: 300 },
+          { id: 4, name: 'Fourth Item', balance: 200 },
+        ]);
+        expect(secondInsert.totalAfterWrite).toBe(4);
+        await expect(storage.read(testTable, { limit: 1 })).resolves.toHaveLength(1);
+        await expect(countTable(testTable)).resolves.toBe(4);
+        await expect(read(testTable)).resolves.toHaveLength(4);
+
+        const bulkResult = await bulkWrite(testTable, [
+          { type: 'delete', where: { id: 2 } },
+          {
+            type: 'insert',
+            data: [
+              { id: 5, name: 'Fifth Item', balance: 100 },
+              { id: 6, name: 'Sixth Item', balance: 50 },
+            ],
+          },
+        ]);
+        expect(bulkResult.totalAfterWrite).toBe(5);
+        await expect(countTable(testTable)).resolves.toBe(5);
+        await expect(read(testTable)).resolves.toHaveLength(5);
+
+        await rollback({});
+        transactionActive = false;
+      } finally {
+        if (transactionActive) {
+          await rollback({}).catch(() => undefined);
+        }
+      }
+    });
+
     it('commits multiple transaction operations', async () => {
       await beginTransaction({});
       let transactionActive = true;
@@ -561,6 +645,10 @@ describe('public API', () => {
       try {
         await beginTransaction({ encrypted: false, requireAuthOnAccess: true });
         await insert('strict_transaction_table', { id: 1 });
+
+        await expect(insert('strict_transaction_table', { id: 2 }, { encryptFullTable: true })).rejects.toThrow(
+          'Transaction security options must match the active transaction'
+        );
 
         await expect(commit({ encrypted: true, requireAuthOnAccess: false })).rejects.toThrow(
           'Transaction security options must match the active transaction'

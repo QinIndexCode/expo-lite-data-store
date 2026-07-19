@@ -23,11 +23,11 @@ const isAvailableAsync = async (): Promise<boolean> => {
   return true;
 };
 
-module.exports = {
+const expoSecureStoreMock = {
   getItemAsync,
   setItemAsync,
   deleteItemAsync,
   isAvailableAsync,
 };
 
-module.exports.default = module.exports;
+module.exports = Object.assign(expoSecureStoreMock, { default: expoSecureStoreMock });

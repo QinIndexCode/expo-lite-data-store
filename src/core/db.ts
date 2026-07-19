@@ -2,9 +2,6 @@ import storage from './adapter/FileSystemStorageAdapter';
 import { EncryptedStorageAdapter } from './EncryptedStorageAdapter';
 import type { IStorageAdapter } from '../types/storageAdapterInfc';
 
-/**
- * Database instance manager that allows dynamic switching between encrypted and non-encrypted modes.
- */
 export class DbInstanceManager {
   private static instance: DbInstanceManager;
   private defaultInstance: IStorageAdapter = storage;
@@ -12,28 +9,15 @@ export class DbInstanceManager {
 
   private constructor() {}
 
-  /**
-   * Gets the singleton instance of the DbInstanceManager.
-   *
-   * @returns DbInstanceManager Singleton instance
-   */
   public static getInstance(): DbInstanceManager {
     return DbInstanceManager.instance ?? (DbInstanceManager.instance = new DbInstanceManager());
   }
 
-  /**
-   * Gets the storage instance based on encryption requirements.
-   *
-   * @param encrypted Whether to enable encrypted storage (defaults to false)
-   * @param requireAuthOnAccess Whether biometric authentication is required (defaults to false)
-   * @returns IStorageAdapter Storage instance matching the specified requirements
-   */
   public getDbInstance(encrypted: boolean = false, requireAuthOnAccess: boolean = false): IStorageAdapter {
     if (!encrypted) {
       return this.defaultInstance;
     }
 
-    // Get or create encrypted instance based on requireAuthOnAccess
     const instanceKey = requireAuthOnAccess;
     if (!this.encryptedInstances.has(instanceKey)) {
       this.encryptedInstances.set(instanceKey, new EncryptedStorageAdapter({ requireAuthOnAccess }));
@@ -42,28 +26,14 @@ export class DbInstanceManager {
     return this.encryptedInstances.get(instanceKey)!;
   }
 
-  /**
-   * Gets the default database instance (for backward compatibility).
-   *
-   * @returns IStorageAdapter Default non-encrypted storage instance
-   */
   public getDefaultInstance(): IStorageAdapter {
     return this.defaultInstance;
   }
 }
 
-/**
- * Database instance manager singleton.
- */
 export const dbManager = DbInstanceManager.getInstance();
 
-/**
- * Default database instance (initially non-encrypted).
- */
 export const db = dbManager.getDbInstance();
 
-/**
- * Plain storage instance (for debugging purposes).
- * Allows direct viewing of plaintext data during development.
- */
+/** Exposes unencrypted storage for diagnostics. */
 export const plainStorage = storage;

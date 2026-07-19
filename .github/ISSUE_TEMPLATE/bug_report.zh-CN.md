@@ -6,6 +6,9 @@ labels: bug
 assignees: ''
 ---
 
+> [!IMPORTANT]
+> 请勿通过公开 Issue 披露疑似安全漏洞。请改用[安全策略中的私下披露流程](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/SECURITY.zh-CN.md)。
+
 ## 摘要
 
 请清楚、简洁地描述问题。

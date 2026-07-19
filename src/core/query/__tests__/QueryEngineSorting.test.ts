@@ -1,6 +1,6 @@
 import { QueryEngine } from '../QueryEngine';
 
-describe('QueryEngine Sorting', () => {
+describe('QueryEngine sorting', () => {
   const testData = [
     { id: 1, name: 'Alice', age: 25, score: 85.5, active: true, category: 'A' },
     { id: 2, name: 'Bob', age: 30, score: 92.0, active: false, category: 'B' },
@@ -9,7 +9,7 @@ describe('QueryEngine Sorting', () => {
     { id: 5, name: 'Eve', age: 28, score: 91.2, active: false, category: 'B' },
   ];
 
-  describe('Basic Sorting', () => {
+  describe('basic sorting', () => {
     it('sorts records by one field in ascending order', () => {
       const result = QueryEngine.sort(testData, 'age', 'asc');
       expect(result[0].age).toBe(20);
@@ -54,7 +54,7 @@ describe('QueryEngine Sorting', () => {
     });
   });
 
-  describe('Multi-field Sorting', () => {
+  describe('multi-field sorting', () => {
     it('sorts records by multiple fields', () => {
       const data = [
         { name: 'Alice', age: 25, score: 85 },
@@ -88,7 +88,7 @@ describe('QueryEngine Sorting', () => {
     });
   });
 
-  describe('Algorithm Selection', () => {
+  describe('algorithm selection', () => {
     it('uses the default algorithm when none is specified', () => {
       const result = QueryEngine.sort(testData, 'age');
       expect(result[0].age).toBe(20);
@@ -112,7 +112,29 @@ describe('QueryEngine Sorting', () => {
     });
   });
 
-  describe('Edge Cases', () => {
+  describe('algorithm consistency', () => {
+    const algorithms = ['default', 'fast', 'counting', 'merge', 'slow'] as const;
+    const dataWithNullishValues = [
+      { id: 'null-first', value: null },
+      { id: 'b', value: 'b' },
+      { id: 'undefined-middle', value: undefined },
+      { id: 'a', value: 'a' },
+      { id: 'null-late', value: null },
+      { id: 'c', value: 'c' },
+      { id: 'undefined-late', value: undefined },
+    ];
+    const nullishIds = ['null-first', 'undefined-middle', 'null-late', 'undefined-late'];
+
+    it.each(algorithms)('keeps nullish values stable and last with the %s algorithm', algorithm => {
+      const ascending = QueryEngine.sort(dataWithNullishValues, 'value', 'asc', algorithm);
+      const descending = QueryEngine.sort(dataWithNullishValues, 'value', 'desc', algorithm);
+
+      expect(ascending.map(item => item.id)).toEqual(['a', 'b', 'c', ...nullishIds]);
+      expect(descending.map(item => item.id)).toEqual(['c', 'b', 'a', ...nullishIds]);
+    });
+  });
+
+  describe('edge cases', () => {
     it('orders null and undefined values consistently', () => {
       const dataWithNulls = [
         { name: 'Alice', age: null },
@@ -131,6 +153,17 @@ describe('QueryEngine Sorting', () => {
 
       const result = QueryEngine.sort(mixedData, 'value', 'asc');
       expect(result).toHaveLength(4);
+    });
+  });
+
+  describe('pagination validation', () => {
+    it('rejects invalid skip and limit boundaries', () => {
+      const invalidBoundaries = [-1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, Number.MAX_SAFE_INTEGER + 1];
+
+      for (const boundary of invalidBoundaries) {
+        expect(() => QueryEngine.paginate(testData, boundary)).toThrow(RangeError);
+        expect(() => QueryEngine.paginate(testData, 0, boundary)).toThrow(RangeError);
+      }
     });
   });
 });

@@ -63,7 +63,7 @@ export class TaskQueue {
   start(): void {
     if (!this.isRunning) {
       this.isRunning = true;
-      // Tests control task execution explicitly to keep scheduling deterministic.
+      // Keep test runs deterministic by requiring explicit processNextInTest calls.
       if (!(typeof process !== 'undefined' && process.env.NODE_ENV === 'test')) {
         this.processNext();
       }

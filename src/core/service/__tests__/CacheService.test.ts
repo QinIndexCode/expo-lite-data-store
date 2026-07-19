@@ -127,41 +127,35 @@ describe('CacheService', () => {
     });
   });
 
-  describe('table cache keys', () => {
-    it('records keys related to a table', () => {
+  describe('table cache generations', () => {
+    it('invalidates one table without clearing unrelated cache entries', () => {
       const tableName = 'testTable';
-      const cacheKey1 = 'table:testTable:data';
-      const cacheKey2 = 'table:testTable:count';
-
-      cacheService.recordTableCacheKey(tableName, cacheKey1);
-      cacheService.recordTableCacheKey(tableName, cacheKey2);
-
-      cacheService.set(cacheKey1, [{ id: 1, name: 'Alice' }]);
-      cacheService.set(cacheKey2, 1);
-
-      expect(cacheService.get(cacheKey1)).toBeDefined();
-      expect(cacheService.get(cacheKey2)).toBeDefined();
-    });
-
-    it('clears keys related to one table while retaining unrelated keys', () => {
-      const tableName = 'testTable';
-      const cacheKey1 = 'table:testTable:data';
-      const cacheKey2 = 'table:testTable:count';
       const unrelatedKey = 'unrelated:key';
+      const firstVersion = cacheManager.getNamespaceVersion(tableName);
+      const firstCacheKey = `${tableName}_${firstVersion}_{}`;
 
-      cacheService.recordTableCacheKey(tableName, cacheKey1);
-      cacheService.recordTableCacheKey(tableName, cacheKey2);
-
-      cacheService.set(cacheKey1, [{ id: 1, name: 'Alice' }]);
-      cacheService.set(cacheKey2, 1);
+      cacheService.set(firstCacheKey, [{ id: 1, name: 'Alice' }]);
       cacheService.set(unrelatedKey, 'unrelatedValue');
 
       cacheService.clearTableCache(tableName);
 
-      expect(cacheService.get(cacheKey1)).toBeUndefined();
-      expect(cacheService.get(cacheKey2)).toBeUndefined();
-
+      const secondVersion = cacheManager.getNamespaceVersion(tableName);
+      expect(secondVersion).not.toBe(firstVersion);
+      expect(cacheService.get(`${tableName}_${secondVersion}_{}`)).toBeUndefined();
       expect(cacheService.get(unrelatedKey)).toBe('unrelatedValue');
+    });
+
+    it('keeps repeated table invalidations within the cache entry budget', () => {
+      const tableName = 'boundedTable';
+
+      for (let index = 0; index < 250; index++) {
+        const version = cacheManager.getNamespaceVersion(tableName);
+        cacheService.set(`${tableName}_${version}_${index}`, index);
+        cacheService.clearTableCache(tableName);
+      }
+
+      expect(cacheManager.getSize()).toBeLessThanOrEqual(100);
+      expect(cacheService.get(`${tableName}_cache_keys`)).toBeUndefined();
     });
   });
 });

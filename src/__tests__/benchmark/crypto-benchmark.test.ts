@@ -4,6 +4,13 @@ import { configManager } from '../../core/config/ConfigManager';
 
 const diagnosticsEnabled = process.env.EXPO_LITE_DATA_STORE_TEST_DIAGNOSTICS === '1';
 
+type EncodedPayload = {
+  version: string;
+  hmac?: string;
+};
+
+const decodePayload = (encrypted: string): EncodedPayload => JSON.parse(atob(encrypted)) as unknown as EncodedPayload;
+
 describe('crypto performance benchmark', () => {
   const TEST_DATA = 'Hello, World! This is a test string for encryption benchmark.';
   const MASTER_KEY = 'test-master-key-for-benchmark';
@@ -28,7 +35,7 @@ describe('crypto performance benchmark', () => {
       const duration = Date.now() - start;
       const avgTime = duration / ITERATIONS;
 
-      // GCM with 600K PBKDF2 iterations takes longer; allow up to 10s in test env
+      // The high PBKDF2 work factor needs a deliberately loose functional-test ceiling.
       expect(avgTime).toBeLessThan(10000);
 
       if (diagnosticsEnabled) {
@@ -77,8 +84,7 @@ describe('crypto performance benchmark', () => {
 
       const encrypted = await encrypt(TEST_DATA, MASTER_KEY);
 
-      // GCM payloads have version field
-      const decoded = JSON.parse(atob(encrypted));
+      const decoded = decodePayload(encrypted);
       expect(decoded.version).toBe('gcm-v1');
     });
 
@@ -87,7 +93,7 @@ describe('crypto performance benchmark', () => {
 
       const encrypted = await encrypt(TEST_DATA, MASTER_KEY);
 
-      const decoded = JSON.parse(atob(encrypted));
+      const decoded = decodePayload(encrypted);
       expect(decoded.version).toBe('gcm-v1');
     });
 
@@ -97,7 +103,7 @@ describe('crypto performance benchmark', () => {
       const encrypted = await encrypt(TEST_DATA, MASTER_KEY);
 
       // CTR v2 authenticates the payload version and encryption parameters.
-      const decoded = JSON.parse(atob(encrypted));
+      const decoded = decodePayload(encrypted);
       expect(decoded.version).toBe('ctr-v2');
       expect(decoded.hmac).toBeDefined();
     });

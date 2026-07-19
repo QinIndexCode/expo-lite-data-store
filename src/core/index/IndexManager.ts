@@ -2,62 +2,85 @@ import { isStorageRecord, type StorageRecord } from '../../types/storageTypes';
 import type { IMetadataManager } from '../../types/metadataManagerInfc';
 import { StorageError } from '../../types/storageErrorInfc';
 
-type IndexId = string | number;
+export type IndexId = string | number;
 
-const getIndexId = (record: StorageRecord): IndexId | undefined => {
+const isStableIndexId = (value: unknown): value is IndexId =>
+  typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value));
+
+export const getStableIndexId = (record: StorageRecord): IndexId | undefined => {
   const id = record.id;
-  return typeof id === 'string' || typeof id === 'number' ? id : undefined;
+  if (isStableIndexId(id)) {
+    return id;
+  }
+
+  const fallbackId = record._id;
+  return isStableIndexId(fallbackId) ? fallbackId : undefined;
 };
-/**
- * Index type enum
- */
+
 export enum IndexType {
   UNIQUE = 'unique',
   NORMAL = 'normal',
 }
 
-/**
- * Index item interface
- */
 export interface IndexItem {
   value: unknown;
-  id: IndexId;
+  id?: IndexId;
 }
 
-/**
- * Index interface
- */
 export interface Index {
   name: string;
   type: IndexType;
   fields: string[]; // Supports composite indexes
   data: Map<string, IndexItem[]>; // Stringified composite values as keys
+  ready: boolean;
 }
 
-/**
- * Index manager class for creating, querying, and updating indexes
- */
-export class IndexManager {
-  /**
-   * Index cache
-   */
-  private indexCache = new Map<string, Map<string, Index>>(); // tableName -> indexName -> Index
+export type IndexUpdateMode = 'append' | 'rebuild';
 
-  /**
-   * Metadata manager instance
-   */
+export interface IndexUpdatePlan {
+  readonly apply: () => void;
+}
+
+type PreparedBucketDelta = {
+  readonly items: IndexItem[];
+  readonly removals: Set<IndexItem>;
+  readonly additions: IndexItem[];
+};
+
+type PreparedIndexPatch = {
+  readonly kind: 'patch';
+  readonly index: Index;
+  readonly buckets: ReadonlyMap<string, PreparedBucketDelta>;
+  readonly unqueryableRecords: number;
+};
+
+type PreparedIndexReplacement = {
+  readonly kind: 'replace';
+  readonly index: Index;
+  readonly data: Map<string, IndexItem[]>;
+  readonly ready: boolean;
+  readonly unqueryableRecords: number;
+};
+
+type PreparedIndexUpdate = PreparedIndexPatch | PreparedIndexReplacement;
+
+type PreparedIndexEntry = {
+  readonly compositeKey: string;
+  readonly item: IndexItem;
+};
+
+export class IndexManager {
+  private indexCache = new Map<string, Map<string, Index>>();
+
+  // Keying by the data map makes restored snapshots re-evaluate coverage automatically.
+  private readonly unqueryableRecordCounts = new WeakMap<Index['data'], number>();
+
   private metadataManager: IMetadataManager;
 
-  /**
-   * Constructor
-   */
   constructor(metadataManager: IMetadataManager) {
     this.metadataManager = metadataManager;
   }
 
-  /**
-   * Create an index
-   */
   async createIndex(tableName: string, fields: string | string[], type: IndexType = IndexType.NORMAL): Promise<void> {
     if (!tableName?.trim()) {
       throw new StorageError('Table name cannot be empty', 'TABLE_NAME_INVALID', {
@@ -110,7 +133,10 @@ export class IndexManager {
       type,
       fields: indexFields,
       data: new Map(),
+      ready: this.metadataManager.count(tableName) === 0,
     };
+
+    this.unqueryableRecordCounts.set(index.data, 0);
 
     tableIndexes.set(indexName, index);
 
@@ -125,9 +151,6 @@ export class IndexManager {
     }
   }
 
-  /**
-   * Drop an index
-   */
   async dropIndex(tableName: string, fields: string | string[], type: IndexType = IndexType.NORMAL): Promise<void> {
     if (!tableName?.trim()) {
       throw new StorageError('Table name cannot be empty', 'TABLE_NAME_INVALID');
@@ -162,177 +185,261 @@ export class IndexManager {
     }
   }
 
-  /**
-   * Generate composite index key
-   */
   private generateCompositeKey(values: readonly unknown[]): string {
     return JSON.stringify(values);
   }
 
-  /**
-   * Add data to indexes
-   */
-  addToIndex<T extends object>(tableName: string, data: T): void {
-    if (!this.indexCache.has(tableName)) {
-      return;
+  private prepareIndexEntry(index: Index, record: StorageRecord): PreparedIndexEntry | undefined {
+    const fieldValues = index.fields.map(field => record[field]);
+    if (fieldValues.some(value => value === undefined)) {
+      return undefined;
     }
 
-    if (!isStorageRecord(data)) {
-      return;
+    const value = fieldValues.length === 1 ? fieldValues[0] : fieldValues;
+    const id = getStableIndexId(record);
+    return {
+      compositeKey: this.generateCompositeKey(fieldValues),
+      item: id === undefined ? { value } : { value, id },
+    };
+  }
+
+  private getUnqueryableRecordCount(index: Index): number {
+    const cachedCount = this.unqueryableRecordCounts.get(index.data);
+    if (cachedCount !== undefined) {
+      return cachedCount;
     }
 
-    const tableIndexes = this.indexCache.get(tableName)!;
-    const id = getIndexId(data);
-
-    if (id === undefined) {
-      return;
-    }
-
-    for (const [indexName, index] of tableIndexes.entries()) {
-      const fieldValues = index.fields.map(field => data[field]);
-
-      if (fieldValues.some(value => value === undefined)) {
-        continue;
-      }
-
-      const compositeKey = this.generateCompositeKey(fieldValues);
-
-      if (!index.data.has(compositeKey)) {
-        index.data.set(compositeKey, []);
-      }
-
-      const indexItems = index.data.get(compositeKey)!;
-
-      if (index.type === IndexType.UNIQUE) {
-        if (indexItems.length > 0) {
-          throw new StorageError(
-            `Unique constraint violated for index ${indexName} on fields ${index.fields.join(', ')}`,
-            'TABLE_INDEX_NOT_UNIQUE',
-            {
-              details: `Value '${compositeKey}' already exists in unique index ${indexName}`,
-              suggestion: 'Use a different combination of values for the fields or drop the unique constraint',
-            }
-          );
+    let count = 0;
+    for (const items of index.data.values()) {
+      for (const item of items) {
+        if (item.id === undefined) {
+          count++;
         }
       }
-
-      indexItems.push({
-        value: fieldValues.length === 1 ? fieldValues[0] : fieldValues,
-        id,
-      });
     }
+    this.unqueryableRecordCounts.set(index.data, count);
+    return count;
   }
 
-  /**
-   * Remove data from indexes
-   */
-  removeFromIndex<T extends object>(tableName: string, data: T): void {
-    if (!this.indexCache.has(tableName)) {
-      return;
+  private addRecordToPreparedIndex(index: Index, indexData: Index['data'], record: StorageRecord): number {
+    const entry = this.prepareIndexEntry(index, record);
+    if (!entry) {
+      return 0;
     }
 
-    if (!isStorageRecord(data)) {
-      return;
+    const indexItems = indexData.get(entry.compositeKey) ?? [];
+
+    if (index.type === IndexType.UNIQUE && indexItems.length > 0) {
+      throw new StorageError(
+        `Unique constraint violated for index ${index.name} on fields ${index.fields.join(', ')}`,
+        'TABLE_INDEX_NOT_UNIQUE',
+        {
+          details: `Value '${entry.compositeKey}' already exists in unique index ${index.name}`,
+          suggestion: 'Use a different combination of values for the fields or drop the unique constraint',
+        }
+      );
     }
 
-    const tableIndexes = this.indexCache.get(tableName)!;
-    const id = getIndexId(data);
+    if (!indexData.has(entry.compositeKey)) {
+      indexData.set(entry.compositeKey, indexItems);
+    }
+    indexItems.push(entry.item);
+    return entry.item.id === undefined ? 1 : 0;
+  }
 
-    if (id === undefined) {
-      return;
+  private createUpdatePlan(updates: readonly PreparedIndexUpdate[]): IndexUpdatePlan {
+    let applied = false;
+    return {
+      apply: () => {
+        if (applied) {
+          return;
+        }
+        for (const update of updates) {
+          if (update.kind === 'replace') {
+            update.index.data = update.data;
+            update.index.ready = update.ready;
+            this.unqueryableRecordCounts.set(update.data, update.unqueryableRecords);
+            continue;
+          }
+
+          for (const [compositeKey, delta] of update.buckets) {
+            for (const item of delta.removals) {
+              const itemIndex = delta.items.indexOf(item);
+              if (itemIndex !== -1) {
+                delta.items.splice(itemIndex, 1);
+              }
+            }
+            for (const item of delta.additions) {
+              delta.items.push(item);
+            }
+
+            if (delta.items.length === 0) {
+              update.index.data.delete(compositeKey);
+            } else {
+              update.index.data.set(compositeKey, delta.items);
+            }
+          }
+          this.unqueryableRecordCounts.set(update.index.data, update.unqueryableRecords);
+        }
+        applied = true;
+      },
+    };
+  }
+
+  private stageIncrementalUpdate(
+    tableName: string,
+    additions: readonly StorageRecord[],
+    removals: readonly StorageRecord[] = []
+  ): IndexUpdatePlan {
+    const tableIndexes = this.indexCache.get(tableName);
+    if (!tableIndexes || tableIndexes.size === 0) {
+      return this.createUpdatePlan([]);
     }
 
-    for (const [, index] of tableIndexes.entries()) {
-      const fieldValues = index.fields.map(field => data[field]);
-
-      if (fieldValues.some(value => value === undefined)) {
+    const updates: PreparedIndexUpdate[] = [];
+    for (const index of tableIndexes.values()) {
+      if (!index.ready) {
         continue;
       }
 
-      const compositeKey = this.generateCompositeKey(fieldValues);
+      // Stage only references and deltas; hot buckets remain untouched until apply().
+      const preparedBuckets = new Map<string, PreparedBucketDelta>();
+      const getPreparedBucket = (compositeKey: string) => {
+        const prepared = preparedBuckets.get(compositeKey);
+        if (prepared) {
+          return prepared;
+        }
 
-      if (!index.data.has(compositeKey)) {
-        continue;
-      }
+        const delta: PreparedBucketDelta = {
+          items: index.data.get(compositeKey) ?? [],
+          removals: new Set<IndexItem>(),
+          additions: [],
+        };
+        preparedBuckets.set(compositeKey, delta);
+        return delta;
+      };
+      let unqueryableRecords = this.getUnqueryableRecordCount(index);
 
-      const indexItems = index.data.get(compositeKey)!;
-      const indexToRemove = indexItems.findIndex(item => item.id === id);
-
-      if (indexToRemove !== -1) {
-        indexItems.splice(indexToRemove, 1);
-      }
-
-      if (indexItems.length === 0) {
-        index.data.delete(compositeKey);
-      }
-    }
-  }
-
-  /**
-   * Update index (remove old, add new)
-   */
-  updateIndex<T extends object>(tableName: string, oldData: T, newData: T): void {
-    this.removeFromIndex(tableName, oldData);
-    this.addToIndex(tableName, newData);
-  }
-
-  /**
-   * Batch rebuild indexes (3-5x faster than adding items one by one)
-   */
-  rebuildIndexes<T extends object>(tableName: string, data: T[]): void {
-    if (!this.indexCache.has(tableName)) {
-      return;
-    }
-
-    const tableIndexes = this.indexCache.get(tableName)!;
-    if (tableIndexes.size === 0) {
-      return;
-    }
-
-    for (const [, index] of tableIndexes.entries()) {
-      index.data = new Map();
-
-      for (const item of data) {
-        if (!isStorageRecord(item)) {
+      for (const record of removals) {
+        const entry = this.prepareIndexEntry(index, record);
+        if (!entry) {
           continue;
         }
 
-        const id = getIndexId(item);
-        if (id === undefined) continue;
+        const delta = getPreparedBucket(entry.compositeKey);
+        const removedItem = delta.items.find(item => !delta.removals.has(item) && item.id === entry.item.id);
+        if (removedItem) {
+          delta.removals.add(removedItem);
+          if (removedItem.id === undefined) {
+            unqueryableRecords--;
+          }
+        }
+      }
 
-        const fieldValues = index.fields.map(field => item[field]);
-        if (fieldValues.some(value => value === undefined)) continue;
-
-        const compositeKey = this.generateCompositeKey(fieldValues);
-
-        if (!index.data.has(compositeKey)) {
-          index.data.set(compositeKey, []);
+      for (const record of additions) {
+        const entry = this.prepareIndexEntry(index, record);
+        if (!entry) {
+          continue;
         }
 
-        const indexItems = index.data.get(compositeKey)!;
-
-        if (index.type === IndexType.UNIQUE && indexItems.length > 0) {
+        const delta = getPreparedBucket(entry.compositeKey);
+        const occupiedSlots = delta.items.length - delta.removals.size + delta.additions.length;
+        if (index.type === IndexType.UNIQUE && occupiedSlots > 0) {
           throw new StorageError(
             `Unique constraint violated for index ${index.name} on fields ${index.fields.join(', ')}`,
             'TABLE_INDEX_NOT_UNIQUE',
             {
-              details: `Value '${compositeKey}' already exists in unique index ${index.name}`,
+              details: `Value '${entry.compositeKey}' already exists in unique index ${index.name}`,
               suggestion: 'Use a different combination of values for the fields or drop the unique constraint',
             }
           );
         }
-
-        indexItems.push({
-          value: fieldValues.length === 1 ? fieldValues[0] : fieldValues,
-          id,
-        });
+        delta.additions.push(entry.item);
+        if (entry.item.id === undefined) {
+          unqueryableRecords++;
+        }
       }
+
+      updates.push({
+        kind: 'patch',
+        index,
+        buckets: preparedBuckets,
+        unqueryableRecords,
+      });
     }
+
+    return this.createUpdatePlan(updates);
   }
 
   /**
-   * Query index for matching data IDs
+   * Builds a complete, constraint-validated index update without mutating the
+   * live index cache. The returned plan can be applied after storage succeeds.
    */
+  stageIndexUpdate(tableName: string, data: readonly StorageRecord[], mode: IndexUpdateMode): IndexUpdatePlan {
+    if (mode === 'append') {
+      return this.stageIncrementalUpdate(tableName, data);
+    }
+
+    const tableIndexes = this.indexCache.get(tableName);
+    if (!tableIndexes || tableIndexes.size === 0) {
+      return this.createUpdatePlan([]);
+    }
+
+    const updates: PreparedIndexUpdate[] = [];
+    for (const index of tableIndexes.values()) {
+      const preparedData = new Map<string, IndexItem[]>();
+      let unqueryableRecords = 0;
+      for (const record of data) {
+        unqueryableRecords += this.addRecordToPreparedIndex(index, preparedData, record);
+      }
+      updates.push({
+        kind: 'replace',
+        index,
+        data: preparedData,
+        ready: true,
+        unqueryableRecords,
+      });
+    }
+
+    return this.createUpdatePlan(updates);
+  }
+
+  /** Applies a plan whose data constraints were fully checked during staging. */
+  applyIndexUpdate(plan: IndexUpdatePlan): void {
+    plan.apply();
+  }
+
+  addToIndex<T extends object>(tableName: string, data: T): void {
+    if (!isStorageRecord(data)) {
+      return;
+    }
+    this.applyIndexUpdate(this.stageIncrementalUpdate(tableName, [data]));
+  }
+
+  removeFromIndex<T extends object>(tableName: string, data: T): void {
+    if (!isStorageRecord(data)) {
+      return;
+    }
+    this.applyIndexUpdate(this.stageIncrementalUpdate(tableName, [], [data]));
+  }
+
+  updateIndex<T extends object>(tableName: string, oldData: T, newData: T): void {
+    if (!isStorageRecord(oldData) || !isStorageRecord(newData)) {
+      return;
+    }
+    this.applyIndexUpdate(this.stageIncrementalUpdate(tableName, [newData], [oldData]));
+  }
+
+  rebuildIndexes<T extends object>(tableName: string, data: T[]): void {
+    const records: StorageRecord[] = [];
+    for (const item of data) {
+      if (isStorageRecord(item)) {
+        records.push(item);
+      }
+    }
+    this.applyIndexUpdate(this.stageIndexUpdate(tableName, records, 'rebuild'));
+  }
+
   queryIndex(tableName: string, fields: string | string[], values: unknown | unknown[]): IndexId[] {
     if (!this.indexCache.has(tableName)) {
       return [];
@@ -344,7 +451,7 @@ export class IndexManager {
 
     let matchingIndex: Index | undefined;
     for (const [, index] of tableIndexes.entries()) {
-      if (index.fields.length === queryFields.length) {
+      if (index.ready && this.getUnqueryableRecordCount(index) === 0 && index.fields.length === queryFields.length) {
         const fieldsMatch = index.fields.every((field, idx) => field === queryFields[idx]);
         if (fieldsMatch) {
           matchingIndex = index;
@@ -364,12 +471,9 @@ export class IndexManager {
       return [];
     }
 
-    return indexItems.map(item => item.id);
+    return indexItems.flatMap(item => (item.id === undefined ? [] : [item.id]));
   }
 
-  /**
-   * Get all indexes for a table
-   */
   getTableIndexes(tableName: string): Index[] {
     if (!this.indexCache.has(tableName)) {
       return [];
@@ -378,9 +482,6 @@ export class IndexManager {
     return Array.from(this.indexCache.get(tableName)!.values());
   }
 
-  /**
-   * Check if a field or field combination has an index
-   */
   hasIndex(tableName: string, fields: string | string[]): boolean {
     if (!this.indexCache.has(tableName)) {
       return false;
@@ -390,7 +491,7 @@ export class IndexManager {
     const checkFields = Array.isArray(fields) ? fields : [fields];
 
     for (const [, index] of tableIndexes.entries()) {
-      if (index.fields.length === checkFields.length) {
+      if (index.ready && this.getUnqueryableRecordCount(index) === 0 && index.fields.length === checkFields.length) {
         const fieldsMatch = index.fields.every((field, idx) => field === checkFields[idx]);
         if (fieldsMatch) {
           return true;
@@ -401,11 +502,8 @@ export class IndexManager {
     return false;
   }
 
-  /**
-   * Clear all indexes for a table
-   */
   clearTableIndexes(tableName: string): void {
-    this.indexCache.delete(tableName);
+    this.invalidateTableIndexes(tableName);
 
     const tableMeta = this.metadataManager.get(tableName);
     if (tableMeta) {
@@ -414,8 +512,12 @@ export class IndexManager {
       });
     }
   }
+
+  /** Drops only process-local index state after another adapter mutates a table. */
+  invalidateTableIndexes(tableName: string): void {
+    this.indexCache.delete(tableName);
+  }
 }
 
-// Singleton export using global meta instance
 import { meta } from '../meta/MetadataManager';
 export const indexManager = new IndexManager(meta);

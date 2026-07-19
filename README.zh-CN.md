@@ -1,4 +1,4 @@
-# expo-lite-data-store
+# 🍃 expo-lite-data-store
 
 面向 Expo 应用的本地结构化存储库，已针对 Expo SDK 56 下的 Expo Go、managed app 和原生开发构建完成运行时验证。
 
@@ -171,7 +171,13 @@ const activeUsers = await db.findMany('users', {
 
 建表时若传入 `initialData`，其序列化大小估算值只有在超过 `chunkSize` 一半时才会自动选择 chunked 模式；默认 `chunkSize` 为 5 MiB，因此默认门槛是超过 2.5 MiB。后续写入不会隐式把单文件表迁移为 chunked；需要转换时请显式设置 `mode: 'chunked'` 或调用 `migrateToChunked()`。
 
-chunked 覆盖写和追加写都带恢复日志，并会清理失败时已经写出的部分 chunk。追加写会先提交元数据、再移除恢复日志；读取遇到不完整 chunk 集合时会明确报错，而不是静默返回部分数据。表元数据采用串行化临时文件发布，并发表写不会吞掉较晚的元数据更新。
+chunked 覆盖写使用有界 v2 日志：日志只记录旧计数和 chunk 状态，不复制旧记录；已有 chunk 会移入 `<table>.overwrite-backup/`，并以 `.ready` 标记区分完整备份。删除 overwrite 日志是提交点；若提交后的备份清理失败，后续访问会先校验当前表，再删除残留备份。chunked 追加写也使用恢复日志，并在失败时移除已写出的部分 chunk。运行时会先解决待处理的追加日志、再解决待处理的覆盖写；追加写会先提交元数据、再移除恢复日志；读取遇到不完整 chunk 集合时会明确报错，而不是静默返回部分数据。single-to-chunked 迁移会先发布并校验新 chunk 集合，再切换元数据 mode；mode 切换是提交点，之后清理旧单文件工件失败不会回滚已经提交的模式。
+
+单文件表采用可恢复发布。v2 commit marker 会绑定表名，并记录前后两代 storage commit token、SHA-256 hash 和物理记录数。恢复时直接读取磁盘上的持久化元数据快照，不信任适配器内的缓存 token。canonical v1 marker 只为兼容而保留；临时 marker 仅在它是 v2 `committed`、表名和目标 token 与持久化元数据一致、hash/count 与主文件一致时才可采信，任何不匹配都会 fail-closed 并保留证据。非 marker 恢复场景中，主文件缺失或损坏时也只能从有效的数据备份恢复。
+
+文件处理器会通过跨实例共享的进程内 FIFO 队列，串行处理同一物理表路径上的操作；锁等待上限为 30 秒。若可恢复 mutation 超过截止时间，运行时不会放弃仍不可取消的底层文件操作，而是等待其结束、回滚后再释放路径锁。该协调不提供跨进程锁语义。
+
+元数据 flush 使用另一条按元数据文件键控的进程级 FIFO，锁等待上限同样为 30 秒。每次 flush 都会重新读取最新磁盘快照；update/delete 必须匹配预期 `createdAt` 代际，create 则要求表名仍然缺失，因此陈旧 mutation 不能修改或覆盖同名新代际。共享 mutation epoch 会让其他 adapter 刷新元数据、存储表示、读取缓存 namespace 与索引；稳定读取会按最新 mode 重试。失败或超时的 mutation 会保留，等待显式重试。元数据主文件缺失时，初始化只会恢复结构有效的 backup；主文件存在但损坏时绝不回退到可能陈旧的 backup。发布与恢复都必须成功移除旧 backup 才算完成。该机制仍只协调当前进程，不是跨进程元数据锁。
 
 ### 列定义
 
@@ -185,7 +191,7 @@ chunked 覆盖写和追加写都带恢复日志，并会清理失败时已经写
 
 列定义主要用于表元数据和写入验证，公开 API 里的记录本质上仍然是普通 JavaScript 对象。
 
-记录不强制要求包含 `id` 或 `_id`。这些字段适合作为业务标识，也能在存在索引时帮助加速；但基于 `where` 的更新、删除、批量操作和事务路径会按查询引擎实际命中的行来处理，所以没有 id 的记录也会被安全地逐行匹配。
+记录不强制要求包含 `id` 或 `_id`。这些字段适合作为业务标识，也能在存在索引时帮助加速；但基于 `where` 的更新、删除、批量操作和事务路径会按查询引擎实际命中的行来处理，所以没有 id 的记录也会被安全地逐行匹配。内存索引优先使用字符串或有限数值形式的 `id`，仅在 `id` 不稳定时回退到 `_id`。只要索引覆盖的任一行没有稳定标识符，该索引就不会参与查询加速，查询会回退到全表扫描。增量写入只暂存受影响 bucket 的 delta，并在物理存储成功后发布。
 
 ### 写入数据
 
@@ -240,6 +246,10 @@ const expensiveElectronics = await db.findMany('products', {
   limit: 20,
 });
 ```
+
+`skip` 和 `limit` 必须是非负安全整数。`limit: 0` 返回空页；负数、小数、非有限数或超出安全整数范围的值会抛出 `RangeError`，不会交给数组切片静默换算。
+
+所有受支持的排序算法在升序和降序下都会保持 `null`、`undefined` 的相对顺序，并把它们放在结果末尾。
 
 当前支持的查询操作符如下：
 
@@ -298,6 +308,10 @@ await db.bulkWrite('users', [
 
 当业务流程希望用一次高层调用描述一组有顺序要求的本地变更时，这个 API 很适合。
 
+### 删除表
+
+`deleteTable()` 会先提交元数据删除，再清理物理文件。若元数据提交失败，运行时会恢复原元数据，且不会触碰物理数据。提交成功后，元数据缺失就是权威删除状态，残留文件不能让表复活；若工件清理失败，该表仍保持逻辑不存在，再次调用 `deleteTable()` 会重试清理。同名重建会先清除全部孤立单文件、chunk、journal、marker 和 backup 工件。
+
 ### 事务
 
 事务是显式且有状态的：
@@ -323,6 +337,8 @@ await db.commit();
 - 在未结束前再次调用 `beginTransaction()` 会抛出 `TRANSACTION_IN_PROGRESS`；
 - 没有活动事务时调用 `commit()` 或 `rollback()` 会抛出 `NO_TRANSACTION_IN_PROGRESS`；
 - 显式回滚只丢弃排队写入，不会重写表文件；若提交执行到一半失败，已有表会恢复，事务中新建的表会被移除；
+- commit 执行和 commit 失败后的快照恢复使用模块私有 symbol capability 进行直接写；公开 options 中伪造 `directWrite` 不能绕过事务暂存；
+- 活动事务期间 AutoSync 会保留脏缓存项，只有事务结束后的后续定时或显式 sync 才会写入；
 - 事务是进程内协调能力，不是跨进程或应用崩溃后仍可恢复的 ACID 实现。
 
 ### 计数与校验
@@ -392,6 +408,8 @@ const result = await db.verifyCountTable('users');
 | `LITE_STORE_AUTO_SYNC_ENABLED`                     | `autoSync.enabled`                    |
 | `LITE_STORE_AUTO_SYNC_INTERVAL`                    | `autoSync.interval`                   |
 
+Logger 控制项独立于 `configManager`。`EXPO_LITE_DATA_STORE_LOG_LEVEL` 支持 `silent`、`error`、`warn`、`info`、`debug`，非测试环境默认 `warn`。测试默认静默，避免大规模测试撑满本地磁盘或 CI 日志；设置 `EXPO_LITE_DATA_STORE_TEST_LOGS=1` 可开启测试 `debug` 输出。
+
 ### 程序化配置
 
 ```ts
@@ -438,6 +456,12 @@ await db.createTable('profiles', {
 - 通过 `encryptFullTable: true` 做整表加密；
 - 通过 `requireAuthOnAccess: true` 表达严格的逐次访问认证意图。
 
+即使省略 `encrypted: true`，非空 `encryptedFields` 也会选择加密 facade。若加密写入在事务中隐式建表，解析后的字段列表会传入 commit，确保持久化策略与加密负载一致。
+
+一次加密写入若隐式创建了未知表，会持久化所选加密策略。该策略不是每次调用都能切换的开关：对既有加密表改变 `encrypted`、`encryptFullTable`、`encryptedFields` 或 `requireAuthOnAccess` 都需要由应用控制的数据迁移。运行时会以 `MIGRATION_FAILED` fail-closed，而不会静默用不同策略重写数据。
+
+对新建字段级加密表，只有 `encryptAllFields: true` 与 `encryptedFields: []` 的精确组合表示动态全字段加密，之后记录形态中新增的字段也会被加密。早期 v3 元数据没有该 marker；空列表或字段缺失仍按历史全局配置回退。整表加密在物理层只保存一条 envelope，其逻辑行数与同一 storage generation 一并提交；事务快照也会同时恢复两者。可选的解密缓存只在绑定当前精确 ciphertext 时才可命中，cache timeout 为 0 时完全禁用。
+
 ### Expo Go 边界
 
 常规加密存储在 Expo Go 中可用。
@@ -461,7 +485,9 @@ await db.createTable('profiles', {
 - chunked 表布局；
 - 历史 beta 产生的加密负载格式。
 
-上述兼容不代表会把常规加密数据转换为严格访问数据。若未经过应用控制的数据迁移就为已有常规加密表启用 `requireAuthOnAccess`，操作会以 `MIGRATION_FAILED` 失败。
+字段批量解密会逐条识别 legacy CTR 与当前 GCM payload，按 provider 分组解密后恢复原始顺序。因此升级后的同一存储批次即使混合两种格式，也能保持可读。
+
+上述兼容不代表会把常规加密数据转换为严格访问数据或任何其他加密策略。若未经过应用控制的数据迁移就为已有加密表启用 `requireAuthOnAccess`、切换字段级/整表级加密或修改 `encryptedFields`，操作会以 `MIGRATION_FAILED` 失败。若适配器本身未按严格访问创建却请求严格访问，会以 `PERMISSION_DENIED` 失败；运行时绝不会替换为较弱的密钥。
 
 当稳定默认根目录 `lite-data-store` 尚不存在，而旧目录 `expo-lite-data` 存在时，运行时会自动尝试兼容迁移。
 

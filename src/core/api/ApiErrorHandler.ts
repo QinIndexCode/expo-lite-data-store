@@ -2,7 +2,7 @@ import type { ApiResponse } from '../../types/apiResponse';
 import { StorageError } from '../../types/storageErrorInfc';
 import logger from '../../utils/logger';
 
-/** Formats storage and unexpected failures as API responses. */
+/** Converts storage and unexpected failures into API responses without exposing internal details in production. */
 export class ErrorHandler {
   handleError<T = unknown>(error: unknown, requestId: string, startTime: number, version: string): ApiResponse<T> {
     const endTime = Date.now();
@@ -48,6 +48,7 @@ export class ErrorHandler {
     };
   }
 
+  /** Creates a request identifier for correlating API responses with logs. */
   generateRequestId(): string {
     return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }

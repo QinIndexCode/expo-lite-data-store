@@ -2,6 +2,7 @@ import { FileSystemStorageAdapter } from '../adapter/FileSystemStorageAdapter';
 import { isStorageRecord, type StorageRecord } from '../../types/storageTypes';
 
 import { CacheService } from './CacheService';
+import { guardedAutoSyncWrite } from './TransactionService';
 import { configManager } from '../config/ConfigManager';
 import logger from '../../utils/logger';
 
@@ -118,6 +119,7 @@ export class AutoSyncService {
   private isSyncing = false;
   private isShuttingDown = false;
   private hasDeferredBatchEntries = false;
+  private transactionDeferredDuringSync = false;
   private syncCompleteResolve: (() => void) | null = null;
   private eventListeners = new Map<AutoSyncEvent, Set<AutoSyncEventListener>>();
   private stats: AutoSyncStats = {
@@ -253,7 +255,11 @@ export class AutoSyncService {
     while (attempt < maxRetries) {
       try {
         attempt++;
-        await this.storageAdapter.write<StorageRecord>(tableName, data, { mode: 'overwrite', directWrite: true });
+        const result = await this.storageAdapter[guardedAutoSyncWrite](tableName, data);
+        if (!result) {
+          this.transactionDeferredDuringSync = true;
+          return false;
+        }
         return true;
       } catch (error) {
         const isTransientError = this._isTransientError(error);
@@ -332,6 +338,13 @@ export class AutoSyncService {
       return;
     }
 
+    if (this.storageAdapter.isInTransaction()) {
+      this.hasDeferredBatchEntries = true;
+      logger.info('[AutoSyncService] Deferring sync until the active transaction settles');
+      return;
+    }
+
+    this.transactionDeferredDuringSync = false;
     this.isSyncing = true;
     const startTime = Date.now();
     const successfulWrites: string[] = [];
@@ -427,7 +440,7 @@ export class AutoSyncService {
         logger.info('[AutoSyncService] Completed sync for table', tableName);
       }
 
-      this.hasDeferredBatchEntries = hasDeferredBatchEntries;
+      this.hasDeferredBatchEntries = hasDeferredBatchEntries || this.transactionDeferredDuringSync;
 
       this.stats.syncCount++;
       this.stats.lastSyncTime = Date.now();
@@ -563,6 +576,7 @@ export class AutoSyncService {
     await this.stop();
     this.eventListeners.clear();
     this.hasDeferredBatchEntries = false;
+    this.transactionDeferredDuringSync = false;
     this.isShuttingDown = false;
     logger.info('[AutoSyncService] Cleanup completed');
   }

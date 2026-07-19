@@ -259,13 +259,9 @@ export const pbkdf2 = (
 };
 
 /**
- * HKDF key derivation (extract + expand) for fast per-record key derivation.
- * This is orders of magnitude faster than PBKDF2 (~3μs vs ~2s).
+ * Derives independent per-record key material from a high-entropy input key.
  *
- * @param ikm Input keying material (already high-entropy, e.g. from PBKDF2)
- * @param salt Salt for key derivation
- * @param dkLen Desired output key length
- * @returns Derived key material
+ * HKDF avoids repeating the expensive password KDF for every record.
  */
 export const hkdfDerive = (ikm: Uint8Array, salt: Uint8Array, dkLen: number): Uint8Array => {
   return hkdfBytesSync(ikm, salt, dkLen);

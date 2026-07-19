@@ -56,6 +56,8 @@ const buildExpoModuleMissingDetails = (moduleName: string): string => {
 
 type RuntimeRequire = (moduleName: string) => unknown;
 
+const isRuntimeRequire = (value: unknown): value is RuntimeRequire => typeof value === 'function';
+
 const loadBundledExpoPeer = (moduleName: string): unknown => {
   try {
     switch (moduleName) {
@@ -101,9 +103,10 @@ const getRuntimeRequire = (): RuntimeRequire | undefined => {
 
   try {
     // Hermes/Metro can resolve peers here even when direct dynamic require(moduleName) is unsupported.
-    const runtimeRequire = Function('return require')() as RuntimeRequire;
-    if (typeof runtimeRequire === 'function') {
-      return runtimeRequire;
+    const runtimeRequireFactory = Function('return require') as () => unknown;
+    const resolvedRequire = runtimeRequireFactory();
+    if (isRuntimeRequire(resolvedRequire)) {
+      return resolvedRequire;
     }
   } catch {}
 

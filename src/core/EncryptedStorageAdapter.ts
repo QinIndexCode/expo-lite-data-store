@@ -5,6 +5,7 @@ import {
   type CreateTableOptions,
   type FilterCondition,
   type FindOptions,
+  type InternalWriteOptions,
   type NonInfer,
   type ReadOptions,
   type StorageInput,
@@ -33,33 +34,36 @@ import { ErrorHandler as StorageErrorHandler } from '../utils/StorageErrorHandle
 import { StorageError } from '../types/storageErrorInfc';
 import { QueryEngine } from './query/QueryEngine';
 import logger from '../utils/logger';
+import {
+  transactionOwnerOption,
+  withDynamicFieldEncryption,
+  withLogicalRecordCount,
+  type TransactionOwnerToken,
+  type TransactionScopedOptions,
+  type TransactionWriteOptions,
+} from './service/TransactionService';
 
 type CachedTableData = {
   data: StorageRecord[];
   timestamp: number;
-  sourceCiphertext?: string;
+  sourceCiphertext: string;
 };
 
-type FullTableWriteSnapshot = {
-  existed: boolean;
-  records: StorageRecord[];
-  logicalRecordCount?: number;
+type ResolvedFieldEncryptionPolicy = {
+  encryptedFields: string[];
+  encryptAllFields: boolean;
 };
 
 export class EncryptedStorageAdapter implements IStorageAdapter {
   private keyPromise: Promise<string> | null = null;
   private keyGeneration = -1;
   private cacheKeyGeneration = getMasterKeyGeneration();
-  private cachedData: Map<string, CachedTableData> = new Map();
-  private cacheTimeout = configManager.getConfig().encryption.cacheTimeout; // Read cache timeout from config
-  private maxCacheSize = configManager.getConfig().encryption.maxCacheSize; // Read max cache size from config
+  private fullTableCache: Map<string, CachedTableData> = new Map();
+  private cacheTimeout = configManager.getConfig().encryption.cacheTimeout;
+  private maxCacheSize = configManager.getConfig().encryption.maxCacheSize;
   private requireAuthOnAccess: boolean = false;
-  private pendingLogicalRecordCounts = new Map<string, number>();
-  private transactionLogicalRecordCountSnapshots = new Map<string, number>();
   private static tableWriteLocks = new Map<string, Promise<void>>();
-
-  // Optimization: Add query index cache
-  private queryIndexes: Map<string, Map<string, Map<string | number, StorageRecord[]>>> = new Map();
+  private readonly transactionOwner: TransactionOwnerToken = {};
 
   private normalizeStorageInput<T extends object>(data: StorageInput<T>): StorageRecord[] {
     const records: unknown[] = Array.isArray(data) ? data : [data];
@@ -212,24 +216,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     }
   }
 
-  private async normalizeFullTableWriteResult(
-    tableName: string,
-    result: WriteResult,
-    written: number,
-    totalAfterWrite: number,
-    snapshot?: FullTableWriteSnapshot
-  ): Promise<WriteResult> {
-    if (this.isStorageTransactionInProgress()) {
-      this.rememberLogicalRecordCountBeforeTransactionWrite(tableName);
-      this.pendingLogicalRecordCounts.set(tableName, totalAfterWrite);
-    } else {
-      try {
-        await storage.setLogicalRecordCount(tableName, totalAfterWrite);
-      } catch (error) {
-        await this.restoreFailedFullTableWrite(tableName, snapshot, error);
-        throw error;
-      }
-    }
+  private normalizeFullTableWriteResult(result: WriteResult, written: number, totalAfterWrite: number): WriteResult {
     return {
       ...result,
       written,
@@ -238,6 +225,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   private async key() {
+    this.assertTransactionOwnership();
     this.invalidateCachesIfMasterKeyChanged();
     const key = await this.getOrInitKey();
     this.invalidateCachesIfMasterKeyChanged();
@@ -245,11 +233,25 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   private async ensureAccessAuthorized(): Promise<string | undefined> {
+    this.assertTransactionOwnership();
     if (this.requireAuthOnAccess) {
       return this.key();
     }
 
     return undefined;
+  }
+
+  private assertTransactionOwnership(): void {
+    storage.assertTransactionOwner(this.transactionOwner);
+  }
+
+  private withTransactionOwner(): TableOptions & TransactionScopedOptions;
+  private withTransactionOwner<T extends object>(options: T | undefined): T & TransactionScopedOptions;
+  private withTransactionOwner<T extends object>(options?: T): (T | TableOptions) & TransactionScopedOptions {
+    return {
+      ...(options ?? ({} as T)),
+      [transactionOwnerOption]: this.transactionOwner,
+    } as (T | TableOptions) & TransactionScopedOptions;
   }
 
   private isStorageTransactionInProgress(): boolean {
@@ -279,119 +281,231 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     }
   }
 
-  private rememberLogicalRecordCountBeforeTransactionWrite(tableName: string): void {
-    if (this.transactionLogicalRecordCountSnapshots.has(tableName)) {
+  private async getTableMeta(tableName: string) {
+    this.assertTransactionOwnership();
+    await storage.ensureInitialized();
+    const tableMeta = storage.getTableMeta(tableName);
+    this.assertPersistedEncryptionPolicy(tableName, tableMeta);
+    this.assertTableAccessPolicy(tableName, tableMeta);
+    return tableMeta;
+  }
+
+  private assertPersistedEncryptionPolicy(tableName: string, tableMeta: TableSchema | undefined): void {
+    if (!tableMeta) {
       return;
     }
 
-    const currentCount = storage.getTableMeta(tableName)?.count;
-    if (typeof currentCount === 'number' && Number.isSafeInteger(currentCount) && currentCount >= 0) {
-      this.transactionLogicalRecordCountSnapshots.set(tableName, currentCount);
-    }
-  }
-
-  private async restoreTransactionLogicalRecordCounts(): Promise<void> {
-    for (const [tableName, count] of this.transactionLogicalRecordCountSnapshots) {
-      await storage.setLogicalRecordCount(tableName, count);
-    }
-  }
-
-  private async restoreTransactionLogicalRecordCountsSafely(): Promise<void> {
-    try {
-      await this.restoreTransactionLogicalRecordCounts();
-    } catch (error) {
-      logger.error('Failed to restore logical record counts after transaction rollback', error);
-    }
-  }
-
-  private async captureFullTableWriteSnapshot(tableName: string): Promise<FullTableWriteSnapshot> {
-    const existed = await storage.hasTable(tableName);
-    if (!existed) {
-      return { existed: false, records: [] };
-    }
-
-    const logicalRecordCount = storage.getTableMeta(tableName)?.count;
-    if (typeof logicalRecordCount !== 'number' || !Number.isSafeInteger(logicalRecordCount) || logicalRecordCount < 0) {
+    const hasEncryptedFields = (tableMeta.encryptedFields?.length ?? 0) > 0;
+    const encryptAllFields = tableMeta.encryptAllFields === true;
+    const requiresEncryption =
+      tableMeta.encryptFullTable === true ||
+      tableMeta.requireAuthOnAccess === true ||
+      hasEncryptedFields ||
+      encryptAllFields;
+    if (requiresEncryption && tableMeta.encrypted !== true) {
       throw new StorageError(
-        `Cannot safely update full-table encrypted data for '${tableName}' because its logical record count is invalid`,
-        'TABLE_UPDATE_FAILED',
+        `Table '${tableName}' has inconsistent persisted encryption metadata`,
+        'MIGRATION_FAILED',
         {
-          details: 'The existing logical record count must be a non-negative safe integer before a recoverable write.',
-          suggestion: 'Repair the table metadata before retrying the write.',
+          details: 'A protected table policy cannot be opened while its encrypted flag is disabled.',
+          suggestion: 'Restore verified metadata or migrate the table through an application-controlled recovery flow.',
           tableName,
         }
       );
     }
 
-    const records = await storage.read(tableName, { bypassCache: true });
-    return {
-      existed: true,
-      records: this.cloneRecords(records),
-      logicalRecordCount,
-    };
+    if (
+      encryptAllFields &&
+      (tableMeta.encryptFullTable === true ||
+        tableMeta.encryptedFields === undefined ||
+        tableMeta.encryptedFields.length !== 0)
+    ) {
+      throw new StorageError(
+        `Table '${tableName}' has inconsistent all-field encryption metadata`,
+        'MIGRATION_FAILED',
+        {
+          details: 'Dynamic all-field encryption requires field-level mode and an explicitly empty field list.',
+          suggestion: 'Restore verified metadata or migrate the table through an application-controlled recovery flow.',
+          tableName,
+        }
+      );
+    }
   }
 
-  private async prepareFullTableWriteSnapshot(tableName: string): Promise<FullTableWriteSnapshot | undefined> {
-    if (this.isStorageTransactionInProgress()) {
-      return undefined;
+  private assertWriteEncryptionPolicy(
+    tableName: string,
+    tableMeta: TableSchema,
+    options: Omit<WriteOptions, 'mode'> | WriteOptions | undefined
+  ): void {
+    const hasOption = (name: 'encrypted' | 'encryptFullTable' | 'requireAuthOnAccess'): boolean =>
+      options !== undefined && Object.prototype.hasOwnProperty.call(options, name) && options[name] !== undefined;
+
+    if (hasOption('encryptFullTable') && options?.encryptFullTable !== (tableMeta.encryptFullTable === true)) {
+      throw new StorageError(`Table '${tableName}' has a different full-table encryption policy`, 'MIGRATION_FAILED', {
+        details: 'Changing an existing table encryption mode requires an explicit data migration.',
+        suggestion: 'Omit encryptFullTable to use the persisted policy, or migrate the table explicitly.',
+        tableName,
+      });
     }
 
-    return this.captureFullTableWriteSnapshot(tableName);
+    const requestedEncrypted = options?.encryptFullTable === true ? true : options?.encrypted;
+    if (hasOption('encrypted') && requestedEncrypted !== (tableMeta.encrypted === true)) {
+      throw new StorageError(`Table '${tableName}' has a different encrypted-storage policy`, 'MIGRATION_FAILED', {
+        details: 'Changing an existing table encryption policy requires an explicit data migration.',
+        suggestion: 'Omit encrypted to use the persisted policy, or migrate the table explicitly.',
+        tableName,
+      });
+    }
+
+    if (options?.requireAuthOnAccess === true && !this.requireAuthOnAccess) {
+      throw new StorageError(`Table '${tableName}' requires a strict encrypted storage adapter`, 'PERMISSION_DENIED', {
+        details: 'requireAuthOnAccess must be selected when the encrypted adapter is created.',
+        suggestion: 'Create the adapter with requireAuthOnAccess: true before writing.',
+        tableName,
+      });
+    }
+
+    if (hasOption('requireAuthOnAccess') && options?.requireAuthOnAccess !== (tableMeta.requireAuthOnAccess === true)) {
+      throw new StorageError(`Table '${tableName}' has a different access-authentication policy`, 'MIGRATION_FAILED', {
+        details: 'Changing requireAuthOnAccess on an existing table requires an explicit data migration.',
+        suggestion: 'Omit requireAuthOnAccess to use the persisted policy, or migrate the table explicitly.',
+        tableName,
+      });
+    }
   }
 
-  private async restoreFullTableWriteSnapshot(tableName: string, snapshot: FullTableWriteSnapshot): Promise<void> {
-    try {
-      if (!snapshot.existed) {
-        await storage.deleteTable(tableName);
-        return;
+  private assertExistingCreateTablePolicy<T extends object>(
+    tableName: string,
+    tableMeta: TableSchema,
+    options: CreateTableOptions<T> | undefined
+  ): void {
+    this.assertWriteEncryptionPolicy(tableName, tableMeta, options);
+
+    if (options?.encryptedFields === undefined) {
+      return;
+    }
+
+    const requestedFields = new Set(options.encryptedFields);
+    const configuredFields = new Set(tableMeta.encryptedFields ?? []);
+    const fieldsMatch =
+      requestedFields.size === 0
+        ? tableMeta.encrypted !== true || tableMeta.encryptFullTable === true || tableMeta.encryptAllFields === true
+        : tableMeta.encryptAllFields !== true &&
+          requestedFields.size === configuredFields.size &&
+          Array.from(requestedFields).every(field => configuredFields.has(field));
+
+    if (!fieldsMatch) {
+      throw new StorageError(`Table '${tableName}' has different encrypted field settings`, 'MIGRATION_FAILED', {
+        details: 'Changing encrypted fields on an existing table requires an explicit data migration.',
+        suggestion: 'Omit encryptedFields to use the persisted policy, or migrate the table explicitly.',
+        tableName,
+      });
+    }
+  }
+
+  private getImplicitTablePolicy(
+    options: Omit<WriteOptions, 'mode'> | WriteOptions | undefined,
+    fieldPolicy: ResolvedFieldEncryptionPolicy
+  ): Pick<
+    CreateTableOptions<StorageRecord>,
+    'encrypted' | 'encryptFullTable' | 'requireAuthOnAccess' | 'encryptedFields'
+  > {
+    const encryptFullTable = options?.encryptFullTable === true;
+    const encrypted = this.requireAuthOnAccess || options?.encrypted === true || encryptFullTable;
+    const useFieldEncryption = encrypted && !encryptFullTable;
+    return withDynamicFieldEncryption(
+      {
+        encrypted,
+        encryptFullTable,
+        requireAuthOnAccess: this.requireAuthOnAccess,
+        encryptedFields: useFieldEncryption ? [...fieldPolicy.encryptedFields] : [],
+      },
+      useFieldEncryption && fieldPolicy.encryptAllFields
+    );
+  }
+
+  private getExplicitCreateTablePolicy<T extends object>(
+    options: Omit<CreateTableOptions<T>, 'initialData'>,
+    config: LiteStoreConfig
+  ): Pick<
+    CreateTableOptions<StorageRecord>,
+    'encrypted' | 'encryptFullTable' | 'requireAuthOnAccess' | 'encryptedFields'
+  > {
+    const requestedFields = options.encryptedFields;
+    const policyOptions: Omit<WriteOptions, 'mode'> = {
+      encrypted: options.encrypted === true || (requestedFields?.length ?? 0) > 0,
+      encryptFullTable: options.encryptFullTable,
+      requireAuthOnAccess: options.requireAuthOnAccess,
+    };
+    const fieldPolicy: ResolvedFieldEncryptionPolicy =
+      requestedFields === undefined
+        ? this.resolveImplicitFieldEncryptionPolicy(policyOptions, config)
+        : {
+            encryptedFields: [...new Set(requestedFields)],
+            encryptAllFields: requestedFields.length === 0,
+          };
+
+    return this.getImplicitTablePolicy(policyOptions, fieldPolicy);
+  }
+
+  private getStorageWriteOptions(
+    options: Omit<WriteOptions, 'mode'> | WriteOptions | undefined,
+    tableMeta: TableSchema | undefined,
+    mode: InternalWriteOptions['mode'] | undefined,
+    implicitFieldPolicy: ResolvedFieldEncryptionPolicy,
+    logicalRecordCount?: number
+  ): TransactionWriteOptions {
+    const writeOptions: TransactionWriteOptions = {
+      ...options,
+      ...(mode === undefined ? {} : { mode }),
+    };
+    if (tableMeta) {
+      delete writeOptions.encrypted;
+      delete writeOptions.requireAuthOnAccess;
+      delete writeOptions.encryptedFields;
+    } else {
+      Object.assign(writeOptions, this.getImplicitTablePolicy(options, implicitFieldPolicy));
+    }
+    const transactionOptions = this.withTransactionOwner(writeOptions);
+    return logicalRecordCount === undefined
+      ? transactionOptions
+      : withLogicalRecordCount(transactionOptions, logicalRecordCount);
+  }
+
+  private async getTableMetaForWrite(
+    tableName: string,
+    options: Omit<WriteOptions, 'mode'> | WriteOptions | undefined,
+    implicitFieldPolicy: ResolvedFieldEncryptionPolicy
+  ): Promise<TableSchema | undefined> {
+    if (options?.requireAuthOnAccess === true && !this.requireAuthOnAccess) {
+      throw new StorageError(`Table '${tableName}' requires a strict encrypted storage adapter`, 'PERMISSION_DENIED', {
+        details: 'requireAuthOnAccess must be selected when the encrypted adapter is created.',
+        suggestion: 'Create the adapter with requireAuthOnAccess: true before writing.',
+        tableName,
+      });
+    }
+
+    let tableMeta = await this.getTableMeta(tableName);
+    if (!tableMeta) {
+      const policy = this.getImplicitTablePolicy(options, implicitFieldPolicy);
+      const { encrypted } = policy;
+      if (!encrypted) {
+        return undefined;
       }
 
-      await storage.write(tableName, this.cloneRecords(snapshot.records), { mode: 'overwrite' });
-      await storage.setLogicalRecordCount(tableName, snapshot.logicalRecordCount!);
-    } finally {
-      this.clearTableCache(tableName);
-      this.clearFullTableCache(tableName);
-    }
-  }
+      // Let the queued storage write create the table during commit so its
+      // transaction snapshot still records that the table did not exist.
+      if (this.isStorageTransactionInProgress()) {
+        return undefined;
+      }
 
-  private async restoreFailedFullTableWrite(
-    tableName: string,
-    snapshot: FullTableWriteSnapshot | undefined,
-    originalError: unknown
-  ): Promise<void> {
-    if (!snapshot) {
-      throw new StorageError(
-        `Failed to recover full-table encrypted write for '${tableName}' after logical record count publication failed`,
-        'TABLE_UPDATE_FAILED',
-        {
-          cause: originalError,
-          details: 'No pre-write snapshot was available for recovery.',
-          suggestion: 'Verify the table contents before retrying the write.',
-          tableName,
-        }
-      );
+      await storage.createTable(tableName, this.withTransactionOwner(policy));
+      tableMeta = await this.getTableMeta(tableName);
     }
 
-    try {
-      await this.restoreFullTableWriteSnapshot(tableName, snapshot);
-    } catch (recoveryError) {
-      throw new StorageError(
-        `Failed to recover full-table encrypted write for '${tableName}' after logical record count publication failed`,
-        'TABLE_UPDATE_FAILED',
-        {
-          cause: originalError,
-          details: `Recovery failed: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`,
-          suggestion: 'Verify the table contents and metadata before retrying the write.',
-          tableName,
-        }
-      );
+    if (tableMeta) {
+      this.assertWriteEncryptionPolicy(tableName, tableMeta, options);
     }
-  }
-
-  private async getTableMeta(tableName: string) {
-    await storage.ensureInitialized();
-    const tableMeta = storage.getTableMeta(tableName);
-    this.assertTableAccessPolicy(tableName, tableMeta);
     return tableMeta;
   }
 
@@ -450,7 +564,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       return undefined;
     }
 
-    const entry = this.cachedData.get(this.fullTableCacheKey(tableName));
+    const entry = this.fullTableCache.get(this.fullTableCacheKey(tableName));
     if (!entry || entry.sourceCiphertext !== sourceCiphertext || Date.now() - entry.timestamp >= this.cacheTimeout) {
       return undefined;
     }
@@ -463,7 +577,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       return;
     }
 
-    this.cachedData.set(this.fullTableCacheKey(tableName), {
+    this.fullTableCache.set(this.fullTableCacheKey(tableName), {
       data: this.cloneRecords(data),
       timestamp: Date.now(),
       sourceCiphertext,
@@ -472,20 +586,22 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   private clearTableCache(tableName: string): void {
-    this.cachedData.delete(tableName);
-    this.queryIndexes.delete(tableName);
-  }
-
-  private clearFullTableCache(tableName: string): void {
-    this.cachedData.delete(this.fullTableCacheKey(tableName));
+    this.fullTableCache.delete(this.fullTableCacheKey(tableName));
   }
 
   private resolveConfiguredEncryptedFields(tableMeta: TableSchema | undefined, config: LiteStoreConfig): string[] {
-    const tableEncryptedFields = tableMeta?.encryptedFields;
-    if (tableEncryptedFields && tableEncryptedFields.length > 0) {
-      return tableEncryptedFields;
+    if (tableMeta?.encrypted === true) {
+      if (tableMeta.encryptAllFields === true) {
+        return [];
+      }
+      const persistedFields = tableMeta.encryptedFields;
+      if (persistedFields && persistedFields.length > 0) {
+        return persistedFields;
+      }
     }
 
+    // v3 metadata had no all-fields marker. Empty or missing fields therefore
+    // retain the legacy global-config fallback instead of reinterpreting plain strings.
     return config.encryption.encryptedFields || [];
   }
 
@@ -497,11 +613,33 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     return [...fields];
   }
 
+  private resolveImplicitFieldEncryptionPolicy(
+    options: Omit<WriteOptions, 'mode'> | WriteOptions | undefined,
+    config: LiteStoreConfig
+  ): ResolvedFieldEncryptionPolicy {
+    const encrypted = this.requireAuthOnAccess || options?.encrypted === true || options?.encryptFullTable === true;
+    if (!encrypted || options?.encryptFullTable === true) {
+      return { encryptedFields: [], encryptAllFields: false };
+    }
+
+    const configuredFields = config.encryption.encryptedFields ?? [];
+    return configuredFields.length > 0
+      ? { encryptedFields: [...new Set(configuredFields)], encryptAllFields: false }
+      : { encryptedFields: [], encryptAllFields: true };
+  }
+
   private resolveFieldsForWrite(
     data: Record<string, unknown>[],
     tableMeta: TableSchema | undefined,
-    config: LiteStoreConfig
+    config: LiteStoreConfig,
+    implicitFieldPolicy?: ResolvedFieldEncryptionPolicy
   ): string[] {
+    if (!tableMeta && implicitFieldPolicy) {
+      return implicitFieldPolicy.encryptAllFields
+        ? this.resolveAllRecordFields(data)
+        : implicitFieldPolicy.encryptedFields;
+    }
+
     const configuredFields = this.resolveConfiguredEncryptedFields(tableMeta, config);
     if (configuredFields.length > 0) {
       return configuredFields;
@@ -532,43 +670,18 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   clearAllCache(): void {
-    this.cachedData.clear();
-    this.queryIndexes.clear();
+    this.fullTableCache.clear();
   }
 
   private manageCacheSize(): void {
-    if (this.cachedData.size > this.maxCacheSize) {
-      const entries = Array.from(this.cachedData.entries());
+    if (this.fullTableCache.size > this.maxCacheSize) {
+      const entries = Array.from(this.fullTableCache.entries());
       entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
-      const toRemove = entries.slice(0, this.cachedData.size - this.maxCacheSize);
-      toRemove.forEach(([tableName]) => {
-        this.cachedData.delete(tableName);
-        // Also clear corresponding query index
-        this.queryIndexes.delete(tableName);
+      const toRemove = entries.slice(0, this.fullTableCache.size - this.maxCacheSize);
+      toRemove.forEach(([cacheKey]) => {
+        this.fullTableCache.delete(cacheKey);
       });
     }
-  }
-
-  private buildQueryIndex(tableName: string, field: string): void {
-    const cached = this.cachedData.get(tableName);
-    if (!cached) return;
-
-    const index = new Map<string | number, StorageRecord[]>();
-    for (const item of cached.data) {
-      const value = item[field];
-      if (value !== undefined && value !== null) {
-        const key = typeof value === 'object' ? JSON.stringify(value) : String(value);
-        if (!index.has(key)) {
-          index.set(key, []);
-        }
-        index.get(key)!.push(item);
-      }
-    }
-
-    if (!this.queryIndexes.has(tableName)) {
-      this.queryIndexes.set(tableName, new Map());
-    }
-    this.queryIndexes.get(tableName)!.set(field, index);
   }
 
   async createTable<T extends object = StorageRecord>(
@@ -580,11 +693,6 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     const accessKey = await this.ensureAccessAuthorized();
     const { initialData = [], ...tableOptions } = options ?? {};
     const normalizedInitialData = this.normalizeStorageInput(initialData);
-    const alreadyExists = await storage.hasTable(tableName);
-    if (alreadyExists) {
-      await this.getTableMeta(tableName);
-      return;
-    }
 
     if (options?.requireAuthOnAccess === true && !this.requireAuthOnAccess) {
       throw new StorageError(`Table '${tableName}' requires a strict encrypted storage adapter`, 'PERMISSION_DENIED', {
@@ -594,12 +702,25 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       });
     }
 
-    await storage.createTable<StorageRecord>(tableName, {
-      ...tableOptions,
-      encrypted: this.requireAuthOnAccess || tableOptions.encrypted,
-      requireAuthOnAccess: this.requireAuthOnAccess,
-      initialData: [],
-    });
+    const alreadyExists = await storage.hasTable(tableName, this.withTransactionOwner());
+    if (alreadyExists) {
+      const tableMeta = await this.getTableMeta(tableName);
+      if (tableMeta) {
+        this.assertExistingCreateTablePolicy(tableName, tableMeta, options);
+      }
+      return;
+    }
+
+    const encryptionPolicy = this.getExplicitCreateTablePolicy(tableOptions, configManager.getConfig());
+
+    await storage.createTable<StorageRecord>(
+      tableName,
+      this.withTransactionOwner({
+        ...tableOptions,
+        ...encryptionPolicy,
+        initialData: [],
+      })
+    );
 
     if (normalizedInitialData.length === 0) {
       return;
@@ -618,7 +739,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       );
     } catch (error) {
       try {
-        await storage.deleteTable(tableName);
+        await storage.deleteTable(tableName, this.withTransactionOwner());
       } catch (cleanupError) {
         logger.error(`Failed to clean up table ${tableName} after encrypted initialization failed`, cleanupError);
       }
@@ -631,22 +752,35 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     return this.withTableWriteLock(tableName, async () => {
       await this.getTableMeta(tableName);
       try {
-        return await storage.deleteTable(tableName, _options);
+        return await storage.deleteTable(tableName, this.withTransactionOwner(_options));
       } finally {
         this.clearTableCache(tableName);
-        this.clearFullTableCache(tableName);
       }
     });
   }
 
   async hasTable(tableName: string, _options?: TableOptions): Promise<boolean> {
     await this.ensureAccessAuthorized();
-    return storage.hasTable(tableName, _options);
+    const exists = await storage.hasTable(tableName, this.withTransactionOwner(_options));
+    if (exists) {
+      await this.getTableMeta(tableName);
+    }
+    return exists;
   }
 
   async listTables(_options?: TableOptions): Promise<string[]> {
     await this.ensureAccessAuthorized();
-    return storage.listTables(_options);
+    const tableNames = await storage.listTables(this.withTransactionOwner(_options));
+    if (
+      !this.requireAuthOnAccess &&
+      tableNames.some(tableName => storage.getTableMeta(tableName)?.requireAuthOnAccess === true)
+    ) {
+      throw new StorageError('Listing tables requires strict access authentication', 'PERMISSION_DENIED', {
+        details: 'At least one table is bound to the requireAuthOnAccess key scope.',
+        suggestion: 'Use an adapter created with requireAuthOnAccess: true.',
+      });
+    }
+    return tableNames;
   }
 
   async overwrite<T extends object = StorageRecord>(
@@ -674,7 +808,6 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   ): Promise<WriteResult> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
-        // Clear cache for this table
         this.clearTableCache(tableName);
 
         const finalData = this.cloneRecords(this.normalizeStorageInput(data));
@@ -682,15 +815,14 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         let encryptedData: StorageRecord[] = [];
         let fullTableCiphertext: string | undefined;
         const config = configManager.getConfig();
-        const tableMeta = await this.getTableMeta(tableName);
+        const implicitFieldPolicy = this.resolveImplicitFieldEncryptionPolicy(options, config);
+        const tableMeta = await this.getTableMetaForWrite(tableName, options, implicitFieldPolicy);
 
-        // Decide which encryption strategy to use
         const shouldEncryptFullTable = tableMeta?.encryptFullTable === true || options?.encryptFullTable === true;
         const useFieldLevelEncryption = !shouldEncryptFullTable;
 
         if (useFieldLevelEncryption) {
-          // Field-level encryption mode
-          const encryptedFields = this.resolveFieldsForWrite(finalData, tableMeta, config);
+          const encryptedFields = this.resolveFieldsForWrite(finalData, tableMeta, config, implicitFieldPolicy);
 
           if (config.encryption.useBulkOperations && finalData.length > 1) {
             encryptedData = await encryptFieldsBulk(finalData, {
@@ -707,11 +839,13 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
             encryptedData = await Promise.all(encryptionPromises);
           }
 
-          return storage.write(tableName, encryptedData, { ...options, mode: 'overwrite' });
+          return storage.write(
+            tableName,
+            encryptedData,
+            this.getStorageWriteOptions(options, tableMeta, 'overwrite', implicitFieldPolicy)
+          );
         } else {
-          // Full table encryption mode
           if (shouldEncryptFullTable) {
-            // Overwrite mode: Direct encrypted write
             const serializedData = JSON.stringify(finalData);
             const encrypted = await encrypt(serializedData, key);
             encryptedData = [{ __enc: encrypted }];
@@ -719,17 +853,12 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
           }
         }
 
-        const fullTableWriteSnapshot = fullTableCiphertext
-          ? await this.prepareFullTableWriteSnapshot(tableName)
-          : undefined;
-        const result = await storage.write(tableName, encryptedData, { ...options, mode: 'overwrite' });
-        const normalizedResult = await this.normalizeFullTableWriteResult(
+        const result = await storage.write(
           tableName,
-          result,
-          finalData.length,
-          finalData.length,
-          fullTableWriteSnapshot
+          encryptedData,
+          this.getStorageWriteOptions(options, tableMeta, 'overwrite', implicitFieldPolicy, finalData.length)
         );
+        const normalizedResult = this.normalizeFullTableWriteResult(result, finalData.length, finalData.length);
         if (fullTableCiphertext) {
           this.cacheFullTableData(tableName, finalData, fullTableCiphertext);
         }
@@ -771,7 +900,6 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   ): Promise<WriteResult> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
-        // Clear cache for this table
         this.clearTableCache(tableName);
 
         const finalData = this.cloneRecords(this.normalizeStorageInput(data));
@@ -780,13 +908,11 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         let fullTableTotal: number | undefined;
         let fullTableCacheData: StorageRecord[] | undefined;
         let fullTableCacheCiphertext: string | undefined;
-        let fullTableWriteSnapshot: FullTableWriteSnapshot | undefined;
         const config = configManager.getConfig();
-        const tableMeta = await this.getTableMeta(tableName);
+        const implicitFieldPolicy = this.resolveImplicitFieldEncryptionPolicy(options, config);
+        const tableMeta = await this.getTableMetaForWrite(tableName, options, implicitFieldPolicy);
 
-        // Decide which encryption strategy to use
-        // Only use full-table encryption when encryptFullTable is explicitly true
-        // Prefer table metadata encryption config
+        // Persisted full-table encryption cannot be downgraded by an individual write.
         const tableEncryptFullTable = tableMeta?.encryptFullTable || false;
         const tableEncrypted = tableMeta?.encrypted || options?.encrypted || false;
 
@@ -794,8 +920,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         const useFieldLevelEncryption = !shouldEncryptFullTable;
 
         if (useFieldLevelEncryption) {
-          // Prefer table metadata encrypted fields over global config
-          const encryptedFields = this.resolveFieldsForWrite(finalData, tableMeta, config);
+          const encryptedFields = this.resolveFieldsForWrite(finalData, tableMeta, config, implicitFieldPolicy);
 
           if (config.encryption.useBulkOperations && finalData.length > 1) {
             encryptedData = await encryptFieldsBulk(finalData, {
@@ -811,22 +936,16 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
             );
             encryptedData = await Promise.all(encryptionPromises);
           }
-          const writeOptions = { ...options };
-          delete writeOptions.encrypted;
-          delete writeOptions.requireAuthOnAccess;
-          return storage.write(tableName, encryptedData, writeOptions);
+          return storage.write(
+            tableName,
+            encryptedData,
+            this.getStorageWriteOptions(options, tableMeta, undefined, implicitFieldPolicy)
+          );
         } else {
           if (shouldEncryptFullTable) {
-            fullTableWriteSnapshot = await this.prepareFullTableWriteSnapshot(tableName);
             if (options?.mode === 'append') {
-              // Full-table encryption append mode optimization
-              // Optimization 1: Use cache to reduce repeated decryption
-              // Optimization 2: Encrypt only new data, not entire table
-              // Optimization 3: Use incremental encryption strategy
-
-              // Read existing encrypted data first
-              const existingEncrypted =
-                fullTableWriteSnapshot?.records ?? (await storage.read(tableName, { bypassCache: true }));
+              // A full-table append must republish one ciphertext for the combined plaintext generation.
+              const existingEncrypted = await storage.read(tableName, this.withTransactionOwner({ bypassCache: true }));
               let combinedData = finalData;
 
               if (existingEncrypted.length > 0) {
@@ -843,14 +962,12 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
               // hit, otherwise a later append can overwrite an earlier record.
               fullTableCacheData = combinedData;
 
-              // Optimization 4: Use more efficient serialization and encryption
               const serializedData = JSON.stringify(combinedData);
               const encrypted = await encrypt(serializedData, key);
               encryptedData = [{ __enc: encrypted }];
               fullTableCacheCiphertext = encrypted;
               fullTableTotal = combinedData.length;
             } else {
-              // Overwrite mode: Direct encrypted write
               const serializedData = JSON.stringify(finalData);
               const encrypted = await encrypt(serializedData, key);
               encryptedData = [{ __enc: encrypted }];
@@ -859,7 +976,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
               fullTableTotal = finalData.length;
             }
           } else {
-            // Not explicitly required full-table, check if table needs encryption
+            // An encrypted policy without full-table mode encrypts every record field.
             if (tableEncrypted || options?.encrypted) {
               if (config.encryption.useBulkOperations && finalData.length > 1) {
                 encryptedData = await encryptFieldsBulk(finalData, {
@@ -884,19 +1001,14 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
           }
           encryptedData = finalData;
         }
-        const finalWriteOptions = { ...options };
-        delete finalWriteOptions.encrypted;
-        delete finalWriteOptions.requireAuthOnAccess;
         const storageMode = fullTableTotal !== undefined ? 'overwrite' : options?.mode;
-        const result = await storage.write(tableName, encryptedData, { ...finalWriteOptions, mode: storageMode });
+        const result = await storage.write(
+          tableName,
+          encryptedData,
+          this.getStorageWriteOptions(options, tableMeta, storageMode, implicitFieldPolicy, fullTableTotal)
+        );
         if (fullTableTotal !== undefined) {
-          const normalizedResult = await this.normalizeFullTableWriteResult(
-            tableName,
-            result,
-            finalData.length,
-            fullTableTotal,
-            fullTableWriteSnapshot
-          );
+          const normalizedResult = this.normalizeFullTableWriteResult(result, finalData.length, fullTableTotal);
           if (fullTableCacheData && fullTableCacheCiphertext) {
             this.cacheFullTableData(tableName, fullTableCacheData, fullTableCacheCiphertext);
           }
@@ -928,37 +1040,35 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   ): Promise<StorageRecord[]> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
-        // A zero timeout explicitly disables decrypted data and query-index caches.
+        // A zero timeout explicitly disables the ciphertext-bound decrypted cache.
         if (this.cacheTimeout === 0) {
-          this.cachedData.clear();
-          this.queryIndexes.clear();
+          this.fullTableCache.clear();
         }
         const tableMeta = await this.getTableMeta(tableName);
         const readOptions = options ? { bypassCache: options.bypassCache } : undefined;
-        const raw = await storage.read<StorageRecord>(tableName, readOptions);
+        const raw = await storage.read<StorageRecord>(tableName, this.withTransactionOwner(readOptions));
         if (raw.length === 0) {
           this.clearTableCache(tableName);
-          this.clearFullTableCache(tableName);
           return [];
         }
 
         const first = raw[0];
         let result: StorageRecord[] = [];
         const config = configManager.getConfig();
-        // Prefer table metadata encrypted fields over global config
         const encryptedFields = this.resolveFieldsForRead(raw, tableMeta, config);
 
         const encryptedTablePayload = first?.['__enc'];
         const encryptedBulkPayload = first?.['__enc_bulk'];
         if (encryptedTablePayload !== undefined) {
-          // Full data decryption
           if (typeof encryptedTablePayload !== 'string') {
             throw new StorageError('Encrypted table payload is invalid', 'FILE_CONTENT_INVALID');
           }
-          result = this.parseEncryptedRecords(await decrypt(encryptedTablePayload, key));
-          this.cacheFullTableData(tableName, result, encryptedTablePayload);
+          const cachedData = this.getCachedFullTableData(tableName, encryptedTablePayload);
+          result = cachedData ?? this.parseEncryptedRecords(await decrypt(encryptedTablePayload, key));
+          if (!cachedData) {
+            this.cacheFullTableData(tableName, result, encryptedTablePayload);
+          }
         } else if (encryptedBulkPayload !== undefined) {
-          // Batch data decryption
           if (!Array.isArray(encryptedBulkPayload) || !encryptedBulkPayload.every(value => typeof value === 'string')) {
             throw new StorageError('Encrypted batch payload is invalid', 'FILE_CONTENT_INVALID');
           }
@@ -972,13 +1082,11 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
           });
         } else if (encryptedFields.length > 0) {
           if (config.encryption.useBulkOperations && raw.length > 1) {
-            // Batch field-level decryption
             result = await decryptFieldsBulk(raw, {
               fields: encryptedFields,
               masterKey: key,
             });
           } else {
-            // Single field-level decryption
             const decryptionPromises = raw.map(item =>
               decryptFields(item, {
                 fields: encryptedFields,
@@ -990,28 +1098,6 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         } else {
           result = raw;
         }
-        if (this.cacheTimeout > 0) {
-          this.cachedData.set(tableName, {
-            data: this.cloneRecords(result),
-            timestamp: Date.now(),
-          });
-
-          // Manage cache size
-          this.manageCacheSize();
-          if (configManager.getConfig().performance.enableQueryOptimization && result.length > 0) {
-            if (result.some(item => item['id'] !== undefined)) {
-              this.buildQueryIndex(tableName, 'id');
-            }
-            // Build index for other common fields
-            const commonFields = ['name', 'email', 'type', 'status'];
-            commonFields.forEach(field => {
-              if (result.some(item => item[field] !== undefined)) {
-                this.buildQueryIndex(tableName, field);
-              }
-            });
-          }
-        }
-
         // Filtering and sorting must observe decrypted fields rather than encrypted envelopes.
         let visibleRecords = result;
         if (options?.filter) {
@@ -1039,14 +1125,6 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   private async countWithKey(tableName: string, key: string): Promise<number> {
-    await this.getTableMeta(tableName);
-    // Optimization: Get count from cache if valid, avoid reading all data
-    const cached = this.cachedData.get(tableName);
-    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-      return cached.data.length;
-    }
-
-    // For encrypted tables, read all data to get count
     const data = await this.readWithKey(tableName, undefined, key);
     return data.length;
   }
@@ -1056,14 +1134,14 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     const key = await this.key();
     const tableMeta = await this.getTableMeta(tableName);
     if (!tableMeta?.encryptFullTable) {
-      return storage.verifyCount(tableName);
+      return storage.verifyCount(tableName, this.withTransactionOwner());
     }
 
     const metadata = tableMeta.count ?? 0;
     const actual = await this.countWithKey(tableName, key);
     const match = metadata === actual;
     if (!match && !this.isStorageTransactionInProgress()) {
-      await storage.setLogicalRecordCount(tableName, actual);
+      await storage.setLogicalRecordCount(tableName, actual, this.withTransactionOwner());
     }
     return { metadata, actual, match };
   }
@@ -1077,36 +1155,6 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     const result = await StorageErrorHandler.handleAsyncError(
       async () => {
         const key = await this.key();
-        await this.getTableMeta(tableName);
-        // Optimization: Use index for fast lookup
-        if (configManager.getConfig().performance.enableQueryOptimization) {
-          const tableIndexes = this.queryIndexes.get(tableName);
-          if (tableIndexes && isStorageRecord(storageFilter)) {
-            const filterRecord = storageFilter as StorageRecord;
-            // Find index fields used in filter
-            const filterFields = Object.keys(filterRecord);
-            for (const field of filterFields) {
-              if (tableIndexes.has(field)) {
-                const fieldIndex = tableIndexes.get(field)!;
-                const filterValue = filterRecord[field];
-                const serializedValue = typeof filterValue === 'object' ? JSON.stringify(filterValue) : undefined;
-                const indexKey = serializedValue ?? String(filterValue);
-
-                // Find matching data from index
-                const indexedData = fieldIndex.get(indexKey) || [];
-                if (indexedData.length > 0) {
-                  // If matches found, use QueryEngine for more precise filtering
-                  const filtered = QueryEngine.filter(indexedData, storageFilter);
-                  if (filtered.length > 0) {
-                    return this.cloneRecords([filtered[0]])[0];
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        // No usable index or not found, fallback to read all data
         const data = await this.readWithKey(tableName, options, key);
         const filtered = QueryEngine.filter(data, storageFilter);
         return filtered.length > 0 ? this.cloneRecords([filtered[0]])[0] : null;
@@ -1130,7 +1178,6 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     findOptions?: TableOptions
   ): Promise<T[]> {
     const key = await this.key();
-    // Prefer cache
     const readOptions: ReadOptions<StorageRecord> | undefined = findOptions ? { ...findOptions } : undefined;
 
     let data = await this.readWithKey(tableName, readOptions, key);
@@ -1139,12 +1186,11 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       data = filtered;
     }
 
-    // Apply sorting
     const storageOptions = this.toStorageFindOptions(options);
     if (storageOptions?.sortBy) {
       data = QueryEngine.sort(data, storageOptions.sortBy, storageOptions.order, storageOptions.sortAlgorithm);
     } else {
-      // Default sort by id, ensure consistent pagination
+      // A stable default order keeps pagination deterministic.
       data = QueryEngine.sort(data, 'id', 'asc', storageOptions?.sortAlgorithm);
     }
     const skip = storageOptions?.skip || 0;
@@ -1212,10 +1258,8 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     await this.withTableWriteLock(tableName, async () => {
       await this.getTableMeta(tableName);
       this.clearTableCache(tableName);
-      this.clearFullTableCache(tableName);
-      await storage.migrateToChunked(tableName);
+      await storage.migrateToChunked(tableName, this.withTransactionOwner());
       this.clearTableCache(tableName);
-      this.clearFullTableCache(tableName);
     });
   }
 
@@ -1240,39 +1284,28 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
   async beginTransaction(options?: TableOptions): Promise<void> {
     await this.ensureAccessAuthorized();
-    await storage.beginTransaction(options);
-    this.pendingLogicalRecordCounts.clear();
-    this.transactionLogicalRecordCountSnapshots.clear();
+    await storage.beginTransaction(this.withTransactionOwner(options));
   }
 
   async commit(options?: TableOptions): Promise<void> {
     await this.ensureAccessAuthorized();
-    const pendingCounts = new Map(this.pendingLogicalRecordCounts);
     try {
-      await storage.commit(options, async () => {
-        for (const [tableName, count] of pendingCounts) {
-          await storage.setLogicalRecordCount(tableName, count);
-        }
-      });
-    } catch (error) {
-      await this.restoreTransactionLogicalRecordCountsSafely();
-      throw error;
+      await storage.commit(this.withTransactionOwner(options));
     } finally {
-      this.clearAllCache();
-      this.pendingLogicalRecordCounts.clear();
-      this.transactionLogicalRecordCountSnapshots.clear();
+      if (!storage.isInTransaction()) {
+        this.clearAllCache();
+      }
     }
   }
 
   async rollback(options?: TableOptions): Promise<void> {
     await this.ensureAccessAuthorized();
     try {
-      await storage.rollback(options);
+      await storage.rollback(this.withTransactionOwner(options));
     } finally {
-      await this.restoreTransactionLogicalRecordCountsSafely();
-      this.clearAllCache();
-      this.pendingLogicalRecordCounts.clear();
-      this.transactionLogicalRecordCountSnapshots.clear();
+      if (!storage.isInTransaction()) {
+        this.clearAllCache();
+      }
     }
   }
 
@@ -1317,8 +1350,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     await this.withTableWriteLock(tableName, async () => {
       await this.getTableMeta(tableName);
       this.clearTableCache(tableName);
-      this.clearFullTableCache(tableName);
-      await storage.clearTable(tableName);
+      await storage.clearTable(tableName, this.withTransactionOwner());
     });
   }
 

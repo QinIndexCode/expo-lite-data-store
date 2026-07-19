@@ -13,6 +13,7 @@ type EncryptedAdapterPrivateAccess = {
 
 type StoragePrivateAccess = {
   dataWriter: DataWriter;
+  metadataManager: MetadataManager;
 };
 
 type EncryptedAdapterStaticAccess = {
@@ -27,6 +28,10 @@ type SecureStoreOptions = {
 type SecureStoreMock = {
   deleteItemAsync: (key: string, options?: SecureStoreOptions) => Promise<void>;
   getItemAsync: (key: string, options?: SecureStoreOptions) => Promise<string | null>;
+};
+
+type ExpoConstantsMock = {
+  appOwnership: string | null | undefined;
 };
 
 const getEncryptedAdapterPrivateAccess = (adapter: EncryptedStorageAdapter): EncryptedAdapterPrivateAccess =>
@@ -45,27 +50,6 @@ const deleteTableIfPresent = async (tableName: string): Promise<void> => {
     await storage.deleteTable(tableName);
   }
 };
-
-function failFirstLogicalRecordCountPublication(message: string): () => void {
-  const originalSetLogicalRecordCount = FileSystemStorageAdapter.prototype.setLogicalRecordCount;
-  let failFirstPublication = true;
-
-  FileSystemStorageAdapter.prototype.setLogicalRecordCount = async function (
-    this: FileSystemStorageAdapter,
-    tableName: string,
-    count: number
-  ): Promise<void> {
-    if (failFirstPublication) {
-      failFirstPublication = false;
-      throw new Error(message);
-    }
-    return originalSetLogicalRecordCount.call(this, tableName, count);
-  };
-
-  return () => {
-    FileSystemStorageAdapter.prototype.setLogicalRecordCount = originalSetLogicalRecordCount;
-  };
-}
 
 describe('EncryptedStorageAdapter', () => {
   let adapter: EncryptedStorageAdapter;
@@ -99,6 +83,346 @@ describe('EncryptedStorageAdapter', () => {
       const tables = await adapter.listTables();
       expect(tables).toContain(tableName);
     });
+  });
+
+  describe('persisted encryption policy', () => {
+    it('persists full-table encryption when a write creates the table implicitly', async () => {
+      const autoTable = 'test_auto_created_full_table_policy';
+
+      try {
+        await adapter.write(autoTable, { id: 1, secret: 'classified' }, { mode: 'append', encryptFullTable: true });
+
+        expect(storage.getTableMeta(autoTable)).toMatchObject({
+          encrypted: true,
+          encryptFullTable: true,
+          requireAuthOnAccess: false,
+        });
+        expect(storage.getTableMeta(autoTable)?.encryptAllFields).toBeUndefined();
+        const raw = await storage.read(autoTable, { bypassCache: true });
+        expect(raw).toHaveLength(1);
+        expect(raw[0]?.__enc).toEqual(expect.any(String));
+        await expect(adapter.read(autoTable, { bypassCache: true })).resolves.toEqual([
+          { id: 1, secret: 'classified' },
+        ]);
+      } finally {
+        await deleteTableIfPresent(autoTable);
+      }
+    });
+
+    it('persists the field policy used by an implicitly created encrypted table', async () => {
+      const autoTable = 'test_auto_created_field_policy';
+      configManager.updateConfig({ encryption: { encryptedFields: ['secret', 'secret'] } });
+
+      try {
+        await adapter.write(
+          autoTable,
+          { id: 1, secret: 'classified', visible: 'plain' },
+          { mode: 'append', encrypted: true }
+        );
+
+        expect(storage.getTableMeta(autoTable)).toMatchObject({
+          encrypted: true,
+          encryptFullTable: false,
+          encryptedFields: ['secret'],
+        });
+        expect(storage.getTableMeta(autoTable)?.encryptAllFields).toBeUndefined();
+        const raw = await storage.read(autoTable, { bypassCache: true });
+        expect(raw[0]?.secret).not.toBe('classified');
+        expect(raw[0]?.visible).toBe('plain');
+        await expect(adapter.read(autoTable, { bypassCache: true })).resolves.toEqual([
+          { id: 1, secret: 'classified', visible: 'plain' },
+        ]);
+      } finally {
+        await deleteTableIfPresent(autoTable);
+      }
+    });
+
+    it('keeps dynamic all-field encryption when initial data has a different shape from later records', async () => {
+      const policyTable = 'test_explicit_dynamic_fields_with_initial_data';
+      const initialRecord = { id: 1, initialField: 'initial' };
+      const laterRecord = { id: 2, laterField: 'later' };
+      configManager.updateConfig({ encryption: { encryptedFields: [] } });
+
+      try {
+        await adapter.createTable(policyTable, { encrypted: true, initialData: [initialRecord] });
+        await adapter.insert(policyTable, laterRecord, { encrypted: true });
+
+        expect(storage.getTableMeta(policyTable)).toMatchObject({
+          encrypted: true,
+          encryptFullTable: false,
+          encryptedFields: [],
+          encryptAllFields: true,
+        });
+        const raw = await storage.read(policyTable, { bypassCache: true });
+        expect(raw[0]?.id).not.toBe(initialRecord.id);
+        expect(raw[0]?.initialField).not.toBe(initialRecord.initialField);
+        expect(raw[1]?.id).not.toBe(laterRecord.id);
+        expect(raw[1]?.laterField).not.toBe(laterRecord.laterField);
+        await expect(adapter.read(policyTable, { bypassCache: true })).resolves.toEqual([initialRecord, laterRecord]);
+      } finally {
+        await deleteTableIfPresent(policyTable);
+      }
+    });
+
+    it('keeps dynamic all-field encryption when an explicitly empty table receives new record shapes', async () => {
+      const policyTable = 'test_explicit_dynamic_fields_without_initial_data';
+      const firstRecord = { id: 1, firstField: 'first' };
+      const secondRecord = { id: 2, secondField: 'second' };
+      configManager.updateConfig({ encryption: { encryptedFields: [] } });
+
+      try {
+        await adapter.createTable(policyTable, { encrypted: true });
+        await adapter.insert(policyTable, firstRecord, { encrypted: true });
+        await adapter.insert(policyTable, secondRecord, { encrypted: true });
+
+        expect(storage.getTableMeta(policyTable)).toMatchObject({
+          encrypted: true,
+          encryptedFields: [],
+          encryptAllFields: true,
+        });
+        const raw = await storage.read(policyTable, { bypassCache: true });
+        expect(raw[0]?.firstField).not.toBe(firstRecord.firstField);
+        expect(raw[1]?.secondField).not.toBe(secondRecord.secondField);
+        await expect(adapter.read(policyTable, { bypassCache: true })).resolves.toEqual([firstRecord, secondRecord]);
+      } finally {
+        await deleteTableIfPresent(policyTable);
+      }
+    });
+
+    it('keeps dynamic all-field encryption when writes implicitly create a table with changing shapes', async () => {
+      const policyTable = 'test_implicit_dynamic_fields';
+      const firstRecord = { id: 1, firstField: 'first' };
+      const secondRecord = { id: 2, secondField: 'second' };
+      configManager.updateConfig({ encryption: { encryptedFields: [] } });
+
+      try {
+        await adapter.insert(policyTable, firstRecord, { encrypted: true });
+        await adapter.insert(policyTable, secondRecord, { encrypted: true });
+
+        expect(storage.getTableMeta(policyTable)).toMatchObject({
+          encrypted: true,
+          encryptedFields: [],
+          encryptAllFields: true,
+        });
+        const raw = await storage.read(policyTable, { bypassCache: true });
+        expect(raw[0]?.firstField).not.toBe(firstRecord.firstField);
+        expect(raw[1]?.secondField).not.toBe(secondRecord.secondField);
+        await expect(adapter.read(policyTable, { bypassCache: true })).resolves.toEqual([firstRecord, secondRecord]);
+      } finally {
+        await deleteTableIfPresent(policyTable);
+      }
+    });
+
+    it('keeps dynamic all-field encryption across transactional writes with changing shapes', async () => {
+      const policyTable = 'test_transaction_dynamic_fields';
+      const firstRecord = { id: 1, firstField: 'first' };
+      const secondRecord = { id: 2, secondField: 'second' };
+      configManager.updateConfig({ encryption: { encryptedFields: [] } });
+
+      try {
+        await adapter.beginTransaction();
+        await adapter.insert(policyTable, firstRecord, { encrypted: true });
+        await adapter.insert(policyTable, secondRecord, { encrypted: true });
+        await adapter.commit();
+
+        expect(storage.getTableMeta(policyTable)).toMatchObject({
+          encrypted: true,
+          encryptedFields: [],
+          encryptAllFields: true,
+        });
+        const raw = await storage.read(policyTable, { bypassCache: true });
+        expect(raw[0]?.firstField).not.toBe(firstRecord.firstField);
+        expect(raw[1]?.secondField).not.toBe(secondRecord.secondField);
+        await expect(adapter.read(policyTable, { bypassCache: true })).resolves.toEqual([firstRecord, secondRecord]);
+      } finally {
+        if (storage.isInTransaction()) {
+          await adapter.rollback();
+        }
+        await deleteTableIfPresent(policyTable);
+      }
+    });
+
+    it.each([
+      { metadataShape: 'an empty field list', tableName: 'test_legacy_empty_fields', encryptedFields: [] as string[] },
+      { metadataShape: 'a missing field list', tableName: 'test_legacy_missing_fields', encryptedFields: undefined },
+    ])(
+      'uses the global field fallback for legacy metadata with $metadataShape',
+      async ({ tableName: legacyTable, encryptedFields }) => {
+        const record = { id: 1, secret: 'ciphertext-only', visible: 'plain-string' };
+        configManager.updateConfig({ encryption: { encryptedFields: ['secret'] } });
+
+        try {
+          await adapter.createTable(legacyTable, { encrypted: true, encryptedFields: ['secret'] });
+          await adapter.overwrite(legacyTable, [record], { encrypted: true });
+          const raw = await storage.read(legacyTable, { bypassCache: true });
+          expect(raw[0]?.secret).not.toBe(record.secret);
+          expect(raw[0]?.visible).toBe(record.visible);
+
+          const storageMetadata = getStoragePrivateAccess(storage).metadataManager;
+          storageMetadata.update(legacyTable, { encryptedFields, encryptAllFields: undefined });
+          await storageMetadata.saveImmediately();
+          await storageMetadata.reload();
+
+          expect(storage.getTableMeta(legacyTable)?.encryptAllFields).toBeUndefined();
+          const reopenedAdapter = new EncryptedStorageAdapter();
+          await expect(reopenedAdapter.read(legacyTable, { bypassCache: true })).resolves.toEqual([record]);
+          await expect(
+            reopenedAdapter.createTable(legacyTable, { encrypted: true, encryptedFields: [] })
+          ).rejects.toMatchObject({ code: 'MIGRATION_FAILED' });
+        } finally {
+          await deleteTableIfPresent(legacyTable);
+        }
+      }
+    );
+
+    it('keeps the configured field policy captured by explicit table creation', async () => {
+      const policyTable = 'test_explicit_configured_field_policy';
+      const initialData = [{ id: 1, secret: 'classified', visible: 'plain' }];
+      configManager.updateConfig({ encryption: { encryptedFields: ['secret'] } });
+
+      try {
+        await adapter.createTable(policyTable, { encrypted: true, initialData });
+
+        expect(storage.getTableMeta(policyTable)).toMatchObject({
+          encrypted: true,
+          encryptFullTable: false,
+          encryptedFields: ['secret'],
+        });
+        expect(storage.getTableMeta(policyTable)?.encryptAllFields).toBeUndefined();
+        configManager.updateConfig({ encryption: { encryptedFields: ['visible'] } });
+        const reopenedAdapter = new EncryptedStorageAdapter();
+
+        await expect(reopenedAdapter.read(policyTable, { bypassCache: true })).resolves.toEqual(initialData);
+        const raw = await storage.read(policyTable, { bypassCache: true });
+        expect(raw[0]?.secret).not.toBe('classified');
+        expect(raw[0]?.visible).toBe('plain');
+      } finally {
+        await deleteTableIfPresent(policyTable);
+      }
+    });
+
+    it('rejects encryption mode changes on an existing table', async () => {
+      const policyTable = 'test_existing_encryption_policy';
+
+      try {
+        await adapter.createTable(policyTable, {
+          encrypted: true,
+          encryptedFields: ['secret'],
+        });
+
+        await expect(
+          adapter.write(
+            policyTable,
+            { id: 1, secret: 'classified' },
+            { mode: 'append', encrypted: true, encryptFullTable: true }
+          )
+        ).rejects.toMatchObject({ code: 'MIGRATION_FAILED' });
+        await expect(
+          adapter.createTable(policyTable, {
+            encrypted: true,
+            encryptedFields: ['differentField'],
+          })
+        ).rejects.toMatchObject({ code: 'MIGRATION_FAILED' });
+      } finally {
+        await deleteTableIfPresent(policyTable);
+      }
+    });
+
+    it('rejects per-write authentication changes on an existing table', async () => {
+      const policyTable = 'test_existing_authentication_policy';
+
+      try {
+        await adapter.createTable(policyTable, { encrypted: true });
+
+        await expect(
+          adapter.write(
+            policyTable,
+            { id: 1, secret: 'classified' },
+            { mode: 'append', encrypted: true, requireAuthOnAccess: true }
+          )
+        ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      } finally {
+        await deleteTableIfPresent(policyTable);
+      }
+    });
+
+    it('rejects strict access requests without leaving an implicitly created table', async () => {
+      const policyTable = 'test_rejected_implicit_strict_policy';
+
+      await expect(
+        adapter.write(
+          policyTable,
+          { id: 1, secret: 'classified' },
+          { mode: 'append', encrypted: true, requireAuthOnAccess: true }
+        )
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      await expect(storage.hasTable(policyTable)).resolves.toBe(false);
+    });
+
+    it('rejects contradictory persisted encryption metadata when opening a table', async () => {
+      const policyTable = 'test_inconsistent_persisted_encryption_policy';
+
+      try {
+        await storage.createTable(policyTable);
+        getStoragePrivateAccess(storage).metadataManager.update(policyTable, {
+          encrypted: false,
+          encryptFullTable: true,
+        });
+
+        await expect(adapter.read(policyTable, { bypassCache: true })).rejects.toMatchObject({
+          code: 'MIGRATION_FAILED',
+        });
+      } finally {
+        await storage.deleteTable(policyTable);
+      }
+    });
+
+    it.each([
+      {
+        encryptionMode: 'field-level',
+        tableName: 'test_implicit_strict_field_transaction',
+        writeOptions: { encrypted: true },
+        encryptFullTable: false,
+      },
+      {
+        encryptionMode: 'full-table',
+        tableName: 'test_implicit_strict_full_transaction',
+        writeOptions: { encrypted: true, encryptFullTable: true },
+        encryptFullTable: true,
+      },
+    ])(
+      'persists strict $encryptionMode policy when a transaction creates a table implicitly',
+      async ({ tableName: strictTable, writeOptions, encryptFullTable }) => {
+        const strictAdapter = new EncryptedStorageAdapter({ requireAuthOnAccess: true });
+        const strictKeySpy = jest
+          .spyOn(getEncryptedAdapterPrivateAccess(strictAdapter), 'key')
+          .mockResolvedValue('strict-transaction-test-key');
+        const normalAdapter = new EncryptedStorageAdapter();
+
+        try {
+          await strictAdapter.beginTransaction();
+          await strictAdapter.insert(strictTable, { id: 1, secret: 'classified' }, writeOptions);
+          await strictAdapter.commit();
+
+          expect(storage.getTableMeta(strictTable)).toMatchObject({
+            encrypted: true,
+            encryptFullTable,
+            requireAuthOnAccess: true,
+          });
+          await expect(normalAdapter.read(strictTable, { bypassCache: true })).rejects.toMatchObject({
+            code: 'PERMISSION_DENIED',
+          });
+        } finally {
+          if (storage.isInTransaction()) {
+            await strictAdapter.rollback();
+          }
+          if (await storage.hasTable(strictTable)) {
+            await strictAdapter.deleteTable(strictTable);
+          }
+          strictKeySpy.mockRestore();
+        }
+      }
+    );
   });
 
   describe('encrypted reads and writes', () => {
@@ -141,8 +465,15 @@ describe('EncryptedStorageAdapter', () => {
         expect(rawData[0]?.name).not.toBe('Alice');
         expect(rawData[0]?.age).not.toBe(25);
         expect(rawData[0]?.active).not.toBe(true);
+        expect(storage.getTableMeta(encryptedAllFieldsTable)).toMatchObject({
+          encryptedFields: [],
+          encryptAllFields: true,
+        });
 
-        await expect(adapter.read(encryptedAllFieldsTable, { bypassCache: true })).resolves.toEqual(testData);
+        configManager.updateConfig({ encryption: { encryptedFields: ['name'] } });
+        const reopenedAdapter = new EncryptedStorageAdapter();
+
+        await expect(reopenedAdapter.read(encryptedAllFieldsTable, { bypassCache: true })).resolves.toEqual(testData);
       } finally {
         await adapter.deleteTable(encryptedAllFieldsTable);
       }
@@ -386,6 +717,116 @@ describe('EncryptedStorageAdapter', () => {
       }
     });
 
+    it('publishes an implicitly created encrypted table only after transaction commit', async () => {
+      const fullTable = 'test_implicit_encrypted_transaction_rollback';
+
+      await adapter.beginTransaction();
+      try {
+        await adapter.insert(fullTable, { id: 1, secret: 'pending' }, { encrypted: true, encryptFullTable: true });
+
+        await expect(adapter.hasTable(fullTable)).resolves.toBe(false);
+        await adapter.rollback();
+        await expect(storage.hasTable(fullTable)).resolves.toBe(false);
+
+        await adapter.beginTransaction();
+        await adapter.insert(fullTable, { id: 2, secret: 'committed' }, { encrypted: true, encryptFullTable: true });
+
+        await expect(adapter.hasTable(fullTable)).resolves.toBe(false);
+        await adapter.commit();
+
+        await expect(storage.hasTable(fullTable)).resolves.toBe(true);
+        expect(storage.getTableMeta(fullTable)).toMatchObject({
+          count: 1,
+          encrypted: true,
+          encryptFullTable: true,
+        });
+        await expect(adapter.read(fullTable, { bypassCache: true })).resolves.toEqual([{ id: 2, secret: 'committed' }]);
+      } finally {
+        if (storage.isInTransaction()) {
+          await adapter.rollback();
+        }
+        await deleteTableIfPresent(fullTable);
+      }
+    });
+
+    it('rejects encrypted transaction work from a different adapter instance', async () => {
+      const fullTable = 'test_encrypted_transaction_owner';
+      const otherAdapter = new EncryptedStorageAdapter();
+
+      try {
+        await adapter.createTable(fullTable, { encrypted: true, encryptFullTable: true });
+        await adapter.beginTransaction();
+
+        await expect(storage.hasTable(fullTable)).rejects.toMatchObject({ code: 'TRANSACTION_IN_PROGRESS' });
+        await expect(otherAdapter.hasTable(fullTable)).rejects.toMatchObject({ code: 'TRANSACTION_IN_PROGRESS' });
+        await expect(otherAdapter.insert(fullTable, { id: 1, secret: 'cross-instance' })).rejects.toMatchObject({
+          code: 'TRANSACTION_IN_PROGRESS',
+        });
+      } finally {
+        if (storage.isInTransaction()) {
+          await adapter.rollback();
+        }
+        await deleteTableIfPresent(fullTable);
+      }
+    });
+
+    it('rolls back an implicitly created table when queued writes use conflicting policies', async () => {
+      const policyTable = 'test_transaction_implicit_policy_conflict';
+
+      await adapter.beginTransaction();
+      try {
+        await adapter.overwrite(policyTable, [{ id: 1, secret: 'field' }], { encrypted: true });
+        await adapter.overwrite(policyTable, [{ id: 2, secret: 'full' }], { encrypted: true, encryptFullTable: true });
+
+        await expect(adapter.commit()).rejects.toMatchObject({ code: 'MIGRATION_FAILED' });
+        await expect(storage.hasTable(policyTable)).resolves.toBe(false);
+      } finally {
+        if (storage.isInTransaction()) {
+          await adapter.rollback();
+        }
+        await deleteTableIfPresent(policyTable);
+      }
+    });
+
+    it('rejects a cross-instance write whose transaction precheck becomes stale', async () => {
+      const raceTable = 'test_encrypted_transaction_owner_race';
+      const otherAdapter = new EncryptedStorageAdapter();
+      const otherAdapterPrivate = getEncryptedAdapterPrivateAccess(otherAdapter);
+      const originalGetOrInitKey = otherAdapterPrivate.getOrInitKey.bind(otherAdapter);
+      let signalKeyReadStarted: () => void = () => undefined;
+      const keyReadStarted = new Promise<void>(resolve => {
+        signalKeyReadStarted = resolve;
+      });
+      let releaseKeyRead: () => void = () => undefined;
+      const keyReadGate = new Promise<void>(resolve => {
+        releaseKeyRead = resolve;
+      });
+      const keySpy = jest.spyOn(otherAdapterPrivate, 'getOrInitKey').mockImplementation(async () => {
+        signalKeyReadStarted();
+        await keyReadGate;
+        return originalGetOrInitKey();
+      });
+
+      try {
+        await adapter.createTable(raceTable, { encrypted: true, encryptedFields: ['secret'] });
+
+        const competingWrite = otherAdapter.insert(raceTable, { id: 1, secret: 'cross-instance' });
+        await keyReadStarted;
+        await adapter.beginTransaction();
+        releaseKeyRead();
+
+        await expect(competingWrite).rejects.toMatchObject({ code: 'TRANSACTION_IN_PROGRESS' });
+        await expect(adapter.read(raceTable, { bypassCache: true })).resolves.toEqual([]);
+      } finally {
+        releaseKeyRead();
+        keySpy.mockRestore();
+        if (storage.isInTransaction()) {
+          await adapter.rollback();
+        }
+        await deleteTableIfPresent(raceTable);
+      }
+    });
+
     it('restores a full-table logical count when a transaction commit rolls back after a write failure', async () => {
       const fullTable = 'test_full_table_transaction_count_failure';
 
@@ -398,6 +839,7 @@ describe('EncryptedStorageAdapter', () => {
 
         await adapter.beginTransaction();
         await adapter.insert(fullTable, { id: 3, secret: 'gamma' });
+        await adapter.insert(fullTable, { id: 4, secret: 'delta' });
 
         const dataWriter = getStoragePrivateAccess(storage).dataWriter;
         const originalWrite = dataWriter.write.bind(dataWriter);
@@ -406,7 +848,7 @@ describe('EncryptedStorageAdapter', () => {
           .spyOn(dataWriter, 'write')
           .mockImplementation(async (...args: Parameters<DataWriter['write']>) => {
             writeCalls++;
-            if (writeCalls === 1) {
+            if (writeCalls === 2) {
               throw new Error('injected full-table commit failure');
             }
             return originalWrite(...args);
@@ -431,127 +873,164 @@ describe('EncryptedStorageAdapter', () => {
       }
     });
 
-    it('restores a full-table write when logical record count publication fails', async () => {
-      const fullTable = 'test_full_table_count_publication_failure';
-      const originalData = [
+    it('publishes a full-table logical count without a second metadata update', async () => {
+      const fullTable = 'test_full_table_atomic_count';
+      const replacementData = [
         { id: 1, secret: 'alpha' },
         { id: 2, secret: 'beta' },
       ];
+      const countSpy = jest
+        .spyOn(FileSystemStorageAdapter.prototype, 'setLogicalRecordCount')
+        .mockRejectedValue(new Error('unexpected second metadata update'));
 
       try {
         await adapter.createTable(fullTable, { encrypted: true, encryptFullTable: true });
-        await adapter.overwrite(fullTable, originalData);
+        await expect(adapter.overwrite(fullTable, replacementData)).resolves.toMatchObject({
+          written: 2,
+          totalAfterWrite: 2,
+        });
 
-        const restoreLogicalRecordCountPublication = failFirstLogicalRecordCountPublication(
-          'injected logical count publication failure'
-        );
-
-        try {
-          await expect(adapter.overwrite(fullTable, [{ id: 3, secret: 'replacement' }])).rejects.toBeDefined();
-        } finally {
-          restoreLogicalRecordCountPublication();
-        }
-
+        expect(countSpy).not.toHaveBeenCalled();
         expect(storage.getTableMeta(fullTable)?.count).toBe(2);
-        await expect(adapter.read(fullTable, { bypassCache: true })).resolves.toEqual(originalData);
+        await expect(adapter.read(fullTable, { bypassCache: true })).resolves.toEqual(replacementData);
       } finally {
+        countSpy.mockRestore();
         await adapter.deleteTable(fullTable);
       }
     });
 
-    it('restores every transaction table when logical record count publication fails', async () => {
-      const fullTable = 'test_full_table_transaction_count_publication_failure';
-      const fieldTable = 'test_field_table_transaction_count_publication_failure';
+    it('commits a full-table logical count without a post-commit metadata callback', async () => {
+      const fullTable = 'test_full_table_transaction_atomic_count';
       const originalData = [
         { id: 1, secret: 'alpha' },
         { id: 2, secret: 'beta' },
       ];
-      const originalFieldData = [{ id: 'field-before', secret: 'field-alpha' }];
+      const countSpy = jest
+        .spyOn(FileSystemStorageAdapter.prototype, 'setLogicalRecordCount')
+        .mockRejectedValue(new Error('unexpected post-commit metadata callback'));
 
       try {
         await adapter.createTable(fullTable, { encrypted: true, encryptFullTable: true });
-        await adapter.createTable(fieldTable, { encrypted: true, encryptedFields: ['secret'] });
         await adapter.overwrite(fullTable, originalData);
-        await adapter.overwrite(fieldTable, originalFieldData);
 
         await adapter.beginTransaction();
-        await adapter.insert(fieldTable, { id: 'field-pending', secret: 'field-beta' });
         await adapter.insert(fullTable, { id: 3, secret: 'gamma' });
+        await expect(adapter.commit()).resolves.toBeUndefined();
 
-        const restoreLogicalRecordCountPublication = failFirstLogicalRecordCountPublication(
-          'injected transaction logical count publication failure'
-        );
-
-        try {
-          await expect(adapter.commit()).rejects.toBeDefined();
-        } finally {
-          restoreLogicalRecordCountPublication();
-        }
-
+        expect(countSpy).not.toHaveBeenCalled();
         expect(storage.isInTransaction()).toBe(false);
-        expect(storage.getTableMeta(fullTable)?.count).toBe(2);
-        await expect(adapter.read(fullTable, { bypassCache: true })).resolves.toEqual(originalData);
-        await expect(adapter.read(fieldTable, { bypassCache: true })).resolves.toEqual(originalFieldData);
+        expect(storage.getTableMeta(fullTable)?.count).toBe(3);
+        await expect(adapter.read(fullTable, { bypassCache: true })).resolves.toEqual([
+          ...originalData,
+          { id: 3, secret: 'gamma' },
+        ]);
       } finally {
+        countSpy.mockRestore();
         if (storage.isInTransaction()) {
           await adapter.rollback();
         }
         await adapter.deleteTable(fullTable);
-        await adapter.deleteTable(fieldTable);
       }
     });
   });
 
   describe('cache invalidation', () => {
-    it('does not retain uncommitted plaintext in query caches after rollback', async () => {
+    it('does not expose uncommitted plaintext after rollback', async () => {
       const committed = [{ id: 'committed', name: 'persisted' }];
       const uncommitted = [{ id: 'uncommitted', name: 'transient' }];
-      const cache = adapter as unknown as {
-        cachedData: Map<string, unknown>;
-        queryIndexes: Map<string, unknown>;
-      };
 
       await adapter.overwrite(tableName, committed);
       await adapter.beginTransaction();
       await adapter.overwrite(tableName, uncommitted);
       await expect(adapter.read(tableName)).resolves.toEqual(uncommitted);
       await expect(adapter.findOne(tableName, { id: 'uncommitted' })).resolves.toEqual(uncommitted[0]);
-      expect(cache.cachedData.has(tableName)).toBe(true);
-      expect(cache.queryIndexes.has(tableName)).toBe(true);
 
       await adapter.rollback();
 
-      expect(cache.cachedData.has(tableName)).toBe(false);
-      expect(cache.queryIndexes.has(tableName)).toBe(false);
       await expect(adapter.findOne(tableName, { id: 'uncommitted' })).resolves.toBeNull();
       await expect(adapter.read(tableName, { bypassCache: true })).resolves.toEqual(committed);
     });
 
-    it('does not serve cached plaintext after resetting the master key', async () => {
+    it('does not serve cached full-table plaintext after resetting the master key', async () => {
       const resetTable = 'test_master_key_reset_cache';
       const cache = adapter as unknown as {
-        cachedData: Map<string, unknown>;
-        queryIndexes: Map<string, unknown>;
+        fullTableCache: Map<string, unknown>;
       };
 
       try {
-        await adapter.createTable(resetTable, { encrypted: true, encryptedFields: ['secret'] });
+        await adapter.createTable(resetTable, { encrypted: true, encryptFullTable: true });
         await adapter.overwrite(resetTable, [{ id: 'old', secret: 'cached-before-reset' }]);
         await expect(adapter.read(resetTable)).resolves.toEqual([{ id: 'old', secret: 'cached-before-reset' }]);
         await expect(adapter.findOne(resetTable, { id: 'old' })).resolves.toEqual({
           id: 'old',
           secret: 'cached-before-reset',
         });
-        expect(cache.cachedData.has(resetTable)).toBe(true);
-        expect(cache.queryIndexes.has(resetTable)).toBe(true);
+        expect(cache.fullTableCache.size).toBe(1);
 
         await resetMasterKey();
 
         await expect(adapter.findOne(resetTable, { id: 'old' })).rejects.toMatchObject({ code: 'TABLE_READ_FAILED' });
-        expect(cache.cachedData.has(resetTable)).toBe(false);
-        expect(cache.queryIndexes.has(resetTable)).toBe(false);
+        expect(cache.fullTableCache.size).toBe(0);
       } finally {
         await deleteTableIfPresent(resetTable);
+      }
+    });
+
+    it('does not reuse field plaintext after another adapter overwrites the table', async () => {
+      const crossInstanceTable = 'test_field_cache_cross_instance_overwrite';
+      const secondAdapter = new EncryptedStorageAdapter();
+
+      try {
+        await adapter.createTable(crossInstanceTable, { encrypted: true, encryptedFields: ['secret'] });
+        await adapter.overwrite(crossInstanceTable, [
+          { id: 'old-1', secret: 'old-alpha' },
+          { id: 'old-2', secret: 'old-beta' },
+        ]);
+        await expect(adapter.count(crossInstanceTable)).resolves.toBe(2);
+        await expect(adapter.findOne(crossInstanceTable, { secret: 'old-alpha' })).resolves.toEqual({
+          id: 'old-1',
+          secret: 'old-alpha',
+        });
+
+        await secondAdapter.overwrite(crossInstanceTable, [{ id: 'new', secret: 'replacement' }]);
+
+        await expect(adapter.count(crossInstanceTable)).resolves.toBe(1);
+        await expect(adapter.findOne(crossInstanceTable, { secret: 'old-alpha' })).resolves.toBeNull();
+        await expect(adapter.findOne(crossInstanceTable, { secret: 'replacement' })).resolves.toEqual({
+          id: 'new',
+          secret: 'replacement',
+        });
+      } finally {
+        await deleteTableIfPresent(crossInstanceTable);
+      }
+    });
+
+    it('does not reuse field plaintext after another adapter deletes a record', async () => {
+      const crossInstanceTable = 'test_field_cache_cross_instance_delete';
+      const secondAdapter = new EncryptedStorageAdapter();
+
+      try {
+        await adapter.createTable(crossInstanceTable, { encrypted: true, encryptedFields: ['secret'] });
+        await adapter.overwrite(crossInstanceTable, [
+          { id: 'remove', secret: 'remove-me' },
+          { id: 'keep', secret: 'keep-me' },
+        ]);
+        await expect(adapter.count(crossInstanceTable)).resolves.toBe(2);
+        await expect(adapter.findOne(crossInstanceTable, { secret: 'remove-me' })).resolves.toEqual({
+          id: 'remove',
+          secret: 'remove-me',
+        });
+
+        await expect(secondAdapter.delete(crossInstanceTable, { id: 'remove' })).resolves.toBe(1);
+
+        await expect(adapter.count(crossInstanceTable)).resolves.toBe(1);
+        await expect(adapter.findOne(crossInstanceTable, { secret: 'remove-me' })).resolves.toBeNull();
+        await expect(adapter.findOne(crossInstanceTable, { secret: 'keep-me' })).resolves.toEqual({
+          id: 'keep',
+          secret: 'keep-me',
+        });
+      } finally {
+        await deleteTableIfPresent(crossInstanceTable);
       }
     });
   });
@@ -560,7 +1039,7 @@ describe('EncryptedStorageAdapter', () => {
     it('retries a strict key read that overlaps a master-key reset', async () => {
       const authAdapter = new EncryptedStorageAdapter({ requireAuthOnAccess: true });
       const secureStore = getSecureStoreMock();
-      const constants = require('expo-constants');
+      const constants = require('expo-constants') as unknown as ExpoConstantsMock;
       const originalGetItemAsync = secureStore.getItemAsync;
       const originalDeleteItemAsync = secureStore.deleteItemAsync;
       const originalAppOwnership = constants.appOwnership;
@@ -691,6 +1170,12 @@ describe('EncryptedStorageAdapter', () => {
           requireAuthOnAccess: true,
         });
         await expect(normalAdapter.deleteTable(strictTable)).rejects.toMatchObject({
+          code: 'PERMISSION_DENIED',
+        });
+        await expect(normalAdapter.hasTable(strictTable)).rejects.toMatchObject({
+          code: 'PERMISSION_DENIED',
+        });
+        await expect(normalAdapter.listTables()).rejects.toMatchObject({
           code: 'PERMISSION_DENIED',
         });
       } finally {

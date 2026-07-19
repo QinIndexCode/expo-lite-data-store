@@ -9,10 +9,22 @@ type RuntimeLogger = {
   warn: (message: string, ...args: unknown[]) => void;
 };
 
+type ConfigManagerModule = Pick<typeof import('../../core/config/ConfigManager'), 'configManager'>;
+type CryptoModule = Pick<typeof import('../../utils/crypto'), 'encrypt'>;
+type CryptoProviderModule = Pick<typeof import('../../utils/cryptoProvider'), 'randomBytes' | '__resetDevWarnForTest'>;
+
 const getRuntimeLogger = (): RuntimeLogger => {
   const loggerModule = require('../../utils/logger') as RuntimeLogger & { default?: RuntimeLogger };
   return loggerModule.default ?? loggerModule;
 };
+
+const getConfigManagerModule = (): ConfigManagerModule =>
+  require('../../core/config/ConfigManager') as ConfigManagerModule;
+
+const getCryptoModule = (): CryptoModule => require('../../utils/crypto') as CryptoModule;
+
+const getCryptoProviderModule = (): CryptoProviderModule =>
+  require('../../utils/cryptoProvider') as CryptoProviderModule;
 
 describe('cryptoProvider dev warning in Expo Go', () => {
   beforeEach(() => {
@@ -26,7 +38,7 @@ describe('cryptoProvider dev warning in Expo Go', () => {
     const warningSpy = jest.spyOn(getRuntimeLogger(), 'warn').mockImplementation(() => undefined);
 
     try {
-      const { randomBytes, __resetDevWarnForTest } = require('../../utils/cryptoProvider');
+      const { randomBytes, __resetDevWarnForTest } = getCryptoProviderModule();
       __resetDevWarnForTest();
       randomBytes(8);
       randomBytes(8);
@@ -65,7 +77,7 @@ describe('crypto iterations in Expo Go', () => {
       hashBytes: hashBytesMock,
     }));
 
-    const { configManager } = require('../../core/config/ConfigManager');
+    const { configManager } = getConfigManagerModule();
     const warningSpy = jest.spyOn(getRuntimeLogger(), 'warn').mockImplementation(() => undefined);
 
     try {
@@ -73,7 +85,7 @@ describe('crypto iterations in Expo Go', () => {
         encryption: { keyIterations: 120000, algorithm: 'AES-CTR' },
       });
 
-      const { encrypt } = require('../../utils/crypto');
+      const { encrypt } = getCryptoModule();
       await encrypt('test', 'master-key');
 
       expect(pbkdf2Mock).toHaveBeenCalled();
@@ -102,14 +114,14 @@ describe('crypto iterations in Expo Go', () => {
       hashBytes: hashBytesMock,
     }));
 
-    const { configManager } = require('../../core/config/ConfigManager');
+    const { configManager } = getConfigManagerModule();
 
     try {
       configManager.updateConfig({
         encryption: { keyIterations: 120000, algorithm: 'AES-GCM' },
       });
 
-      const { encrypt } = require('../../utils/crypto');
+      const { encrypt } = getCryptoModule();
       await encrypt('test', 'master-key');
 
       expect(pbkdf2Mock).toHaveBeenCalled();

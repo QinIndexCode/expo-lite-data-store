@@ -191,7 +191,7 @@ type FilterCondition<T extends object = StorageRecord> =
 
 尽管内部查询引擎支持函数式过滤，公开 `findOne()` 和 `findMany()` 的类型文档仍以对象式 `where` 条件为主。若你希望保持稳定的公共兼容性，请优先使用对象条件。
 
-记录可以包含 `id` 或 `_id`，但这不是强制要求。只要调用提供了 `where` 条件，更新、删除、批量操作和事务路径都会按实际命中的行对象应用变更，而不是在缺少标识符时臆测身份。
+记录可以包含 `id` 或 `_id`，但这不是强制要求。只要调用提供了 `where` 条件，更新、删除、批量操作和事务路径都会按实际命中的行对象应用变更，而不是在缺少标识符时臆测身份。内存索引优先使用字符串或有限数值形式的 `id`，仅在 `id` 不可用或不稳定时回退到 `_id`。若索引覆盖的任一行两者都没有，该索引会被视为不适合查询加速，读取会回退到完整过滤。
 
 ## 初始化
 
@@ -241,6 +241,12 @@ await createTable('users', {
 - 可同时声明字段级或整表级加密选项；
 - 建表完成后会立即持久化表元数据。
 
+即使省略 `encrypted: true`，非空 `encryptedFields` 也会让 `createTable()` 选择加密 facade。加密写入可以隐式创建此前未知的表；在事务中，解析后的字段列表会传入 commit，并持久化所选策略。对既有加密表，`encrypted`、`encryptFullTable`、`encryptedFields` 和 `requireAuthOnAccess` 是策略输入，而不是原地修改命令。冲突请求会以 `MIGRATION_FAILED` 失败，必须由应用控制迁移；未按严格访问创建的适配器请求严格访问时会以 `PERMISSION_DENIED` 失败，而不会替换密钥。
+
+显式创建字段级加密表但省略 `encryptedFields` 时，若建表时配置了非空字段列表，会先去重再快照到表元数据。若当时的配置为空，或调用方显式传入 `encryptedFields: []`，新表会用 `encryptAllFields: true` 与 `encryptedFields: []` 的精确组合持久化动态全字段策略，之后出现的新记录字段也会被加密。早期 v3 元数据没有内部全字段 marker；legacy 空列表或字段缺失仍沿用历史的全局配置回退，避免把混合记录中的明文字符串重新解释为密文。若要改变 legacy 表的行为，必须先显式迁移。
+
+整表加密在物理层只存一条 envelope，而元数据记录逻辑行数。正常写入和事务写入都会把 envelope、逻辑计数与 storage generation 一起发布；事务回滚也会随物理快照恢复已捕获的逻辑计数，而不是再执行第二次元数据修补。可选的整表解密缓存只有在绑定当前精确 ciphertext 时才有效，timeout 为 0 时禁用。
+
 ### `deleteTable(tableName, options?)`
 
 ```ts
@@ -249,9 +255,11 @@ await deleteTable('users');
 
 行为说明：
 
-- 删除单文件表或 chunk 目录；
-- 清理该表对应的索引元数据；
-- 删除表级元数据。
+- 先提交表级元数据删除，再清理物理工件；
+- 若元数据提交失败，则恢复原元数据并保持物理数据不变；
+- 提交成功后清理内存索引、单文件、chunk 目录、恢复日志和 overwrite 备份；
+- 以持久化元数据缺失作为权威删除状态，残留文件不能让表复活；
+- 若物理清理失败，表仍保持逻辑不存在，后续 `deleteTable()` 可重试；同名建表会先清理全部孤立工件。
 
 ### `hasTable(tableName, options?)`
 
@@ -302,9 +310,15 @@ const result = await verifyCountTable('users');
 await migrateToChunked('audit-log');
 ```
 
-把现有表迁移为 chunked 存储模式。适合在单文件表已经增长到不再适合继续维持单文件时使用。迁移会保留列、风险与加密元数据；加密记录按实际存储形态迁移，不经过解密后重写窗口。
+把现有表迁移为 chunked 存储模式。适合在单文件表已经增长到不再适合继续维持单文件时使用。迁移会保留列、风险与加密元数据；加密记录按实际存储形态迁移，不经过解密后重写窗口。运行时先发布并校验全部 chunk，再提交元数据 mode 变更。mode 变更是提交点；之后清理旧单文件失败不能回滚已提交的存储表示。
 
-chunked 写入使用临时文件发布、覆盖写日志和追加写日志。如果追加过程中已有部分新 chunk 写出但后续 chunk 失败，运行时会移除这些部分 chunk，并保持旧表内容可读。
+chunked 覆盖写使用有界 v2 日志，记录旧计数和 chunk 状态，而不保存旧行 payload。已有 chunk 会移入 `<table>.overwrite-backup/`，`.ready` 标记表示备份已完整准备。删除 overwrite 日志是提交点；若之后的备份清理失败，后续访问会先验证已提交 chunk 集合，再删除残留备份。append 使用独立日志；若追加过程中已有新 chunk 写出但后续失败，运行时会移除这些部分 chunk，并保持旧表可读。恢复会先解决待处理 append、再解决待处理 overwrite；返回数据前会校验日志封装和完整 chunk 集合。
+
+单文件发布使用绑定表名的 v2 commit marker，记录前后代 storage token、hash 与物理记录数；恢复会直接从磁盘解析持久化元数据 token。canonical v1 marker 继续兼容；临时证据必须是 v2 `committed` marker，且表名、目标 token、主文件 hash 和物理计数全部匹配，否则 fail-closed。非 marker 恢复场景中，缺失或损坏的数据主文件只能从有效数据备份恢复。
+
+元数据发布使用更严格的备份规则：只有主文件缺失时才可从有效 metadata backup 恢复；主文件存在但不可读或格式损坏时会 fail-closed，不使用可能陈旧的备份。发布与恢复都必须成功移除旧 backup 才算完成。update/delete 以表的 `createdAt` 代际为条件，create 以表名仍缺失为条件；共享 mutation epoch 会让其他 adapter 刷新元数据、存储 mode、缓存 namespace 与索引，稳定读取在代际变化时进行有界重试。
+
+文件处理器会通过跨实例共享的进程内 FIFO 队列，串行处理同一物理表路径上的操作；锁等待最多 30 秒，且该机制不提供跨进程锁。若可恢复 mutation 超过截止时间，运行时会观察底层不可取消操作直至结束，并在释放路径锁前回滚。
 
 ## 写入 API
 
@@ -441,6 +455,8 @@ findMany<T extends object = StorageRecord>(tableName, {
 }): Promise<T[]>
 ```
 
+`skip` 和 `limit` 必须是非负安全整数。`limit: 0` 返回空页；负数、小数、非有限数或超出安全整数范围的值会抛出 `RangeError`，不会被数组切片静默换算。
+
 #### 支持的查询操作符
 
 | 操作符  | 语义             | 示例                                                  |
@@ -468,6 +484,8 @@ findMany<T extends object = StorageRecord>(tableName, {
 - `slow`
 
 如果你不强制指定算法，运行时会根据数据规模和排序形态自动选择更合适的实现。
+
+所有受支持的算法在升序和降序下都会保持 `null`、`undefined` 的相对顺序，并将它们放在结果末尾。
 
 ## 更新与删除 API
 
@@ -549,6 +567,8 @@ await rollback();
 - 没有活动事务时调用 `commit()` 或 `rollback()` 会抛出 `NO_TRANSACTION_IN_PROGRESS`；
 - 事务所在表面同样由 `encrypted` 和 `requireAuthOnAccess` 决定；
 - 显式回滚只丢弃排队操作，不重写表文件；提交部分失败时会恢复已有表快照，并移除事务中新建的表；
+- commit 执行和 commit 失败后的快照恢复使用模块私有 symbol capability 进行直接写；在公开 options 中加入 `directWrite` 属性不能绕过事务暂存；
+- 活动事务期间 AutoSync 会保留脏数据且不执行存储写；事务结束后的后续定时或显式 sync 才可能刷出这些数据；
 - 事务仅在进程内协调，不提供崩溃持久化或跨进程 ACID 语义。
 
 ## 配置 API
@@ -616,9 +636,13 @@ configManager.set('monitoring.enablePerformanceTracking', true);
 
 运行时配置层不会合并每一种宿主来源。在 Expo、React Native 或测试运行时中，它会按以下顺序选择第一个可用来源：`global.__expoConfig.extra.liteStore`、`expo-constants`（`getConfig()`、`expoConfig`、`manifest` 或 `extra`）、`global.expo.extra.liteStore`，最后才回退到 `global.liteStoreConfig`。
 
+### Logger 环境变量
+
+`EXPO_LITE_DATA_STORE_LOG_LEVEL` 支持 `silent`、`error`、`warn`、`info`、`debug`，非测试环境默认 `warn`。测试默认 `silent`；仅在诊断测试时设置 `EXPO_LITE_DATA_STORE_TEST_LOGS=1` 开启 `debug` 输出。这两个变量控制内部 logger，不属于 `configManager` 配置项。
+
 ### `app.json` 示例
 
-`autoSync.enabled` 默认是 `false`。下面的示例表示显式开启后台脏缓存同步。`autoSync.batchSize` 限制一次同步中每张表处理的脏缓存条目数；它不会把一次整表覆盖拆成记录级写入。
+`autoSync.enabled` 默认是 `false`。下面的示例表示显式开启后台脏缓存同步。`autoSync.batchSize` 限制一次同步中每张表处理的脏缓存条目数；它不会把一次整表覆盖拆成记录级写入。活动事务期间触发的 sync 会保留脏数据，留给后续定时或显式 sync 处理。
 
 ```json
 {
@@ -736,8 +760,9 @@ import {
 
 - 默认 `encryption.algorithm` 为 `auto`；当前运行时会在调用方未显式指定 `AES-CTR` 时，把新写入走到 `AES-GCM` 路径；
 - `AES-CTR` 仍保留用于显式配置或旧数据兼容；
+- `decryptBulk()` 会逐条识别 legacy CTR 与当前 GCM payload，按 provider 批量解密并按输入顺序返回，支持同批混合格式；
 - `requireAuthOnAccess: true` 采用严格语义，当运行时无法真正强制逐次访问认证时，会抛出 `AUTH_ON_ACCESS_UNSUPPORTED`；
-- 严格密钥作用域绝不会从常规主密钥静默派生或替代；若试图原地把既有加密数据升级为严格认证，在应用显式迁移并验证数据前会以 `MIGRATION_FAILED` 失败；
+- 严格密钥作用域绝不会从常规主密钥静默派生或替代；若试图原地把既有加密数据升级为严格认证、切换字段级/整表级加密或修改加密字段，在应用显式迁移并验证数据前会以 `MIGRATION_FAILED` 失败；
 - Expo Go 支持常规加密存储，但不支持严格的生物识别或逐次访问认证保证。
 
 ## 错误与失败语义
@@ -778,7 +803,7 @@ try {
 | `TABLE_NAME_INVALID`         | 表名为空或不合法                                                        |
 | `TABLE_COLUMN_INVALID`       | 列定义使用了不支持的类型                                                |
 | `QUERY_FAILED`               | 查询引擎执行条件失败                                                    |
-| `MIGRATION_FAILED`           | 表迁移失败，或严格认证需要显式迁移密钥与数据                            |
+| `MIGRATION_FAILED`           | 表迁移失败，或既有加密/严格认证策略需要显式迁移密钥与数据               |
 | `TRANSACTION_IN_PROGRESS`    | 当前表面已经存在一个活动事务                                            |
 | `NO_TRANSACTION_IN_PROGRESS` | 没有活动事务却调用了 `commit()` 或 `rollback()`                         |
 | `LOCK_TIMEOUT`               | 并发写锁获取超时                                                        |

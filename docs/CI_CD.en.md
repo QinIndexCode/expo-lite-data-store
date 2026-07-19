@@ -14,6 +14,8 @@ This runbook is for maintainers who need to validate a change, diagnose GitHub A
 
 Pull requests never receive the npm publishing credential and cannot trigger package publication.
 
+An ordinary push to `main` can trigger validation or maintenance workflows such as CI, CodeQL, Scorecard, and README-driven wiki sync, but it never triggers `Release package` or npm publication. Publication is possible only after pushing a version tag that matches the release workflow and passes every release guard.
+
 ## Local Gate Before Push
 
 For normal changes, run:

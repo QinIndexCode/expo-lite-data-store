@@ -6,6 +6,9 @@ labels: bug
 assignees: ''
 ---
 
+> [!IMPORTANT]
+> Do not report suspected security vulnerabilities in a public issue. Follow the [private disclosure process](https://github.com/QinIndexCode/expo-lite-data-store/blob/main/SECURITY.en.md) instead.
+
 ## Summary
 
 Describe the defect clearly and concisely.

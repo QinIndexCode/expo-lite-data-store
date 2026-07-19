@@ -191,7 +191,7 @@ type FilterCondition<T extends object = StorageRecord> =
 
 Although the internal query engine supports function filters, the typed public `findOne()` and `findMany()` APIs are documented around object-based `where` conditions. Use object conditions for stable public compatibility.
 
-Records may include `id` or `_id`, but they are not required. When a `where` condition is supplied, update, delete, bulk, and transaction paths apply changes to the matched row objects instead of guessing identity from missing identifiers.
+Records may include `id` or `_id`, but they are not required. When a `where` condition is supplied, update, delete, bulk, and transaction paths apply changes to the matched row objects instead of guessing identity from missing identifiers. In-memory indexes use a string or finite-number `id` first and fall back to `_id` only when `id` is unavailable or unstable. If any row covered by an index has neither form, that index is marked unsuitable for query acceleration and reads fall back to full filtering.
 
 ## Initialization
 
@@ -241,6 +241,12 @@ Behavior:
 - can apply field-level or full-table encryption options;
 - persists table metadata immediately after creation.
 
+A non-empty `encryptedFields` list makes `createTable()` select the encrypted facade even when `encrypted: true` is omitted. An encrypted write can implicitly create a previously unknown table; inside a transaction, its resolved field list is carried into commit, and the selected policy is persisted. For an existing encrypted table, `encrypted`, `encryptFullTable`, `encryptedFields`, and `requireAuthOnAccess` are policy inputs, not in-place mutation commands. A conflicting request fails with `MIGRATION_FAILED` and must be handled by an application-controlled migration; a non-strict adapter that requests strict access fails with `PERMISSION_DENIED` rather than substituting a key.
+
+When explicit field-level table creation omits `encryptedFields`, a non-empty creation-time configured list is deduplicated and snapshotted into table metadata. If that configured list is empty, or the caller explicitly passes `encryptedFields: []`, a newly created table persists the exact pair `encryptAllFields: true` and `encryptedFields: []` as its dynamic all-fields policy, so fields introduced by later record shapes are also encrypted. Metadata written by earlier v3 releases has no internal all-fields marker; an empty or missing legacy list keeps the historical global-configuration fallback so mixed ciphertext/plaintext records are not reinterpreted. Migrate a legacy table explicitly before changing that behavior.
+
+Full-table encryption stores one physical envelope while metadata tracks the logical row count. The envelope, logical count, and storage generation are published together for normal and transactional writes; a transaction rollback restores the captured logical count with the physical snapshot rather than repairing it in a second metadata step. The optional decrypted full-table cache is valid only for the exact source ciphertext and is disabled when its timeout is zero.
+
 ### `deleteTable(tableName, options?)`
 
 ```ts
@@ -249,9 +255,11 @@ await deleteTable('users');
 
 Behavior:
 
-- removes the table file or chunk directory;
-- clears index metadata associated with the table;
-- removes table metadata.
+- commits removal of table metadata before physical cleanup;
+- restores the original metadata and leaves physical data untouched if that commit fails;
+- clears in-memory indexes and removes the table file, chunk directory, recovery journals, and overwrite backup after the commit;
+- treats durable metadata absence as authoritative, so leftover files cannot revive a deleted table;
+- keeps the table logically absent if physical cleanup fails and allows a later `deleteTable()` call to retry; same-name creation purges all orphaned table artifacts first.
 
 ### `hasTable(tableName, options?)`
 
@@ -269,7 +277,11 @@ const tables = await listTables();
 
 Returns every known table for the selected surface.
 
-If any table uses `requireAuthOnAccess: true`, both `listTables()` and `listTables({ encrypted: true })` fail with `PERMISSION_DENIED` to avoid exposing strict-table metadata. Call `listTables({ encrypted: true, requireAuthOnAccess: true })` instead.
+If any table uses `requireAuthOnAccess: true`, both `listTables()` and `listTables({ encrypted: true })` fail with `PERMISSION_DENIED` to avoid exposing strict-table metadata. Only an authorized caller should retry:
+
+```ts
+const tables = await listTables({ encrypted: true, requireAuthOnAccess: true });
+```
 
 ### `countTable(tableName, options?)`
 
@@ -298,9 +310,15 @@ Use this only for diagnosis or maintenance:
 await migrateToChunked('audit-log');
 ```
 
-Moves an existing table into chunked storage mode. Use this when a table has outgrown practical single-file behavior. The migration keeps column, risk, and encryption metadata; encrypted rows are moved in their stored form instead of passing through a decrypted rewrite window.
+Moves an existing table into chunked storage mode. Use this when a table has outgrown practical single-file behavior. The migration keeps column, risk, and encryption metadata; encrypted rows are moved in their stored form instead of passing through a decrypted rewrite window. It publishes and verifies all chunks before committing the metadata mode change. That mode change is the commit point; obsolete single-file cleanup after it cannot roll the committed representation back.
 
-Chunked writes use temp-file publication, overwrite journals, and append journals. If an append fails after one or more new chunks have been written, the runtime removes those partial chunks and leaves the previous table contents readable.
+Chunked overwrites use a bounded v2 journal containing previous count/chunk state rather than old row payloads. Existing chunks move to `<table>.overwrite-backup/`; a `.ready` marker identifies a fully prepared backup. Removing the overwrite journal is the commit point. If backup cleanup then fails, a later access verifies the committed chunk set before deleting the leftover backup. Appends use a separate journal; if an append fails after new chunks were written, the runtime removes those partial chunks and leaves the previous table readable. Recovery resolves a pending append before a pending overwrite, and validates journal envelopes and complete chunk sets before returning data.
+
+Single-file publication uses a table-bound v2 commit marker containing previous/target storage tokens, hashes, and physical counts. Recovery resolves the durable metadata token directly from disk. Canonical v1 markers remain compatible; temporary evidence must be a v2 `committed` marker whose table name, target token, primary hash, and physical count all match, or recovery fails closed. Outside marker recovery, a missing or damaged data primary can be restored only from a valid data backup.
+
+Metadata publication has a stricter backup rule: only a missing primary may be restored from a valid metadata backup. An existing but unreadable or malformed primary fails closed instead of using a potentially stale backup, and publication/recovery succeeds only after the stale backup is removed. Updates/deletes are conditional on the table's `createdAt` generation, while creation is conditional on the name still being absent. A shared mutation epoch makes other adapters refresh metadata, representation mode, cache namespaces, and indexes; bounded stable reads retry if the generation changes.
+
+File handlers serialize operations for the same physical table path through an in-process FIFO queue shared across handler instances. Acquisition waits at most 30 seconds, and this mechanism does not provide cross-process locking. A recoverable mutation that crosses its deadline is observed until the underlying non-cancellable operation settles, then rolled back before the path lock is released.
 
 ## Write API
 
@@ -437,6 +455,8 @@ findMany<T extends object = StorageRecord>(tableName, {
 }): Promise<T[]>
 ```
 
+`skip` and `limit` must be non-negative safe integers. `limit: 0` returns an empty page. Negative, fractional, non-finite, and unsafe values throw a `RangeError` rather than being coerced by array slicing.
+
 #### Supported query operators
 
 | Operator | Semantics                        | Example                                               |
@@ -464,6 +484,8 @@ findMany<T extends object = StorageRecord>(tableName, {
 - `slow`
 
 If you do not force an algorithm, the runtime may choose a more suitable one based on dataset size and sort shape.
+
+Every supported algorithm keeps `null` and `undefined` values stable at the end in both ascending and descending order.
 
 ## Update and Delete API
 
@@ -545,6 +567,8 @@ Discards the active transaction.
 - Calling `commit()` or `rollback()` with no active transaction raises `NO_TRANSACTION_IN_PROGRESS`.
 - The surface is selected by the same `encrypted` and `requireAuthOnAccess` flags used by normal CRUD calls.
 - Explicit rollback discards queued operations without rewriting table files. A partially failed commit restores existing table snapshots and removes tables created by that transaction.
+- Commit execution and failed-commit snapshot restoration use a module-private symbol capability for direct writes. Adding a public `directWrite` property to options cannot bypass transaction staging.
+- AutoSync retains dirty entries and performs no storage write while a transaction is active. A later scheduled or explicit sync may flush them after the transaction settles.
 - Transactions are in-process and are not crash-durable or cross-process ACID transactions.
 
 ## Configuration API
@@ -612,9 +636,13 @@ Current precedence from lowest to highest:
 
 The runtime configuration layer is not a merge of every host source. In an Expo, React Native, or test runtime, the loader uses the first available source in this order: `global.__expoConfig.extra.liteStore`, `expo-constants` (`getConfig()`, `expoConfig`, `manifest`, or `extra`), `global.expo.extra.liteStore`, then `global.liteStoreConfig` as a fallback.
 
+### Logger environment controls
+
+`EXPO_LITE_DATA_STORE_LOG_LEVEL` accepts `silent`, `error`, `warn`, `info`, or `debug`. Non-test runtimes default to `warn`. Tests default to `silent`; set `EXPO_LITE_DATA_STORE_TEST_LOGS=1` to enable `debug` output while diagnosing a test. These variables control the internal logger and are not `configManager` keys.
+
 ### `app.json` example
 
-`autoSync.enabled` is `false` by default. The following example opts into background dirty-cache syncing explicitly. `autoSync.batchSize` limits the number of dirty cache entries processed for each table in one sync run; it does not split a single table overwrite into record-level writes.
+`autoSync.enabled` is `false` by default. The following example opts into background dirty-cache syncing explicitly. `autoSync.batchSize` limits the number of dirty cache entries processed for each table in one sync run; it does not split a single table overwrite into record-level writes. Sync attempts made during an active transaction retain their dirty entries for a later scheduled or explicit sync.
 
 ```json
 {
@@ -732,8 +760,9 @@ Current helper set:
 
 - the default `encryption.algorithm` is `auto`, and current runtime behavior routes new writes through the `AES-GCM` path unless the caller explicitly selects `AES-CTR`;
 - `AES-CTR` exists for explicit configuration and legacy compatibility;
+- `decryptBulk()` detects legacy CTR and current GCM payloads per item, decrypts each provider group in bulk, and returns results in the original input order, including mixed-format batches;
 - `requireAuthOnAccess: true` is strict and throws `AUTH_ON_ACCESS_UNSUPPORTED` if the runtime cannot truly enforce per-access authentication;
-- a strict key scope is never silently derived from or substituted for a regular master key; attempting an in-place strict upgrade of existing encrypted data fails with `MIGRATION_FAILED` until the application migrates and verifies the data explicitly;
+- a strict key scope is never silently derived from or substituted for a regular master key; attempting an in-place strict upgrade, switching field-level/full-table encryption, or changing encrypted fields for existing encrypted data fails with `MIGRATION_FAILED` until the application migrates and verifies the data explicitly;
 - Expo Go supports regular encrypted storage but not strict biometric or per-access authentication guarantees.
 
 ## Errors and Failure Semantics
@@ -765,21 +794,21 @@ try {
 
 ### Common `StorageErrorCode` values
 
-| Code                         | Meaning                                                                                                 |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `EXPO_MODULE_MISSING`        | Required Expo runtime package is missing                                                                |
-| `AUTH_ON_ACCESS_UNSUPPORTED` | Strict per-access authentication cannot be enforced in the current runtime                              |
-| `PERMISSION_DENIED`          | A request selected a weaker storage surface than the table's encryption or strict-authentication policy |
-| `TABLE_NOT_FOUND`            | The requested table does not exist                                                                      |
-| `TABLE_NAME_INVALID`         | The table name is empty or invalid                                                                      |
-| `TABLE_COLUMN_INVALID`       | A declared column uses an unsupported type                                                              |
-| `QUERY_FAILED`               | The query engine failed to execute the condition                                                        |
-| `MIGRATION_FAILED`           | Table migration failed, or strict authentication requires an explicit key/data migration                |
-| `TRANSACTION_IN_PROGRESS`    | A transaction already exists on the current surface                                                     |
-| `NO_TRANSACTION_IN_PROGRESS` | `commit()` or `rollback()` was called with no active transaction                                        |
-| `LOCK_TIMEOUT`               | Concurrent write lock acquisition exceeded the timeout budget                                           |
-| `TIMEOUT`                    | An operation exceeded a configured timeout                                                              |
-| `CORRUPTED_DATA`             | On-disk data could not be parsed safely                                                                 |
+| Code                         | Meaning                                                                                                                |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `EXPO_MODULE_MISSING`        | Required Expo runtime package is missing                                                                               |
+| `AUTH_ON_ACCESS_UNSUPPORTED` | Strict per-access authentication cannot be enforced in the current runtime                                             |
+| `PERMISSION_DENIED`          | A request selected a weaker storage surface than the table's encryption or strict-authentication policy                |
+| `TABLE_NOT_FOUND`            | The requested table does not exist                                                                                     |
+| `TABLE_NAME_INVALID`         | The table name is empty or invalid                                                                                     |
+| `TABLE_COLUMN_INVALID`       | A declared column uses an unsupported type                                                                             |
+| `QUERY_FAILED`               | The query engine failed to execute the condition                                                                       |
+| `MIGRATION_FAILED`           | Table migration failed, or an existing encryption/strict-authentication policy requires an explicit key/data migration |
+| `TRANSACTION_IN_PROGRESS`    | A transaction already exists on the current surface                                                                    |
+| `NO_TRANSACTION_IN_PROGRESS` | `commit()` or `rollback()` was called with no active transaction                                                       |
+| `LOCK_TIMEOUT`               | Concurrent write lock acquisition exceeded the timeout budget                                                          |
+| `TIMEOUT`                    | An operation exceeded a configured timeout                                                                             |
+| `CORRUPTED_DATA`             | On-disk data could not be parsed safely                                                                                |
 
 ### `CryptoError`
 

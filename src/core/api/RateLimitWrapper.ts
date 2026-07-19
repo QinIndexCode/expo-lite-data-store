@@ -2,7 +2,7 @@ import { RATE_LIMIT } from '../constants';
 import { RateLimiter } from './RateLimiter';
 import type { RateLimitStatus } from './RateLimiter';
 
-/** Adapts API wrapper options to the shared token-bucket limiter. */
+/** Adapts API wrapper options to a token-bucket limiter for each wrapper instance. */
 export class RateLimitWrapper {
   private rateLimiter: RateLimiter;
 

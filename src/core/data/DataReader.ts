@@ -8,15 +8,18 @@ import {
   type StorageRecord,
 } from '../../types/storageTypes';
 import { ErrorHandler as StorageErrorHandler } from '../../utils/StorageErrorHandler';
-import { getFileSystem } from '../../utils/fileSystemCompat';
 import { getRootPathSync } from '../../utils/ROOTPath';
 import withTimeout from '../../utils/withTimeout';
 import { CacheManager } from '../cache/CacheManager';
 import { ChunkedFileHandler } from '../file/ChunkedFileHandler';
 import { SingleFileHandler } from '../file/SingleFileHandler';
 import { assertValidTableName } from '../../utils/tableName';
-import { IndexManager } from '../index/IndexManager';
+import { getStableIndexId, IndexManager } from '../index/IndexManager';
+import type { TableSchema } from '../meta/MetadataManager';
 import { QueryEngine } from '../query/QueryEngine';
+import { StorageError } from '../../types/storageErrorInfc';
+
+const MAX_STABLE_READ_ATTEMPTS = 3;
 
 export class DataReader {
   private indexManager: IndexManager;
@@ -32,7 +35,11 @@ export class DataReader {
   private getSingleFile(tableName: string): SingleFileHandler {
     assertValidTableName(tableName);
     const filePath = `${getRootPathSync()}${tableName}.ldb`;
-    return new SingleFileHandler(filePath);
+    return new SingleFileHandler(filePath, async () =>
+      this.metadataManager.getPersisted
+        ? await this.metadataManager.getPersisted(tableName)
+        : this.metadataManager.get(tableName)
+    );
   }
 
   private getChunkedHandler(tableName: string): ChunkedFileHandler {
@@ -40,85 +47,48 @@ export class DataReader {
     return new ChunkedFileHandler(tableName, this.metadataManager);
   }
 
-  private async recoverMissingTableMetadata(tableName: string) {
-    const rootPath = getRootPathSync();
-    const fileSystem = getFileSystem();
-    const singleFilePath = `${rootPath}${tableName}.ldb`;
-    const singleInfo = await fileSystem.getInfoAsync(singleFilePath);
+  private async getLatestTableMetadata(tableName: string): Promise<TableSchema | undefined> {
+    const cachedMetadata = this.metadataManager.get(tableName);
+    const latestMetadata = this.metadataManager.getLatest
+      ? await this.metadataManager.getLatest(tableName)
+      : cachedMetadata;
 
-    if (singleInfo.exists) {
-      const rawContent = await withTimeout(
-        fileSystem.readAsStringAsync(singleFilePath),
-        10000,
-        `recover single file metadata ${tableName}`
-      );
-      const parsed = JSON.parse(rawContent);
-      if (!parsed || !Array.isArray(parsed.data) || parsed.hash === undefined) {
-        return undefined;
-      }
-
-      const recoveredData = await withTimeout(
-        this.getSingleFile(tableName).read(),
-        10000,
-        `recover single file table ${tableName}`
-      );
-      if (parsed.data.length > 0 && recoveredData.length === 0) {
-        return undefined;
-      }
-
-      this.metadataManager.update(tableName, {
-        mode: 'single',
-        path: `${tableName}.ldb`,
-        count: recoveredData.length,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        columns: {},
-      });
-
-      return this.metadataManager.get(tableName);
+    if (latestMetadata !== cachedMetadata) {
+      this.cacheManager.invalidateNamespace(tableName);
+      this.indexManager.invalidateTableIndexes(tableName);
     }
 
-    const chunkedDirPath = `${rootPath}${tableName}/`;
-    const chunkedInfo = await fileSystem.getInfoAsync(chunkedDirPath);
-    if (!chunkedInfo.exists) {
-      return undefined;
-    }
-
-    const chunkEntries = await withTimeout(
-      fileSystem.readDirectoryAsync(chunkedDirPath),
-      10000,
-      `recover chunked metadata ${tableName}`
-    );
-    const chunkFiles = chunkEntries.filter(entry => entry.endsWith('.ldb')).sort();
-    if (chunkFiles.length === 0) {
-      return undefined;
-    }
-
-    const recoveredData = await withTimeout(
-      this.getChunkedHandler(tableName).readAll(),
-      10000,
-      `recover chunked table ${tableName}`
-    );
-    if (recoveredData.length === 0) {
-      return undefined;
-    }
-
-    this.metadataManager.update(tableName, {
-      mode: 'chunked',
-      path: `${tableName}/`,
-      count: recoveredData.length,
-      chunks: chunkFiles.length,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      columns: {},
-    });
-
-    return this.metadataManager.get(tableName);
+    return latestMetadata;
   }
 
-  /**
-   * Generate stable cache key regardless of property order
-   */
+  private async readRepresentation(tableName: string, mode: 'single' | 'chunked'): Promise<StorageRecord[]> {
+    if (mode === 'chunked') {
+      return withTimeout(this.getChunkedHandler(tableName).readAll(), 10000, `read chunked table ${tableName}`);
+    }
+
+    return withTimeout(this.getSingleFile(tableName).read(), 10000, `read single file table ${tableName}`);
+  }
+
+  private async readCurrentRepresentation(
+    tableName: string,
+    initialMode: 'single' | 'chunked'
+  ): Promise<StorageRecord[]> {
+    try {
+      return await this.readRepresentation(tableName, initialMode);
+    } catch (error) {
+      const latestMetadata = await this.getLatestTableMetadata(tableName);
+      if (!latestMetadata) {
+        return [];
+      }
+      if (latestMetadata.mode === initialMode) {
+        throw error;
+      }
+
+      return this.readRepresentation(tableName, latestMetadata.mode);
+    }
+  }
+
+  /** Rejects values that JSON cannot represent deterministically in a cache key. */
   private isCacheKeySerializable(value: unknown, seen = new WeakSet<object>()): boolean {
     if (value === undefined || value === null || typeof value === 'string' || typeof value === 'boolean') {
       return true;
@@ -141,7 +111,7 @@ export class DataReader {
       return value.every(item => item !== undefined && this.isCacheKeySerializable(item, seen));
     }
 
-    const prototype = Object.getPrototypeOf(value);
+    const prototype = Object.getPrototypeOf(value) as object | null;
     if (prototype !== Object.prototype && prototype !== null) {
       return false;
     }
@@ -165,7 +135,7 @@ export class DataReader {
       const sortKeys = (obj: unknown): unknown => {
         if (obj === null || typeof obj !== 'object') return obj;
         if (Array.isArray(obj)) return obj.map(sortKeys);
-        const sorted: Record<string, unknown> = Object.create(null);
+        const sorted = Object.create(null) as Record<string, unknown>;
         for (const key of Object.keys(obj).sort()) {
           const value = (obj as Record<string, unknown>)[key];
           if (value !== undefined) {
@@ -186,7 +156,7 @@ export class DataReader {
    * public data contract while keeping cache-owned state private.
    */
   private cloneRecords(records: StorageRecord[]): StorageRecord[] {
-    const cloned: unknown = JSON.parse(JSON.stringify(records));
+    const cloned: unknown = JSON.parse(JSON.stringify(records)) as unknown;
     if (!Array.isArray(cloned) || !cloned.every(isStorageRecord)) {
       throw StorageErrorHandler.createGeneralError('Stored records could not be cloned safely', 'FILE_CONTENT_INVALID');
     }
@@ -199,84 +169,94 @@ export class DataReader {
   ): Promise<StorageRecord[]> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
-        const tableMeta = this.metadataManager.get(tableName) ?? (await this.recoverMissingTableMetadata(tableName));
-        if (!tableMeta) {
-          return [];
-        }
-
-        const tableIsHighRisk = tableMeta.isHighRisk || false;
-        const shouldBypassCache = options?.bypassCache || tableIsHighRisk;
-        const serializedOptions = shouldBypassCache ? undefined : this.generateCacheKey(options);
-        const cacheKey = serializedOptions === undefined ? undefined : `${tableName}_${serializedOptions}`;
-
-        let data: StorageRecord[] = [];
-        let indexedIdSet: Set<string | number> | undefined;
-
-        if (cacheKey !== undefined) {
-          const cachedData = this.cacheManager.get<StorageRecord[]>(cacheKey);
-          if (cachedData) {
-            return this.cloneRecords(cachedData);
+        for (let attempt = 0; attempt < MAX_STABLE_READ_ATTEMPTS; attempt++) {
+          const tableMeta = await this.getLatestTableMetadata(tableName);
+          if (!tableMeta) {
+            return [];
           }
-        }
 
-        if (options?.filter) {
-          if (isStorageRecord(options.filter) && !('$or' in options.filter) && !('$and' in options.filter)) {
-            const filterRecord = options.filter as StorageRecord;
-            const filterKeys = Object.keys(filterRecord);
-            for (const key of filterKeys) {
-              if (this.indexManager.hasIndex(tableName, key)) {
-                const value = filterRecord[key];
-                if (typeof value !== 'string' && typeof value !== 'number') {
-                  continue;
-                }
-                const indexedIds = this.indexManager.queryIndex(tableName, key, value);
-                if (indexedIds.length > 0) {
+          const tableIsHighRisk = tableMeta.isHighRisk || false;
+          const shouldBypassCache = options?.bypassCache || tableIsHighRisk;
+          const serializedOptions = shouldBypassCache ? undefined : this.generateCacheKey(options);
+          const cacheKey =
+            serializedOptions === undefined
+              ? undefined
+              : `${tableName}_${this.cacheManager.getNamespaceVersion(tableName)}_${serializedOptions}`;
+
+          if (cacheKey !== undefined) {
+            const cachedData = this.cacheManager.get<StorageRecord[]>(cacheKey);
+            if (cachedData) {
+              const metadataAfterCacheRead = await this.getLatestTableMetadata(tableName);
+              if (metadataAfterCacheRead === tableMeta) {
+                return this.cloneRecords(cachedData);
+              }
+              continue;
+            }
+          }
+
+          let data = await this.readCurrentRepresentation(tableName, tableMeta.mode);
+          const metadataAfterPhysicalRead = await this.getLatestTableMetadata(tableName);
+          if (metadataAfterPhysicalRead !== tableMeta) {
+            continue;
+          }
+
+          let indexedIdSet: Set<string | number> | undefined;
+          if (options?.filter) {
+            if (isStorageRecord(options.filter) && !('$or' in options.filter) && !('$and' in options.filter)) {
+              const filterRecord = options.filter as StorageRecord;
+              const filterKeys = Object.keys(filterRecord);
+              for (const key of filterKeys) {
+                if (this.indexManager.hasIndex(tableName, key)) {
+                  const value = filterRecord[key];
+                  if (typeof value !== 'string' && typeof value !== 'number') {
+                    continue;
+                  }
+                  const indexedIds = this.indexManager.queryIndex(tableName, key, value);
                   indexedIdSet = new Set<string | number>(indexedIds);
+                  break;
                 }
-                break;
               }
             }
           }
-        }
 
-        if (tableMeta.mode === 'chunked') {
-          const handler = this.getChunkedHandler(tableName);
-          data = await withTimeout(handler.readAll(), 10000, `read chunked table ${tableName}`);
-        } else {
-          const handler = this.getSingleFile(tableName);
-          data = await withTimeout(handler.read(), 10000, `read single file table ${tableName}`);
-        }
-
-        if (indexedIdSet) {
-          data = data.filter(item => {
-            const id = item['id'];
-            return (typeof id === 'string' || typeof id === 'number') && indexedIdSet.has(id);
-          });
-        }
-
-        if (options?.filter) {
-          data = QueryEngine.filter(data, options.filter);
-        }
-
-        if (options?.sortBy) {
-          const sortAlgorithm = options.sortAlgorithm || configManager.getConfig().sortMethods;
-          data = QueryEngine.sort(data, options.sortBy, options.order, sortAlgorithm);
-        }
-
-        data = QueryEngine.paginate(data, options?.skip, options?.limit);
-
-        if (cacheKey !== undefined) {
-          this.cacheManager.set(cacheKey, this.cloneRecords(data));
-
-          const tableCacheKeysKey = `${tableName}_cache_keys`;
-          const tableCacheKeys = this.cacheManager.get<string[]>(tableCacheKeysKey) ?? [];
-          if (!tableCacheKeys.includes(cacheKey)) {
-            tableCacheKeys.push(cacheKey);
-            this.cacheManager.set(tableCacheKeysKey, tableCacheKeys);
+          if (indexedIdSet) {
+            data =
+              indexedIdSet.size === 0
+                ? []
+                : data.filter(item => {
+                    const id = getStableIndexId(item);
+                    return id !== undefined && indexedIdSet.has(id);
+                  });
           }
+
+          if (options?.filter) {
+            data = QueryEngine.filter(data, options.filter);
+          }
+
+          if (options?.sortBy) {
+            const sortAlgorithm = options.sortAlgorithm || configManager.getConfig().sortMethods;
+            data = QueryEngine.sort(data, options.sortBy, options.order, sortAlgorithm);
+          }
+
+          data = QueryEngine.paginate(data, options?.skip, options?.limit);
+
+          const metadataAfterQuery = await this.getLatestTableMetadata(tableName);
+          if (metadataAfterQuery !== tableMeta) {
+            continue;
+          }
+
+          if (cacheKey !== undefined) {
+            this.cacheManager.set(cacheKey, this.cloneRecords(data));
+          }
+
+          return data;
         }
 
-        return data;
+        throw new StorageError(`Table '${tableName}' changed repeatedly during read`, 'TABLE_READ_FAILED', {
+          details: 'A stable metadata generation could not be observed within the bounded retry limit.',
+          suggestion: 'Retry the read after concurrent writes have settled.',
+          tableName,
+        });
       },
       error => StorageErrorHandler.createFileError('read', `table ${tableName}`, error)
     );

@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 [README Entry](../README.md) | [简体中文](./CHANGELOG.zh-CN.md) | [API Reference](./API.en.md)
 
+## [Unreleased]
+
+### Changed
+
+- Removed unused `FileOperationManager`, `FileHandlerFactory`, `FileInfoCache`, `StorageStrategy`, and legacy `ICacheAdapter` modules, and moved storage-permission probing to adapter initialization so hot writes do not repeat filesystem checks.
+- Added bounded logger levels through `EXPO_LITE_DATA_STORE_LOG_LEVEL` (`silent|error|warn|info|debug`), with `warn` as the non-test default and silent tests unless `EXPO_LITE_DATA_STORE_TEST_LOGS=1` is set.
+
+### Fixed
+
+- Serialized same-path single-file and chunked operations through an in-process FIFO queue shared by handler instances, with a 30-second acquisition limit and cleanup for timed-out waiters.
+- Shared FIFO table locks across DataWriter instances, keyed by storage root and table. Timed-out waiters preserve the later queue chain, and operation-slot handoff continues to enforce the configured concurrency limit.
+- Serialized metadata flushes across manager instances by metadata path with a 30-second FIFO wait, reread the latest disk snapshot before merging `createdAt`-guarded updates/deletes and expected-absent upserts, advanced a shared mutation epoch for cross-adapter representation/cache/index refresh, and retained failed mutations for retry.
+- Restored metadata backups only when the primary is missing, failed closed on an existing damaged primary, and made stale-backup removal a success condition for both publication and recovery.
+- Kept recoverable single-file mutations locked through commit or rollback. A mutation that completes after its deadline is observed to settlement and rolled back before the lock is released.
+- Bound v2 single-file commit markers to table names and both generations' tokens, hashes, and physical counts; recovery now reads the durable metadata token, preserves canonical v1 compatibility, and accepts temporary evidence only when a v2 committed target matches every field.
+- Replaced row-copying chunk overwrite recovery with a bounded v2 journal and marked backup directory, made journal deletion the commit point, and verified committed data before retrying leftover backup cleanup.
+- Resolved pending append recovery before overwrite recovery, validated journals and complete chunk sets, and cleaned failed journal and temporary-file artifacts.
+- Staged touched-bucket index deltas for incremental writes and complete maps for rebuilds, validated `UNIQUE` constraints before physical writes, preferred `id` then `_id`, and disabled acceleration when stable identifier coverage was incomplete.
+- Kept `null` and `undefined` stable and last across every sort algorithm in both directions.
+- Made `deleteTable()` commit authoritative metadata absence before artifact cleanup, restore metadata on commit failure, leave post-commit cleanup retryable without reviving the table, and purge orphaned artifacts before same-name creation.
+- Made the metadata mode switch the single-to-chunked migration commit point after chunk publication/verification; obsolete single-file cleanup can no longer roll back a committed mode.
+- Protected transaction commit/restoration writes with a module-private symbol capability and deferred AutoSync writes while transactions are active without dropping dirty entries.
+- Routed non-empty `encryptedFields` through the encrypted facade, persisted the exact dynamic all-fields marker, committed full-table logical counts with physical generations, bound decrypted cache entries to exact ciphertext, carried policy into transactional implicit table creation, bound active transactions to their creating adapter, and rejected conflicting security surfaces or in-place policy changes.
+- Made bulk field decryption detect and group mixed legacy CTR/current GCM payloads per item while preserving input order.
+- Required query `skip` and `limit` values to be non-negative safe integers, and replaced cache-key scans with bounded namespace versions.
+- Treated an unreadable or malformed current `meta.ldb` as occupied during legacy-root discovery, and removed an empty bootstrap root before migration so correctness does not depend on move-over-existing behavior.
+
 ## [3.0.0] - 2026-07-18
 
 ### Breaking Changes
@@ -33,7 +60,7 @@ All notable changes to this project will be documented in this file.
 - Added chunked append recovery journals and partial-chunk cleanup so failed appends leave the previous table contents readable
 - Made encrypted tables with an empty `encryptedFields` list consistently encrypt and decrypt all record fields
 - Flushed table/write metadata immediately and preserved the actual chunk count for chunked `initialData`
-- Serialized atomic metadata publication so overlapping flushes cannot lose later table updates
+- Serialized recoverable metadata publication so overlapping flushes cannot lose later table updates
 - Committed chunk append metadata before deleting its recovery journal and rejected incomplete chunk sets on read
 - Preserved schema and encryption metadata during chunk migration without decrypting and rewriting encrypted tables
 - Removed transaction-created tables after a partially failed commit and made explicit rollback discard queued work without disk rewrites
@@ -141,7 +168,16 @@ All notable changes to this project will be documented in this file.
 - GCM encryption: ~3μs per record after initial PBKDF2 derivation
 - Overall: 30-50% improvement in encryption operations
 
-## [2.0.0-beta.4] - 2026-01-28
+## [2.0.0-beta.4] - 2026-02-06
+
+### Changed
+
+- Resolved high-severity dependency audit findings
+- Unified dependency ranges and cleaned TypeScript/ESLint configuration
+- Standardized development runtime logs in English
+- Reduced redundant test and setup code
+
+## [2.0.0-beta.3] - 2026-01-28
 
 ### Changed
 
@@ -156,9 +192,11 @@ All notable changes to this project will be documented in this file.
 
 - Test for Expo Go iteration count reduction behavior
 
-## [2.0.0-beta.3] - 2026-01-22
+## [2.0.0-beta.2] - 2026-01-22
 
-### Changed
+### 2026-01-22
+
+#### Changed
 
 - Migrated from crypto-es to @noble/ciphers and @noble/hashes
 - Simplified package management (single package.json)
@@ -166,14 +204,14 @@ All notable changes to this project will be documented in this file.
 - Optimized PBKDF2 key derivation with dynamic iteration adjustment
 - Added smart key cache with LRU cleanup strategy
 
-## [2.0.0-beta.2] - 2025-12-24
+### 2025-12-24
 
-### Fixed
+#### Fixed
 
 - Prototype pollution vulnerability in ConfigManager.ts
 - Added key name validation to prevent malicious key modification
 
-### Added
+#### Added
 
 - GitHub-standard SECURITY.md file
 - Updated architecture documentation (Chinese and English)
@@ -223,29 +261,29 @@ All notable changes to this project will be documented in this file.
 - Added yarn and pnpm installation instructions
 - Clarified installation documentation
 
-## [1.0.0] - 2025-12-07
+### 2025-12-07
 
-### Changed
+#### Changed
 
 - Improved README.md quality
 - Enhanced functionality descriptions
 - Removed test coverage directory from commits
 - Fixed API implementation errors and performance issues
 
-## [1.0.0] - 2025-12-06
+### 2025-12-06
 
-### Added
+#### Added
 
 - Wiki documentation
 - Improved architecture and system stability
 
-### Fixed
+#### Fixed
 
 - Main entry point not correctly calling some features
 
-## [1.0.0] - 2025-12-03
+### 2025-12-03
 
-### Changed
+#### Changed
 
 - Optimized encryption field handling for correct encryption/decryption on read/write
 
@@ -262,38 +300,38 @@ All notable changes to this project will be documented in this file.
 - Adjusted chunkSize to 5MB
 - Updated README.md MIT license link
 
-## [0.1.0] - 2025-11-28
+### 2025-11-28
 
-### Changed
+#### Changed
 
 - Refactored core architecture with complete storage engine
 - Updated documentation and encrypted storage adapter
 - Added API tests
 - Removed unused files
 
-## [0.1.0] - 2025-11-27
+### 2025-11-27
 
-### Changed
+#### Changed
 
 - Code modifications for improved performance and stability
 
-## [0.1.0] - 2025-11-26
+### 2025-11-26
 
-### Added
+#### Added
 
 - Cache adapter interface
 - Storage error code interface
 - Sorting tools for data sorting
 - Merge data and cache utilities
 
-### Changed
+#### Changed
 
 - Fixed encryption decorator, file system adapter, chunked file handler
 - Renamed ldb.config.js to liteStore.config.js
 
-## [0.1.0] - 2025-11-25
+### 2025-11-25
 
-### Added
+#### Added
 
 - File system adapter
 - Chunked file handler
@@ -315,23 +353,23 @@ All notable changes to this project will be documented in this file.
 - Metadata manager
 - Query engine
 
-## [0.0.1] - 2025-11-19
+### 2025-11-19
 
-### Added
+#### Added
 
 - Encrypted storage adapter (AES-CTR mode)
 
-## [0.0.1] - 2025-11-17
+### 2025-11-17
 
-### Added
+#### Added
 
 - Basic project skeleton
 - Encryption support (AES-CTR mode)
 - Basic StorageAdapter interface
 
-## [0.0.1] - 2025-11-15
+### 2025-11-15
 
-### Added
+#### Added
 
 - README.md with project information
 - Initial project commit
