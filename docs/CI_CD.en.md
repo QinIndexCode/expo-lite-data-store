@@ -14,7 +14,7 @@ This runbook is for maintainers who need to validate a change, diagnose GitHub A
 
 Pull requests never receive the npm publishing credential and cannot trigger package publication.
 
-An ordinary push to `main` can trigger validation or maintenance workflows such as CI, CodeQL, Scorecard, and README-driven wiki sync, but it never triggers `Release package` or npm publication. Publication is possible only after pushing a version tag that matches the release workflow and passes every release guard.
+An ordinary push to `main` can trigger validation or maintenance workflows such as CI, CodeQL, Scorecard, and README-driven wiki sync, but it never triggers `Release package` or npm publication. The repository's automated publication path begins only after a version tag matches the release workflow and passes every release guard. Maintainers should not publish locally; package scripts intentionally provide no local publish wrapper.
 
 ## Local Gate Before Push
 
@@ -35,6 +35,8 @@ npm pack --dry-run --ignore-scripts
 ```
 
 `prepublishOnly` includes dependency audits, type-checking, a clean distributable build, all maintained test groups, lint, and the temporary Expo consumer smoke test. The build intentionally precedes tests because package-export and built-artifact contracts inspect `dist/`. Runtime-device evidence beyond the consumer smoke is documented in [EXPO_RUNTIME_QA.en.md](./EXPO_RUNTIME_QA.en.md).
+
+For a repeatable local rerun, `npm run clean` removes ignored `dist`, `coverage`, `artifacts`, and TypeScript build-info outputs. `npm run clean:artifacts` removes the entire ignored `artifacts/` directory, so preserve any manual device evidence stored there first. The shared tracked TypeScript configuration includes `expo/types`, so clean-checkout `process.env` typing must not depend on the ignored local `expo-env.d.ts` file.
 
 ## One-Time Repository Setup
 

@@ -247,7 +247,7 @@ const expensiveElectronics = await db.findMany('products', {
 });
 ```
 
-`skip` and `limit` must be non-negative safe integers. `limit: 0` returns an empty page; negative, fractional, non-finite, or unsafe values throw a `RangeError` instead of being coerced by array slicing.
+`skip` and `limit` must be non-negative safe integers. `limit: 0` returns an empty page; negative, fractional, non-finite, or unsafe values throw a `RangeError` instead of being coerced by array slicing. The input-validation error reaches the caller as a `RangeError`; it is not wrapped as a `StorageError`.
 
 All supported sorting algorithms keep `null` and `undefined` values stable at the end for both ascending and descending order.
 
@@ -336,6 +336,9 @@ Important transaction behavior:
 - only one transaction can be active on a given adapter surface at a time;
 - calling `beginTransaction()` twice without finishing the first transaction raises `TRANSACTION_IN_PROGRESS`;
 - calling `commit()` or `rollback()` without an active transaction raises `NO_TRANSACTION_IN_PROGRESS`;
+- the transaction owner has read-your-writes visibility through `read()`, `countTable()`, `findOne()`, and `findMany()`; filtering, sorting, and pagination run against the staged view, and `remove()` returns the number of rows matched in that view;
+- queued serializable record payloads, object-based query values, and transaction query results are isolated from later caller-side mutation;
+- on the active transaction owner's matching storage surface, public schema operations `createTable()`, `deleteTable()`, and `migrateToChunked()` are rejected with `TRANSACTION_OPERATION_NOT_SUPPORTED` because they persist metadata or files immediately; a different adapter or security surface is rejected by the existing transaction guard first;
 - an explicit rollback discards queued writes without rewriting table files; if a commit fails after partially applying changes, existing tables are restored and tables created by that transaction are removed;
 - commit execution and failed-commit snapshot restoration use a module-private symbol capability for direct writes; a public `directWrite` property cannot bypass transaction staging;
 - AutoSync leaves dirty cache entries queued while a transaction is active and writes them only on a later scheduled or explicit sync after the transaction settles;

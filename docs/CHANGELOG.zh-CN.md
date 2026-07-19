@@ -10,9 +10,14 @@
 
 - 删除未使用的 `FileOperationManager`、`FileHandlerFactory`、`FileInfoCache`、`StorageStrategy` 与 legacy `ICacheAdapter` 模块，并把存储权限探测移到 adapter 初始化阶段，避免写入热路径重复执行文件系统检查。
 - 通过 `EXPO_LITE_DATA_STORE_LOG_LEVEL` 增加有界 logger 级别（`silent|error|warn|info|debug`）；非测试默认 `warn`，测试默认静默，除非设置 `EXPO_LITE_DATA_STORE_TEST_LOGS=1`。
+- 在受版本控制的 TypeScript `types` 配置中加入 `expo/types`，并停止依赖被忽略的本地 `expo-env.d.ts`，使干净 checkout 中的 `process.env` 类型可复现。
+- 删除冗余的本地 `publish:safe` 与 `publish:force` 包装命令，避免 package scripts 宣传绕过受支持发布工作流中 tag、`main` 祖先关系和 provenance 校验的路径。
 
 ### 修复
 
+- 让事务内的 `findOne()`、`findMany()` 读取暂存视图，让事务内 `remove()` 返回该视图的实际命中数，并隔离排队的可序列化记录输入、对象形式的查询值和事务查询结果，避免受调用方后续对象修改影响；同时在匹配的活动事务表面上以 `TRANSACTION_OPERATION_NOT_SUPPORTED` 拒绝公开的 `createTable()`、`deleteTable()` 和 `migrateToChunked()` 调用。
+- 保留分页输入校验失败的原始 `RangeError`，不再包装为 `StorageError`。
+- 恢复加密 `findMany()` 未传 `sortBy` 时按 `id` 升序的确定性排序。
 - 通过文件处理器实例间共享的进程内 FIFO 队列串行处理同路径的单文件与分片操作；锁等待上限为 30 秒，超时等待者会从队列中清理。
 - DataWriter 按存储根目录和表名在 writer 实例间共享 FIFO 表锁；超时等待者不会截断后续队列链，操作槽交接仍遵守配置的并发上限。
 - 按元数据路径在管理器实例间串行 flush，FIFO 等待上限为 30 秒；合并受 `createdAt` 保护的 update/delete 与 expected-absent upsert 前重读最新磁盘快照，推进共享 mutation epoch 以刷新跨 adapter 的表示/缓存/索引，并保留失败 mutation 供重试。

@@ -10,9 +10,14 @@ All notable changes to this project will be documented in this file.
 
 - Removed unused `FileOperationManager`, `FileHandlerFactory`, `FileInfoCache`, `StorageStrategy`, and legacy `ICacheAdapter` modules, and moved storage-permission probing to adapter initialization so hot writes do not repeat filesystem checks.
 - Added bounded logger levels through `EXPO_LITE_DATA_STORE_LOG_LEVEL` (`silent|error|warn|info|debug`), with `warn` as the non-test default and silent tests unless `EXPO_LITE_DATA_STORE_TEST_LOGS=1` is set.
+- Added `expo/types` to the tracked TypeScript `types` configuration and stopped consuming the ignored local `expo-env.d.ts`, so `process.env` typing is reproducible in a clean checkout.
+- Removed the redundant local `publish:safe` and `publish:force` wrappers so package scripts no longer advertise a path that bypasses tag, `main`-ancestry, and provenance checks in the supported release workflow.
 
 ### Fixed
 
+- Made transactional `findOne()` and `findMany()` read the staged view, made transactional `remove()` report its staged matched-row count, isolated queued serializable record payloads, object-based query values, and transaction query results from later caller-side mutation, and rejected public `createTable()`, `deleteTable()`, and `migrateToChunked()` calls on the matching active transaction surface with `TRANSACTION_OPERATION_NOT_SUPPORTED`.
+- Preserved pagination input-validation failures as caller-visible `RangeError` instances instead of wrapping them as `StorageError`.
+- Restored deterministic `id` ascending ordering for encrypted `findMany()` calls that omit `sortBy`.
 - Serialized same-path single-file and chunked operations through an in-process FIFO queue shared by handler instances, with a 30-second acquisition limit and cleanup for timed-out waiters.
 - Shared FIFO table locks across DataWriter instances, keyed by storage root and table. Timed-out waiters preserve the later queue chain, and operation-slot handoff continues to enforce the configured concurrency limit.
 - Serialized metadata flushes across manager instances by metadata path with a 30-second FIFO wait, reread the latest disk snapshot before merging `createdAt`-guarded updates/deletes and expected-absent upserts, advanced a shared mutation epoch for cross-adapter representation/cache/index refresh, and retained failed mutations for retry.

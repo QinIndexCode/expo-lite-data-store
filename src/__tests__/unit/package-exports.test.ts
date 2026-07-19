@@ -18,10 +18,11 @@ describe('package exports', () => {
     });
   });
 
-  it('does not expose core implementation files through package subpaths', () => {
+  it('does not expose core implementation files or local publishing wrappers', () => {
     expect(packageJson.exports).not.toHaveProperty('./dist/js/*');
     expect(packageJson.exports).not.toHaveProperty('./dist/cjs/*');
-    expect(packageJson.scripts?.['publish:force']).not.toContain('--ignore-scripts');
+    expect(packageJson.scripts).not.toHaveProperty('publish:safe');
+    expect(packageJson.scripts).not.toHaveProperty('publish:force');
   });
 
   it('resolves the crypto provider subpath through the package export map', () => {

@@ -175,11 +175,13 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 
 #### TransactionService
 
-- In-process queued transactions with read-your-writes behavior
+- In-process queued transactions with read-your-writes behavior for `read`, `countTable`, `findOne`, and `findMany`; query filtering, sorting, and pagination run on the staged projection
 - Owner identity captured at `beginTransaction()` prevents another adapter from reading, extending, committing, or rolling back the active transaction
 - Commit execution and failed-commit snapshot restoration carry a module-private symbol capability for direct writes; public options cannot forge the bypass
 - Snapshot restoration for partially failed commits, including removal of transaction-created tables
 - Transaction data caching and computation
+- Queued serializable record payloads, object-based query values, and transaction query results are isolated from later caller-side mutation
+- Public `createTable`, `deleteTable`, and `migrateToChunked` calls on the active owner's matching storage surface are rejected with `TRANSACTION_OPERATION_NOT_SUPPORTED` because schema metadata and files persist immediately; other adapters or surfaces fail the transaction guard first
 
 #### AutoSyncService
 
@@ -233,16 +235,18 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 ### 4.3 Transaction Flow
 
 1. Client calls `beginTransaction()` and the transaction captures that adapter's owner identity
-2. Operations from the same owner are queued (not executed immediately); a different adapter is rejected
+2. Mutations from the same owner are queued (not executed immediately); `read`, `countTable`, `findOne`, and `findMany` project that queue into the owner's staged view, while a different adapter is rejected
 3. AutoSync retains dirty entries without writing while the transaction remains active
 4. Client calls `commit()` to execute all operations in order through the module-private direct-write capability
 5. A public `rollback()` discards queued operations without writing; a partially failed commit uses the same capability to restore snapshots
 
 Transactions coordinate one adapter instance in memory. They are not a durable write-ahead log and do not claim crash recovery or cross-process ACID isolation.
 
+Public `createTable()`, `deleteTable()`, and `migrateToChunked()` do not enter the transaction queue on the active owner's matching storage surface: they fail with `TRANSACTION_OPERATION_NOT_SUPPORTED` because each can persist schema metadata or files immediately. Other adapters or surfaces fail the transaction guard first.
+
 ### 4.4 Table Deletion Flow
 
-1. `deleteTable()` snapshots current metadata and stages its removal under the shared table lock
+1. `deleteTable()` validates its transaction surface and rejects a matching active transaction before snapshotting current metadata under the shared table lock
 2. The metadata deletion is flushed; failure restores and reflashes the snapshot before any artifact is removed
 3. After a successful metadata commit, in-memory indexes and all table, journal, and overwrite-backup artifacts are removed
 4. Cleanup failure returns an error but keeps the table logically absent; metadata absence prevents artifact-based revival, and a later delete or same-name create retries/purges orphan cleanup

@@ -8,7 +8,10 @@
 > 存储协调：同路径文件操作和 DataWriter 表写入使用共享的进程内 FIFO，锁等待上限为 30 秒。元数据管理器另行共享按路径键控的 FIFO，重读最新快照、应用受 `createdAt` 保护的 mutation、推进跨 adapter epoch，并保留失败 mutation 供重试；超时等待者不会破坏后续队列交接。
 > 恢复与删除：绑定表名的 v2 单文件 marker 记录前后代 token、hash 与物理计数；临时证据必须与持久化 metadata 和已提交主文件完全匹配。metadata backup 仅在主文件缺失时恢复，主文件损坏时绝不回退，且必须成功移除旧 backup。chunked overwrite 日志和 single-to-chunked mode 提交均有明确边界；删除后的 metadata 缺失是权威状态，同名建表会清除孤立工件。
 > 完整性与安全：增量索引暂存受影响 bucket delta，重建暂存完整映射；两者都在存储前校验 `UNIQUE`，成功后才发布。动态全字段加密使用显式 metadata marker；整表逻辑计数与物理代际同次提交，解密缓存绑定精确 ciphertext。混合 legacy CTR / 当前 GCM bulk payload 会分组解密并保持顺序。加密表策略持久化，事务绑定 owner，直接提交/恢复写需要模块私有 symbol capability。
-> 查询与内存边界：分页仅接受非负安全整数；所有排序算法把 nullish 值放在末尾；缓存失效使用有界命名空间版本；事务延迟 AutoSync 写入时仍保留脏条目。
+> 事务边界：事务 owner 通过 `read()`、`countTable()`、`findOne()` 和 `findMany()` 读取暂存状态；过滤、排序、分页和事务内 `remove()` 的计数都基于该视图。排队的可序列化记录输入、对象形式的查询值和事务查询结果与调用方后续的对象修改相隔离。在匹配的活动事务表面上，公开的 `createTable()`、`deleteTable()` 和 `migrateToChunked()` 会以 `TRANSACTION_OPERATION_NOT_SUPPORTED` 被拒绝。
+> 查询与内存边界：分页仅接受非负安全整数，且会向调用方保留 `RangeError` 输入校验错误；加密 `findMany()` 未传 `sortBy` 时保持按 `id` 升序的确定性顺序；所有排序算法把 nullish 值放在末尾；缓存失效使用有界命名空间版本；事务延迟 AutoSync 写入时仍保留脏条目。
+> 干净 Checkout 类型契约：受版本控制的 TypeScript 配置包含 `expo/types`，`process.env` 类型不再依赖被忽略的本地 `expo-env.d.ts` 文件。
+> 发布治理：删除本地发布便利包装命令；受支持的发布路径是 tag-only GitHub workflow，并执行 tag、`main` 祖先关系、发布门禁和 provenance 校验。
 > 根目录迁移安全：不可读或格式损坏的当前 `meta.ldb` 会被视为已占用；legacy 迁移前会删除空 bootstrap 根目录，避免正确性依赖 move 覆盖既有目录。
 > 运行时卫生：删除未使用的存储抽象，把权限探测移出写入热路径，并让日志按级别输出、测试默认静默。
 

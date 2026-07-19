@@ -21,7 +21,7 @@
     "incremental": true,
     "resolveJsonModule": true,
     "jsx": "react-native",
-    "types": ["node", "jest"],
+    "types": ["node", "jest", "expo/types"],
     "baseUrl": "./src",
     "paths": {
       "@/*": ["./*"],

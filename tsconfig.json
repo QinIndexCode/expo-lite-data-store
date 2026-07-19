@@ -8,6 +8,6 @@
     "moduleResolution": "bundler",
     "tsBuildInfoFile": ".tsbuildinfo"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", ".expo/types/**/*.ts"],
   "exclude": ["dist/**", "coverage/**", "__mocks__/**", "test-install/**", "node_modules/**"]
 }

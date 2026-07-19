@@ -407,14 +407,99 @@ export class TransactionService {
     this.transactionData.clear();
   }
 
+  /** Creates an independent copy for transaction-owned record data. */
+  private cloneRecords(records: StorageRecord[]): StorageRecord[] {
+    let cloned: unknown;
+    if (typeof structuredClone !== 'undefined') {
+      try {
+        cloned = structuredClone(records);
+      } catch {
+        // JSON is the storage boundary fallback for environments without cloneable record values.
+      }
+    }
+
+    if (cloned === undefined) {
+      const serialized = JSON.stringify(records);
+      cloned = serialized === undefined ? undefined : (JSON.parse(serialized) as unknown);
+    }
+
+    if (!Array.isArray(cloned) || !cloned.every(isStorageRecord)) {
+      throw new TransactionError('Could not isolate transaction record data', 'SNAPSHOT_FAILED');
+    }
+    return cloned;
+  }
+
+  private cloneRecord(record: StorageRecord): StorageRecord {
+    const [cloned] = this.cloneRecords([record]);
+    return cloned;
+  }
+
+  private cloneFilter(filter: FilterCondition<StorageRecord>): FilterCondition<StorageRecord> {
+    return typeof filter === 'function' ? filter : this.cloneRecord(filter);
+  }
+
+  private cloneOptions(options?: TransactionWriteOptions): TransactionWriteOptions | undefined {
+    if (!options) {
+      return undefined;
+    }
+    return {
+      ...options,
+      ...(options.encryptedFields ? { encryptedFields: [...options.encryptedFields] } : {}),
+    };
+  }
+
+  private cloneBulkOperations(operations: BulkOperation<StorageRecord>[]): BulkOperation<StorageRecord>[] {
+    return operations.map(operation => {
+      switch (operation.type) {
+        case 'insert':
+          return {
+            ...operation,
+            data: Array.isArray(operation.data) ? this.cloneRecords(operation.data) : this.cloneRecord(operation.data),
+          };
+        case 'update':
+          return {
+            ...operation,
+            data: this.cloneRecord(operation.data),
+            where: this.cloneFilter(operation.where),
+          };
+        case 'delete':
+          return {
+            ...operation,
+            where: this.cloneFilter(operation.where),
+          };
+      }
+    });
+  }
+
+  private cloneOperation(operation: TransactionOperation): TransactionOperation {
+    const options = this.cloneOptions(operation.options);
+    switch (operation.type) {
+      case 'overwrite':
+      case 'write':
+        return { ...operation, data: this.cloneRecords(operation.data), options };
+      case 'update':
+        return {
+          ...operation,
+          data: this.cloneRecord(operation.data),
+          where: this.cloneFilter(operation.where),
+          options,
+        };
+      case 'delete':
+        return { ...operation, where: this.cloneFilter(operation.where), options };
+      case 'bulkWrite':
+        return { ...operation, operations: this.cloneBulkOperations(operation.operations), options };
+    }
+  }
+
   getTransactionData(tableName: string, owner?: TransactionOwnerToken): StorageRecord[] | undefined {
     this.assertTransactionOwner(owner);
-    return this.transactionData.get(tableName);
+    const data = this.transactionData.get(tableName);
+    return data ? this.cloneRecords(data) : undefined;
   }
 
   setTransactionData(tableName: string, data: StorageRecord[], owner?: TransactionOwnerToken): void {
     this.assertTransactionOwner(owner);
-    this.transactionData.set(tableName, data);
+    this.transactionData.set(tableName, this.cloneRecords(data));
   }
 
   /** Saves the first deep snapshot for a table in the active transaction. */
@@ -443,22 +528,9 @@ export class TransactionService {
     }
 
     if (!this.snapshots.has(tableName)) {
-      // Snapshots cannot share mutable record objects with queued operations.
-      let snapshotData: StorageRecord[];
-      if (typeof structuredClone !== 'undefined') {
-        snapshotData = structuredClone(data);
-      } else {
-        const serialized = JSON.stringify(data);
-        const parsed: unknown = serialized === undefined ? undefined : JSON.parse(serialized);
-        if (!Array.isArray(parsed) || !parsed.every(isStorageRecord)) {
-          throw new TransactionError('Could not create a transaction snapshot', 'SNAPSHOT_FAILED');
-        }
-        snapshotData = parsed;
-      }
-
       this.snapshots.set(tableName, {
         tableName,
-        data: snapshotData,
+        data: this.cloneRecords(data),
         existed,
         logicalRecordCount,
       });
@@ -477,9 +549,10 @@ export class TransactionService {
     }
     this.assertTransactionOwner(owner);
 
-    this.operations.push(operation);
+    const copiedOperation = this.cloneOperation(operation);
+    this.operations.push(copiedOperation);
 
-    this.transactionData.delete(operation.tableName);
+    this.transactionData.delete(copiedOperation.tableName);
   }
 
   /** Materializes a table view with all queued operations applied. */
@@ -490,10 +563,10 @@ export class TransactionService {
   ): Promise<StorageRecord[]> {
     this.assertTransactionOwner(owner);
     if (this.transactionData.has(tableName)) {
-      return this.transactionData.get(tableName)!;
+      return this.cloneRecords(this.transactionData.get(tableName)!);
     }
 
-    let data = await readFn(tableName);
+    let data = this.cloneRecords(await readFn(tableName));
 
     for (const operation of this.operations) {
       if (operation.tableName !== tableName) {
@@ -553,6 +626,6 @@ export class TransactionService {
     }
 
     this.transactionData.set(tableName, data);
-    return data;
+    return this.cloneRecords(data);
   }
 }

@@ -1178,29 +1178,17 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     findOptions?: TableOptions
   ): Promise<T[]> {
     const key = await this.key();
-    const readOptions: ReadOptions<StorageRecord> | undefined = findOptions ? { ...findOptions } : undefined;
-
-    let data = await this.readWithKey(tableName, readOptions, key);
-    if (filter) {
-      const filtered = QueryEngine.filter(data, this.toStorageFilter(filter));
-      data = filtered;
-    }
-
     const storageOptions = this.toStorageFindOptions(options);
-    if (storageOptions?.sortBy) {
-      data = QueryEngine.sort(data, storageOptions.sortBy, storageOptions.order, storageOptions.sortAlgorithm);
-    } else {
-      // A stable default order keeps pagination deterministic.
-      data = QueryEngine.sort(data, 'id', 'asc', storageOptions?.sortAlgorithm);
-    }
-    const skip = storageOptions?.skip || 0;
-    const limit = storageOptions?.limit;
+    const readOptions: ReadOptions<StorageRecord> = {
+      ...findOptions,
+      filter: filter ? this.toStorageFilter(filter) : undefined,
+      ...storageOptions,
+      // Preserve the established deterministic pagination order when no explicit field is selected.
+      sortBy: storageOptions?.sortBy ?? 'id',
+      order: storageOptions?.sortBy ? storageOptions.order : 'asc',
+    };
 
-    if (limit !== undefined) {
-      return this.toPublicRecords<T>(this.cloneRecords(data.slice(skip, skip + limit)));
-    } else {
-      return this.toPublicRecords<T>(this.cloneRecords(data.slice(skip)));
-    }
+    return this.toPublicRecords<T>(await this.readWithKey(tableName, readOptions, key));
   }
 
   async bulkWrite<T extends object = StorageRecord>(

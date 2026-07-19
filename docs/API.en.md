@@ -216,6 +216,8 @@ Use `init()` when:
 
 ## Table Management API
 
+> **Transaction boundary:** On the active transaction owner's matching storage surface, public `createTable()`, `deleteTable()`, and `migrateToChunked()` calls persist schema metadata or files directly and are rejected with `TRANSACTION_OPERATION_NOT_SUPPORTED`; commit or roll back first. A different adapter or security surface is rejected by the normal transaction guard before this DDL-specific code. This does not prevent a staged data write from implicitly creating a table during its eventual commit.
+
 ### `createTable(tableName, options?)`
 
 ```ts
@@ -455,7 +457,7 @@ findMany<T extends object = StorageRecord>(tableName, {
 }): Promise<T[]>
 ```
 
-`skip` and `limit` must be non-negative safe integers. `limit: 0` returns an empty page. Negative, fractional, non-finite, and unsafe values throw a `RangeError` rather than being coerced by array slicing.
+`skip` and `limit` must be non-negative safe integers. `limit: 0` returns an empty page. Negative, fractional, non-finite, and unsafe values throw a `RangeError` rather than being coerced by array slicing. This input-validation error reaches the caller unchanged rather than being wrapped as a `StorageError`.
 
 #### Supported query operators
 
@@ -566,6 +568,9 @@ Discards the active transaction.
 - Starting a second transaction before ending the first raises `TRANSACTION_IN_PROGRESS`.
 - Calling `commit()` or `rollback()` with no active transaction raises `NO_TRANSACTION_IN_PROGRESS`.
 - The surface is selected by the same `encrypted` and `requireAuthOnAccess` flags used by normal CRUD calls.
+- The transaction owner sees staged mutations through `read()`, `countTable()`, `findOne()`, and `findMany()`. Query filtering, sorting, and pagination run against that staged view, and `remove()` returns its matched-row count from the same view.
+- Queued serializable record payloads, object-based query values, and transaction query results are isolated from later caller-side mutation. Callback predicates retain their own closure semantics.
+- On the active transaction owner's matching storage surface, public `createTable()`, `deleteTable()`, and `migrateToChunked()` calls are not transactional and raise `TRANSACTION_OPERATION_NOT_SUPPORTED`, because their schema metadata or file changes persist immediately. A different adapter or security surface is rejected by the normal transaction guard first.
 - Explicit rollback discards queued operations without rewriting table files. A partially failed commit restores existing table snapshots and removes tables created by that transaction.
 - Commit execution and failed-commit snapshot restoration use a module-private symbol capability for direct writes. Adding a public `directWrite` property to options cannot bypass transaction staging.
 - AutoSync retains dirty entries and performs no storage write while a transaction is active. A later scheduled or explicit sync may flush them after the transaction settles.
@@ -792,23 +797,26 @@ try {
 - `timestamp`
 - `cause`
 
+`StorageError` instances with a `TRANSACTION_*` code or `NO_TRANSACTION_IN_PROGRESS` use `category: 'transaction'`.
+
 ### Common `StorageErrorCode` values
 
-| Code                         | Meaning                                                                                                                |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `EXPO_MODULE_MISSING`        | Required Expo runtime package is missing                                                                               |
-| `AUTH_ON_ACCESS_UNSUPPORTED` | Strict per-access authentication cannot be enforced in the current runtime                                             |
-| `PERMISSION_DENIED`          | A request selected a weaker storage surface than the table's encryption or strict-authentication policy                |
-| `TABLE_NOT_FOUND`            | The requested table does not exist                                                                                     |
-| `TABLE_NAME_INVALID`         | The table name is empty or invalid                                                                                     |
-| `TABLE_COLUMN_INVALID`       | A declared column uses an unsupported type                                                                             |
-| `QUERY_FAILED`               | The query engine failed to execute the condition                                                                       |
-| `MIGRATION_FAILED`           | Table migration failed, or an existing encryption/strict-authentication policy requires an explicit key/data migration |
-| `TRANSACTION_IN_PROGRESS`    | A transaction already exists on the current surface                                                                    |
-| `NO_TRANSACTION_IN_PROGRESS` | `commit()` or `rollback()` was called with no active transaction                                                       |
-| `LOCK_TIMEOUT`               | Concurrent write lock acquisition exceeded the timeout budget                                                          |
-| `TIMEOUT`                    | An operation exceeded a configured timeout                                                                             |
-| `CORRUPTED_DATA`             | On-disk data could not be parsed safely                                                                                |
+| Code                                  | Meaning                                                                                                                |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `EXPO_MODULE_MISSING`                 | Required Expo runtime package is missing                                                                               |
+| `AUTH_ON_ACCESS_UNSUPPORTED`          | Strict per-access authentication cannot be enforced in the current runtime                                             |
+| `PERMISSION_DENIED`                   | A request selected a weaker storage surface than the table's encryption or strict-authentication policy                |
+| `TABLE_NOT_FOUND`                     | The requested table does not exist                                                                                     |
+| `TABLE_NAME_INVALID`                  | The table name is empty or invalid                                                                                     |
+| `TABLE_COLUMN_INVALID`                | A declared column uses an unsupported type                                                                             |
+| `QUERY_FAILED`                        | The query engine failed to execute the condition                                                                       |
+| `MIGRATION_FAILED`                    | Table migration failed, or an existing encryption/strict-authentication policy requires an explicit key/data migration |
+| `TRANSACTION_IN_PROGRESS`             | A transaction already exists on the current surface                                                                    |
+| `NO_TRANSACTION_IN_PROGRESS`          | `commit()` or `rollback()` was called with no active transaction                                                       |
+| `TRANSACTION_OPERATION_NOT_SUPPORTED` | An active transaction cannot perform a public schema operation that persists immediately                               |
+| `LOCK_TIMEOUT`                        | Concurrent write lock acquisition exceeded the timeout budget                                                          |
+| `TIMEOUT`                             | An operation exceeded a configured timeout                                                                             |
+| `CORRUPTED_DATA`                      | On-disk data could not be parsed safely                                                                                |
 
 ### `CryptoError`
 

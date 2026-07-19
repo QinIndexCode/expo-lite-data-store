@@ -83,6 +83,53 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     return owner;
   }
 
+  private createTransactionDdlError(): StorageError {
+    return new StorageError(
+      'Table structure changes are not supported during an active transaction',
+      'TRANSACTION_OPERATION_NOT_SUPPORTED',
+      {
+        details: 'createTable(), deleteTable(), and migrateToChunked() persist metadata or files immediately.',
+        suggestion: 'Commit or roll back the active transaction before changing table structure.',
+      }
+    );
+  }
+
+  /** Public schema changes must not escape an in-memory transaction. */
+  private assertTransactionDdlAllowed(options?: unknown): void {
+    if (this.transactionService.isInTransaction() && !hasInternalDirectWrite(options)) {
+      throw this.createTransactionDdlError();
+    }
+  }
+
+  /** Holds transaction start until a public schema change has completed. */
+  private async runPublicSchemaChange<T>(options: unknown, operation: () => Promise<T>): Promise<T> {
+    this.assertTransactionAccess(options);
+    if (hasInternalDirectWrite(options)) {
+      return operation();
+    }
+
+    let executed = false;
+    let result: T | undefined;
+    await this.transactionService.runWhenNoTransaction(async () => {
+      executed = true;
+      this.assertTransactionDdlAllowed(options);
+      result = await operation();
+    });
+
+    if (!executed) {
+      throw this.createTransactionDdlError();
+    }
+    return result as T;
+  }
+
+  private getCurrentTransactionData(tableName: string, owner?: TransactionOwnerToken): Promise<StorageRecord[]> {
+    return this.transactionService.getCurrentTransactionData(
+      tableName,
+      (currentTableName: string) => this.dataReader.read(currentTableName, { bypassCache: true }),
+      owner
+    );
+  }
+
   private saveTransactionSnapshot(tableName: string, data: StorageRecord[], owner?: TransactionOwnerToken): void {
     const tableMeta = this.metadataManager.get(tableName);
     this.transactionService.saveSnapshot(
@@ -142,7 +189,10 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       encryptedFields: [...options.encryptedFields],
       [transactionOwnerOption]: transactionOwner,
     };
-    await this.createTable(tableName, withDynamicFieldEncryption(createOptions, requestedAllFields));
+    await this.createTable(
+      tableName,
+      withInternalDirectWrite(withDynamicFieldEncryption(createOptions, requestedAllFields))
+    );
   }
 
   private normalizeStorageInput<T extends object>(data: StorageInput<T>): StorageRecord[] {
@@ -384,7 +434,6 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     } = {}
   ): Promise<void> {
     await this.ensureInitialized();
-    this.assertTransactionAccess(options);
     this.validateTableName(tableName);
 
     const normalizedOptions: CreateTableOptions<StorageRecord> & {
@@ -395,21 +444,22 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       initialData: options.initialData ? this.normalizeStorageInput(options.initialData) : undefined,
     };
 
-    return this.dataWriter.createTable(tableName, normalizedOptions);
+    return this.runPublicSchemaChange(options, () => this.dataWriter.createTable(tableName, normalizedOptions));
   }
 
   async deleteTable(tableName: string, _options?: TableOptions): Promise<void> {
     await this.ensureInitialized();
-    this.assertTransactionAccess(_options);
     this.validateTableName(tableName);
 
-    try {
-      return await this.dataWriter.deleteTable(tableName);
-    } finally {
-      // A durable metadata delete can precede a failed artifact cleanup. Rotate
-      // the namespace on every outcome so a same-name recreation cannot reuse stale data.
-      this.cacheService.clearTableCache(tableName);
-    }
+    return this.runPublicSchemaChange(_options, async () => {
+      try {
+        return await this.dataWriter.deleteTable(tableName);
+      } finally {
+        // A durable metadata delete can precede a failed artifact cleanup. Rotate
+        // the namespace on every outcome so a same-name recreation cannot reuse stale data.
+        this.cacheService.clearTableCache(tableName);
+      }
+    });
   }
 
   async hasTable(tableName: string, _options?: TableOptions): Promise<boolean> {
@@ -557,11 +607,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     // Transactional reads include staged operations that are not persisted yet.
     if (this.transactionService.isInTransaction()) {
       const storageOptions = this.toStorageReadOptions(options);
-      const transactionData = await this.transactionService.getCurrentTransactionData(
-        tableName,
-        (currentTableName: string) => this.dataReader.read(currentTableName, { bypassCache: true }),
-        transactionOwner
-      );
+      const transactionData = await this.getCurrentTransactionData(tableName, transactionOwner);
       return this.toPublicRecords<T>(this.applyReadOptions(transactionData, storageOptions));
     }
 
@@ -574,11 +620,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     this.validateTableName(tableName);
 
     if (this.transactionService.isInTransaction()) {
-      const transactionData = await this.transactionService.getCurrentTransactionData(
-        tableName,
-        (currentTableName: string) => this.dataReader.read(currentTableName, { bypassCache: true }),
-        transactionOwner
-      );
+      const transactionData = await this.getCurrentTransactionData(tableName, transactionOwner);
       return transactionData.length;
     }
 
@@ -636,8 +678,18 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     _options?: TableOptions
   ): Promise<T | null> {
     await this.ensureInitialized();
-    this.assertTransactionAccess(_options);
+    const transactionOwner = this.assertTransactionAccess(_options);
     this.validateTableName(tableName);
+
+    if (this.transactionService.isInTransaction()) {
+      const transactionData = await this.getCurrentTransactionData(tableName, transactionOwner);
+      const [record] = this.applyReadOptions(transactionData, {
+        filter: this.toStorageFilter(filter),
+        limit: 1,
+      });
+      return this.toPublicRecord<T>(record ?? null);
+    }
+
     return this.toPublicRecord<T>(await this.dataReader.findOne(tableName, this.toStorageFilter(filter)));
   }
 
@@ -648,8 +700,19 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     _findOptions?: TableOptions
   ): Promise<T[]> {
     await this.ensureInitialized();
-    this.assertTransactionAccess(_findOptions);
+    const transactionOwner = this.assertTransactionAccess(_findOptions);
     this.validateTableName(tableName);
+
+    if (this.transactionService.isInTransaction()) {
+      const transactionData = await this.getCurrentTransactionData(tableName, transactionOwner);
+      return this.toPublicRecords<T>(
+        this.applyReadOptions(transactionData, {
+          filter: filter ? this.toStorageFilter(filter) : undefined,
+          ...this.toStorageFindOptions(options),
+        })
+      );
+    }
+
     return this.toPublicRecords<T>(
       await this.dataReader.findMany(
         tableName,
@@ -668,8 +731,11 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     const transactionOwner = this.assertTransactionAccess(options);
     this.validateTableName(tableName);
     const directWrite = hasInternalDirectWrite(options);
+    const storageWhere = this.toStorageFilter(where);
 
     if (this.transactionService.isInTransaction() && !directWrite) {
+      const transactionData = await this.getCurrentTransactionData(tableName, transactionOwner);
+      const deletedCount = QueryEngine.filter(transactionData, storageWhere).length;
       const currentData = await this.dataReader.read(tableName, { bypassCache: true });
       this.saveTransactionSnapshot(tableName, currentData, transactionOwner);
 
@@ -677,14 +743,14 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
         {
           tableName,
           type: 'delete',
-          where: this.toStorageFilter(where),
+          where: storageWhere,
           options,
         },
         transactionOwner
       );
-      return 0;
+      return deletedCount;
     }
-    const result = await this.dataWriter.delete(tableName, this.toStorageFilter(where));
+    const result = await this.dataWriter.delete(tableName, storageWhere);
     this.cacheService.clearTableCache(tableName);
 
     return result;
@@ -948,7 +1014,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
         return updatedCount;
       },
-      (tableName: string) => this.deleteTable(tableName, options),
+      (tableName: string) => this.deleteTable(tableName, withInternalDirectWrite({ ...options })),
       finalize,
       transactionOwner
     );
@@ -960,7 +1026,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     await this.transactionService.rollback(
       (tableName: string, data: StorageInput<StorageRecord>, options?: InternalWriteOptions) =>
         this.dataWriter.write(tableName, data, withInternalDirectWrite({ ...options })),
-      (tableName: string) => this.deleteTable(tableName, _options),
+      (tableName: string) => this.deleteTable(tableName, withInternalDirectWrite({ ..._options })),
       false,
       transactionOwner
     );
@@ -968,21 +1034,22 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
   async migrateToChunked(tableName: string, options?: TableOptions): Promise<void> {
     await this.ensureInitialized();
-    this.assertTransactionAccess(options);
     this.validateTableName(tableName);
 
-    const tableMeta = this.metadataManager.getLatest
-      ? await this.metadataManager.getLatest(tableName)
-      : this.metadataManager.get(tableName);
-    if (!tableMeta) {
-      throw new StorageError(`Table ${tableName} not found`, 'TABLE_NOT_FOUND', {
-        details: `Failed to migrate table ${tableName} to chunked mode: table not found`,
-        suggestion: 'Check if the table name is correct',
-      });
-    }
+    return this.runPublicSchemaChange(options, async () => {
+      const tableMeta = this.metadataManager.getLatest
+        ? await this.metadataManager.getLatest(tableName)
+        : this.metadataManager.get(tableName);
+      if (!tableMeta) {
+        throw new StorageError(`Table ${tableName} not found`, 'TABLE_NOT_FOUND', {
+          details: `Failed to migrate table ${tableName} to chunked mode: table not found`,
+          suggestion: 'Check if the table name is correct',
+        });
+      }
 
-    await this.dataWriter.migrateToChunked(tableName);
-    this.cacheService.clearTableCache(tableName);
+      await this.dataWriter.migrateToChunked(tableName);
+      this.cacheService.clearTableCache(tableName);
+    });
   }
 }
 let storageInstance: FileSystemStorageAdapter | null = null;

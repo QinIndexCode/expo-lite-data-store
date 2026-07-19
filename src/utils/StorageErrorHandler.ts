@@ -113,7 +113,7 @@ export class ErrorHandler {
     }
   }
 
-  /** Preserves StorageError instances and normalizes other asynchronous failures. */
+  /** Preserves storage and input-validation errors while normalizing operational failures. */
   static async handleAsyncError<T>(
     operation: () => Promise<T>,
     errorCreator: (cause: unknown) => StorageError
@@ -121,19 +121,19 @@ export class ErrorHandler {
     try {
       return await operation();
     } catch (error) {
-      if (error instanceof StorageError) {
+      if (error instanceof StorageError || error instanceof RangeError) {
         throw error;
       }
       throw errorCreator(error);
     }
   }
 
-  /** Preserves StorageError instances and normalizes other synchronous failures. */
+  /** Preserves storage and input-validation errors while normalizing operational failures. */
   static handleSyncError<T>(operation: () => T, errorCreator: (cause: unknown) => StorageError): T {
     try {
       return operation();
     } catch (error) {
-      if (error instanceof StorageError) {
+      if (error instanceof StorageError || error instanceof RangeError) {
         throw error;
       }
       throw errorCreator(error);

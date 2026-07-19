@@ -216,6 +216,8 @@ await init({ encrypted: true });
 
 ## 表管理 API
 
+> **事务边界：**在活动事务 owner 的匹配存储表面上，公开的 `createTable()`、`deleteTable()` 和 `migrateToChunked()` 会直接持久化 schema 元数据或文件，并以 `TRANSACTION_OPERATION_NOT_SUPPORTED` 被拒绝；请先 commit 或 rollback。其他 adapter 或安全表面会先由常规事务 guard 拒绝。这不妨碍暂存的数据写入在最终 commit 时隐式创建表。
+
 ### `createTable(tableName, options?)`
 
 ```ts
@@ -455,7 +457,7 @@ findMany<T extends object = StorageRecord>(tableName, {
 }): Promise<T[]>
 ```
 
-`skip` 和 `limit` 必须是非负安全整数。`limit: 0` 返回空页；负数、小数、非有限数或超出安全整数范围的值会抛出 `RangeError`，不会被数组切片静默换算。
+`skip` 和 `limit` 必须是非负安全整数。`limit: 0` 返回空页；负数、小数、非有限数或超出安全整数范围的值会抛出 `RangeError`，不会被数组切片静默换算。该输入校验错误会原样传给调用方，不会包装成 `StorageError`。
 
 #### 支持的查询操作符
 
@@ -566,6 +568,9 @@ await rollback();
 - 未结束前再次 `beginTransaction()` 会抛出 `TRANSACTION_IN_PROGRESS`；
 - 没有活动事务时调用 `commit()` 或 `rollback()` 会抛出 `NO_TRANSACTION_IN_PROGRESS`；
 - 事务所在表面同样由 `encrypted` 和 `requireAuthOnAccess` 决定；
+- 事务 owner 可通过 `read()`、`countTable()`、`findOne()` 和 `findMany()` 看到暂存变更；查询过滤、排序和分页都基于该暂存视图，`remove()` 也从同一视图返回实际命中数；
+- 排队的可序列化记录输入、对象形式的查询值和事务查询结果与调用方后续的对象修改相隔离；回调型谓词仍保留自身的闭包语义；
+- 在活动事务 owner 的匹配存储表面上，公开的 `createTable()`、`deleteTable()` 和 `migrateToChunked()` 不属于事务操作；会以 `TRANSACTION_OPERATION_NOT_SUPPORTED` 失败，因为 schema 元数据或文件会立即持久化。其他 adapter 或安全表面会先由常规事务 guard 拒绝；
 - 显式回滚只丢弃排队操作，不重写表文件；提交部分失败时会恢复已有表快照，并移除事务中新建的表；
 - commit 执行和 commit 失败后的快照恢复使用模块私有 symbol capability 进行直接写；在公开 options 中加入 `directWrite` 属性不能绕过事务暂存；
 - 活动事务期间 AutoSync 会保留脏数据且不执行存储写；事务结束后的后续定时或显式 sync 才可能刷出这些数据；
@@ -792,23 +797,26 @@ try {
 - `timestamp`
 - `cause`
 
+错误码以 `TRANSACTION_*` 开头或为 `NO_TRANSACTION_IN_PROGRESS` 的 `StorageError` 使用 `category: 'transaction'`。
+
 ### 常见 `StorageErrorCode`
 
-| 错误码                       | 含义                                                                    |
-| ---------------------------- | ----------------------------------------------------------------------- |
-| `EXPO_MODULE_MISSING`        | 缺少必需的 Expo 运行时包                                                |
-| `AUTH_ON_ACCESS_UNSUPPORTED` | 当前运行时无法兑现严格逐次访问认证                                      |
-| `PERMISSION_DENIED`          | 通过明文表面访问加密表，或未用严格认证表面访问严格表/列出严格表时被拒绝 |
-| `TABLE_NOT_FOUND`            | 请求的表不存在                                                          |
-| `TABLE_NAME_INVALID`         | 表名为空或不合法                                                        |
-| `TABLE_COLUMN_INVALID`       | 列定义使用了不支持的类型                                                |
-| `QUERY_FAILED`               | 查询引擎执行条件失败                                                    |
-| `MIGRATION_FAILED`           | 表迁移失败，或既有加密/严格认证策略需要显式迁移密钥与数据               |
-| `TRANSACTION_IN_PROGRESS`    | 当前表面已经存在一个活动事务                                            |
-| `NO_TRANSACTION_IN_PROGRESS` | 没有活动事务却调用了 `commit()` 或 `rollback()`                         |
-| `LOCK_TIMEOUT`               | 并发写锁获取超时                                                        |
-| `TIMEOUT`                    | 操作超过了配置的超时预算                                                |
-| `CORRUPTED_DATA`             | 磁盘数据无法安全解析                                                    |
+| 错误码                                | 含义                                                                    |
+| ------------------------------------- | ----------------------------------------------------------------------- |
+| `EXPO_MODULE_MISSING`                 | 缺少必需的 Expo 运行时包                                                |
+| `AUTH_ON_ACCESS_UNSUPPORTED`          | 当前运行时无法兑现严格逐次访问认证                                      |
+| `PERMISSION_DENIED`                   | 通过明文表面访问加密表，或未用严格认证表面访问严格表/列出严格表时被拒绝 |
+| `TABLE_NOT_FOUND`                     | 请求的表不存在                                                          |
+| `TABLE_NAME_INVALID`                  | 表名为空或不合法                                                        |
+| `TABLE_COLUMN_INVALID`                | 列定义使用了不支持的类型                                                |
+| `QUERY_FAILED`                        | 查询引擎执行条件失败                                                    |
+| `MIGRATION_FAILED`                    | 表迁移失败，或既有加密/严格认证策略需要显式迁移密钥与数据               |
+| `TRANSACTION_IN_PROGRESS`             | 当前表面已经存在一个活动事务                                            |
+| `NO_TRANSACTION_IN_PROGRESS`          | 没有活动事务却调用了 `commit()` 或 `rollback()`                         |
+| `TRANSACTION_OPERATION_NOT_SUPPORTED` | 活动事务不能执行会立即持久化的公开 schema 操作                          |
+| `LOCK_TIMEOUT`                        | 并发写锁获取超时                                                        |
+| `TIMEOUT`                             | 操作超过了配置的超时预算                                                |
+| `CORRUPTED_DATA`                      | 磁盘数据无法安全解析                                                    |
 
 ### `CryptoError`
 

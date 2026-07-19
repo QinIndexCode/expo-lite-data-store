@@ -559,6 +559,48 @@ describe('EncryptedStorageAdapter', () => {
       expect(result.length).toBe(1);
       expect(result[0]).toEqual({ id: 2, name: 'Bob', age: 30 });
     });
+
+    it('keeps default id ordering and preserves pagination boundary errors', async () => {
+      await adapter.overwrite(tableName, [
+        { id: 3, name: 'Charlie', age: 35 },
+        { id: 1, name: 'Alice', age: 25 },
+        { id: 2, name: 'Bob', age: 30 },
+      ]);
+
+      await expect(adapter.findMany(tableName, {}, { limit: 2 })).resolves.toEqual([
+        { id: 1, name: 'Alice', age: 25 },
+        { id: 2, name: 'Bob', age: 30 },
+      ]);
+      await expect(adapter.findMany(tableName, {}, { skip: -1 })).rejects.toThrow(RangeError);
+    });
+  });
+
+  describe('transaction schema boundaries', () => {
+    it('rejects schema changes during an encrypted transaction without changing the table', async () => {
+      const createdTableName = 'test_encrypted_transaction_ddl_created';
+      await adapter.overwrite(tableName, [{ id: 1, name: 'Alice', age: 25 }]);
+
+      await adapter.beginTransaction();
+      try {
+        await expect(adapter.createTable(createdTableName)).rejects.toMatchObject({
+          code: 'TRANSACTION_OPERATION_NOT_SUPPORTED',
+        });
+        await expect(adapter.deleteTable(tableName)).rejects.toMatchObject({
+          code: 'TRANSACTION_OPERATION_NOT_SUPPORTED',
+        });
+        await expect(adapter.migrateToChunked(tableName)).rejects.toMatchObject({
+          code: 'TRANSACTION_OPERATION_NOT_SUPPORTED',
+        });
+      } finally {
+        await adapter.rollback();
+      }
+
+      await expect(adapter.hasTable(createdTableName)).resolves.toBe(false);
+      expect(storage.getTableMeta(tableName)?.mode).toBe('single');
+      await expect(adapter.read(tableName, { bypassCache: true })).resolves.toEqual([
+        { id: 1, name: 'Alice', age: 25 },
+      ]);
+    });
   });
 
   describe('counts', () => {
@@ -708,6 +750,48 @@ describe('EncryptedStorageAdapter', () => {
         await expect(adapter.read(fullTable, { bypassCache: true })).resolves.toEqual([
           { id: 1, secret: 'alpha' },
           { id: 2, secret: 'beta' },
+        ]);
+      } finally {
+        if (storage.isInTransaction()) {
+          await adapter.rollback();
+        }
+        await adapter.deleteTable(fullTable);
+      }
+    });
+
+    it('queries the staged full-table encrypted view before commit', async () => {
+      const fullTable = 'test_full_table_transaction_find_many';
+      const originalData = [
+        { id: 1, status: 'active', rank: 2 },
+        { id: 2, status: 'inactive', rank: 4 },
+        { id: 4, status: 'active', rank: 3 },
+      ];
+
+      try {
+        await adapter.createTable(fullTable, { encrypted: true, encryptFullTable: true });
+        await adapter.overwrite(fullTable, originalData);
+
+        await adapter.beginTransaction();
+        await adapter.insert(fullTable, { id: 3, status: 'active', rank: 1 });
+        await adapter.update(fullTable, { rank: 5 }, { id: 1 });
+        await expect(
+          adapter.findMany(fullTable, { status: 'active' }, { sortBy: 'rank', order: 'asc', skip: 1, limit: 2 })
+        ).resolves.toEqual([
+          { id: 4, status: 'active', rank: 3 },
+          { id: 1, status: 'active', rank: 5 },
+        ]);
+        await adapter.rollback();
+        await expect(adapter.read(fullTable, { bypassCache: true })).resolves.toEqual(originalData);
+
+        await adapter.beginTransaction();
+        await adapter.insert(fullTable, { id: 3, status: 'active', rank: 1 });
+        await adapter.update(fullTable, { rank: 5 }, { id: 1 });
+        await adapter.commit();
+        await expect(
+          adapter.findMany(fullTable, { status: 'active' }, { sortBy: 'rank', order: 'asc', skip: 1, limit: 2 })
+        ).resolves.toEqual([
+          { id: 4, status: 'active', rank: 3 },
+          { id: 1, status: 'active', rank: 5 },
         ]);
       } finally {
         if (storage.isInTransaction()) {

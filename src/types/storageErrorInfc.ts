@@ -9,6 +9,7 @@ export enum ErrorCategory {
   DISK = 'disk',
   DATA = 'data',
   TIMEOUT = 'timeout',
+  TRANSACTION = 'transaction',
   UNKNOWN = 'unknown',
 }
 
@@ -60,6 +61,8 @@ export class StorageError extends Error {
       return ErrorCategory.DATA;
     } else if (code === 'TIMEOUT') {
       return ErrorCategory.TIMEOUT;
+    } else if (code.startsWith('TRANSACTION_') || code === 'NO_TRANSACTION_IN_PROGRESS') {
+      return ErrorCategory.TRANSACTION;
     } else {
       return ErrorCategory.UNKNOWN;
     }

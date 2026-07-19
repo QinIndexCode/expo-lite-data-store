@@ -58,7 +58,8 @@
     "build:cjs": "tsc -p tsconfig.cjs.json",
     "build:types": "tsc -p tsconfig.types.json",
     "build:all": "rimraf dist && npm run build:js && npm run write:esm-package && npm run patch:esm-extensions && npm run build:cjs && npm run build:types && rimraf .tsbuildinfo .tsbuildinfo.esm .tsbuildinfo.cjs && npm run lint",
-    "clean": "rimraf dist",
+    "clean": "rimraf dist coverage artifacts .tsbuildinfo .tsbuildinfo.esm .tsbuildinfo.cjs",
+    "clean:artifacts": "rimraf artifacts",
     "test": "jest --config jest.simple.config.cjs --testPathIgnorePatterns=crypto-security-assessment --testPathIgnorePatterns=performance-optimization --testPathIgnorePatterns=api.stress --testPathIgnorePatterns=benchmark",
     "test:core": "jest --config jest.simple.config.cjs --testPathIgnorePatterns=crypto-security-assessment --testPathIgnorePatterns=performance-optimization --testMatch=**/src/core/**/__tests__/**/*.test.ts",
     "test:api": "jest --config jest.simple.config.cjs --testPathPatterns=api --testPathIgnorePatterns=api.stress",
@@ -73,8 +74,8 @@
     "test:cache": "jest --config jest.simple.config.cjs --testMatch=**/src/core/cache/__tests__/**/*.test.ts",
     "lint": "eslint . --ext .ts,.tsx --ignore-pattern '.tsbuildinfo*'",
     "lint:fix": "eslint . --ext .ts,.tsx --fix --ignore-pattern '.tsbuildinfo*'",
-    "format": "prettier --write . --ignore-path .prettierignore",
-    "format:check": "prettier --check . --ignore-path .prettierignore",
+    "format": "prettier --write --ignore-unknown --ignore-path .prettierignore .",
+    "format:check": "prettier --check --ignore-unknown --ignore-path .prettierignore .",
     "audit:prod": "npm audit --omit=dev",
     "audit:no-high": "npm audit --audit-level=high",
     "typecheck": "tsc --noEmit --incremental false && tsc -p tsconfig.mocks.json --incremental false",
@@ -91,9 +92,7 @@
     "qa:baseline:native-flagship": "npm run qa:flagship:native",
     "qa:baseline:release": "npm run qa:baseline:expo-go && npm run qa:baseline:native-flagship",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run format:check && npm run audit:prod && npm run audit:no-high && npm run typecheck && npm run build:all && npm run test:all && npm run smoke:expo-consumer",
-    "publish:safe": "npm run build && npm run typecheck && npm publish",
-    "publish:force": "npm publish"
+    "prepublishOnly": "npm run format:check && npm run audit:prod && npm run audit:no-high && npm run typecheck && npm run build:all && npm run test:all && npm run smoke:expo-consumer"
   },
   "dependencies": {
     "@noble/ciphers": "~0.6.0",

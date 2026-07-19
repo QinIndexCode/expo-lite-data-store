@@ -14,7 +14,7 @@
 
 Pull Request 不会获得 npm 发布凭据，也不能触发包发布。
 
-普通 push 到 `main` 可能触发 CI、CodeQL、Scorecard 和 README 驱动的 wiki sync 等验证/维护 workflow，但绝不会触发 `Release package` 或 npm 发布。只有 push 匹配 release workflow 的版本 tag，并通过全部发布门禁后，才可能执行发布。
+普通 push 到 `main` 可能触发 CI、CodeQL、Scorecard 和 README 驱动的 wiki sync 等验证/维护 workflow，但绝不会触发 `Release package` 或 npm 发布。仓库的自动化发布路径只有在 push 的版本 tag 匹配 release workflow 并通过全部发布门禁后才会开始。维护者不应在本地发布；package scripts 有意不提供本地发布包装命令。
 
 ## 推送前本地门禁
 
@@ -35,6 +35,8 @@ npm pack --dry-run --ignore-scripts
 ```
 
 `prepublishOnly` 包含依赖审计、类型检查、干净的可分发构建、全部维护中的测试分组、lint 和临时 Expo consumer smoke。构建有意安排在测试前，因为 package export 与 built artifact 契约会检查 `dist/`。超出 consumer smoke 的真机运行证据请参考 [EXPO_RUNTIME_QA.zh-CN.md](./EXPO_RUNTIME_QA.zh-CN.md)。
+
+为获得可重复的本地重跑结果，`npm run clean` 会删除被忽略的 `dist`、`coverage`、`artifacts` 和 TypeScript build-info 输出。`npm run clean:artifacts` 会删除整个被忽略的 `artifacts/` 目录，若其中保留了手工设备证据，请先另行保存。受版本控制的共享 TypeScript 配置包含 `expo/types`，因此干净 checkout 中的 `process.env` 类型不得依赖被忽略的本地 `expo-env.d.ts` 文件。
 
 ## 仓库一次性配置
 

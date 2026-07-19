@@ -247,7 +247,7 @@ const expensiveElectronics = await db.findMany('products', {
 });
 ```
 
-`skip` 和 `limit` 必须是非负安全整数。`limit: 0` 返回空页；负数、小数、非有限数或超出安全整数范围的值会抛出 `RangeError`，不会交给数组切片静默换算。
+`skip` 和 `limit` 必须是非负安全整数。`limit: 0` 返回空页；负数、小数、非有限数或超出安全整数范围的值会抛出 `RangeError`，不会交给数组切片静默换算。该输入校验错误会以原始 `RangeError` 交给调用方，不会再包装成 `StorageError`。
 
 所有受支持的排序算法在升序和降序下都会保持 `null`、`undefined` 的相对顺序，并把它们放在结果末尾。
 
@@ -336,6 +336,9 @@ await db.commit();
 - 同一适配器表面一次只能有一个活动事务；
 - 在未结束前再次调用 `beginTransaction()` 会抛出 `TRANSACTION_IN_PROGRESS`；
 - 没有活动事务时调用 `commit()` 或 `rollback()` 会抛出 `NO_TRANSACTION_IN_PROGRESS`；
+- 事务 owner 通过 `read()`、`countTable()`、`findOne()` 和 `findMany()` 具备 read-your-writes 可见性；过滤、排序和分页基于暂存视图执行，`remove()` 返回该视图中实际命中的记录数；
+- 排队的可序列化记录输入、对象形式的查询值和事务查询结果与调用方后续的对象修改相隔离；
+- 在活动事务 owner 的匹配存储表面上，公开的 schema 操作 `createTable()`、`deleteTable()` 和 `migrateToChunked()` 会以 `TRANSACTION_OPERATION_NOT_SUPPORTED` 被拒绝，因为它们会立即持久化元数据或文件；其他 adapter 或安全表面会先由既有事务 guard 拒绝；
 - 显式回滚只丢弃排队写入，不会重写表文件；若提交执行到一半失败，已有表会恢复，事务中新建的表会被移除；
 - commit 执行和 commit 失败后的快照恢复使用模块私有 symbol capability 进行直接写；公开 options 中伪造 `directWrite` 不能绕过事务暂存；
 - 活动事务期间 AutoSync 会保留脏缓存项，只有事务结束后的后续定时或显式 sync 才会写入；

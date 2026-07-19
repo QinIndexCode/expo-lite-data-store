@@ -10,7 +10,7 @@ import { getFileSystem } from '../../../utils/fileSystemCompat';
 import { getRootPathSync } from '../../../utils/ROOTPath';
 import logger from '../../../utils/logger';
 import { isStorageRecord, type StorageRecord } from '../../../types/storageTypes';
-import { StorageError } from '../../../types/storageErrorInfc';
+import { ErrorCategory, StorageError } from '../../../types/storageErrorInfc';
 
 type AdapterPrivateAccess = {
   dataWriter: DataWriter;
@@ -292,6 +292,158 @@ describe('FileSystemStorageAdapter reliability hardening', () => {
     ]);
     expect(updated).toBe(1);
     await adapter.deleteTable('no_id_transaction_rows');
+  });
+
+  it('makes transactional find queries and delete counts reflect staged state', async () => {
+    const tableName = 'transaction_query_visibility';
+    const originalData = [
+      { id: 'one', status: 'active', rank: 2 },
+      { id: 'two', status: 'inactive', rank: 4 },
+      { id: 'three', status: 'active', rank: 3 },
+    ];
+    await adapter.createTable(tableName, { initialData: originalData });
+
+    await adapter.beginTransaction();
+    try {
+      await adapter.write(tableName, { id: 'four', status: 'active', rank: 1 });
+      await adapter.update(tableName, { rank: 5 }, { id: 'one' });
+
+      await expect(adapter.findOne(tableName, { id: 'one' })).resolves.toEqual({
+        id: 'one',
+        status: 'active',
+        rank: 5,
+      });
+      await expect(
+        adapter.findMany(tableName, { status: 'active' }, { sortBy: 'rank', order: 'asc', skip: 1, limit: 2 })
+      ).resolves.toEqual([
+        { id: 'three', status: 'active', rank: 3 },
+        { id: 'one', status: 'active', rank: 5 },
+      ]);
+      await expect(adapter.delete(tableName, { status: 'active' })).resolves.toBe(3);
+      await expect(adapter.findMany(tableName)).resolves.toEqual([{ id: 'two', status: 'inactive', rank: 4 }]);
+    } finally {
+      await adapter.rollback();
+    }
+
+    await expect(adapter.read(tableName, { bypassCache: true })).resolves.toEqual(originalData);
+    await adapter.deleteTable(tableName);
+  });
+
+  it('isolates transaction inputs and query results from caller mutation', async () => {
+    type TransactionRecord = {
+      id: string;
+      payload: { state: string };
+    };
+
+    const tableName = 'transaction_mutation_isolation';
+    const staged: TransactionRecord = { id: 'staged', payload: { state: 'queued' } };
+    await adapter.createTable(tableName);
+
+    try {
+      await adapter.beginTransaction();
+      await adapter.write(tableName, staged);
+      staged.payload.state = 'mutated-after-queue';
+
+      const firstRead = await adapter.findOne<TransactionRecord>(tableName, { id: 'staged' });
+      if (!firstRead) {
+        throw new Error('Expected the staged record to be visible');
+      }
+      firstRead.payload.state = 'mutated-after-read';
+
+      await expect(adapter.findOne<TransactionRecord>(tableName, { id: 'staged' })).resolves.toEqual({
+        id: 'staged',
+        payload: { state: 'queued' },
+      });
+      await adapter.commit();
+
+      await expect(adapter.read<TransactionRecord>(tableName, { bypassCache: true })).resolves.toEqual([
+        { id: 'staged', payload: { state: 'queued' } },
+      ]);
+    } finally {
+      if (adapter.isInTransaction()) {
+        await adapter.rollback();
+      }
+      await adapter.deleteTable(tableName);
+    }
+  });
+
+  it('rejects public schema changes during a transaction without mutating the table', async () => {
+    const tableName = 'transaction_ddl_guard';
+    const createdTableName = 'transaction_ddl_created';
+    await adapter.createTable(tableName, { initialData: [{ id: 1, value: 'original' }] });
+
+    await adapter.beginTransaction();
+    try {
+      await expect(adapter.createTable(createdTableName)).rejects.toMatchObject({
+        code: 'TRANSACTION_OPERATION_NOT_SUPPORTED',
+        category: ErrorCategory.TRANSACTION,
+      });
+      await expect(adapter.deleteTable(tableName)).rejects.toMatchObject({
+        code: 'TRANSACTION_OPERATION_NOT_SUPPORTED',
+        category: ErrorCategory.TRANSACTION,
+      });
+      await expect(adapter.migrateToChunked(tableName)).rejects.toMatchObject({
+        code: 'TRANSACTION_OPERATION_NOT_SUPPORTED',
+        category: ErrorCategory.TRANSACTION,
+      });
+    } finally {
+      await adapter.rollback();
+    }
+
+    await expect(adapter.hasTable(createdTableName)).resolves.toBe(false);
+    expect(adapter.getTableMeta(tableName)?.mode).toBe('single');
+    await expect(adapter.read(tableName, { bypassCache: true })).resolves.toEqual([{ id: 1, value: 'original' }]);
+    await adapter.deleteTable(tableName);
+  });
+
+  it('serializes a public schema change with transaction start', async () => {
+    const tableName = 'transaction_ddl_start_race';
+    let releaseCreate!: () => void;
+    let markCreateStarted!: () => void;
+    const createBlocked = new Promise<void>(resolve => {
+      releaseCreate = resolve;
+    });
+    const createStarted = new Promise<void>(resolve => {
+      markCreateStarted = resolve;
+    });
+    const writeRecoverably = SingleFileHandler.prototype.writeRecoverably;
+    let blockNextCreate = true;
+    const writeSpy = jest.spyOn(SingleFileHandler.prototype, 'writeRecoverably').mockImplementation(async function (
+      this: SingleFileHandler,
+      ...args: Parameters<SingleFileHandler['writeRecoverably']>
+    ) {
+      if (blockNextCreate) {
+        blockNextCreate = false;
+        markCreateStarted();
+        await createBlocked;
+      }
+      return writeRecoverably.apply(this, args);
+    });
+
+    try {
+      const creation = adapter.createTable(tableName);
+      await createStarted;
+
+      let transactionStarted = false;
+      const transaction = adapter.beginTransaction().then(() => {
+        transactionStarted = true;
+      });
+      await Promise.resolve();
+      expect(transactionStarted).toBe(false);
+
+      releaseCreate();
+      await creation;
+      await transaction;
+    } finally {
+      releaseCreate();
+      writeSpy.mockRestore();
+      if (adapter.isInTransaction()) {
+        await adapter.rollback();
+      }
+      if (await adapter.hasTable(tableName)) {
+        await adapter.deleteTable(tableName);
+      }
+    }
   });
 
   it('persists table metadata immediately after create and write operations', async () => {
