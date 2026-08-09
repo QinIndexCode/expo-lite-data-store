@@ -63,10 +63,10 @@ export class DataReader {
 
   private async readRepresentation(tableName: string, mode: 'single' | 'chunked'): Promise<StorageRecord[]> {
     if (mode === 'chunked') {
-      return withTimeout(this.getChunkedHandler(tableName).readAll(), 10000, `read chunked table ${tableName}`);
+      return withTimeout(this.getChunkedHandler(tableName).readAll(), 30000, `read chunked table ${tableName}`);
     }
 
-    return withTimeout(this.getSingleFile(tableName).read(), 10000, `read single file table ${tableName}`);
+    return withTimeout(this.getSingleFile(tableName).read(), 30000, `read single file table ${tableName}`);
   }
 
   private async readCurrentRepresentation(

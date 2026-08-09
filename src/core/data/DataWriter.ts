@@ -821,7 +821,7 @@ export class DataWriter {
     const existing =
       options?.mode === 'overwrite'
         ? []
-        : await withTimeout(handler.read(), 10000, `read single file table ${tableName}`);
+        : await withTimeout(handler.read(), 30000, `read single file table ${tableName}`);
 
     const final = options?.mode === 'overwrite' ? items : [...existing, ...items];
     const storageCommitToken = createStorageCommitToken();
@@ -844,7 +844,7 @@ export class DataWriter {
     const existing =
       options?.mode === 'overwrite'
         ? []
-        : await withTimeout(singleFile.read(), 10000, `read single file table ${tableName} before chunk migration`);
+        : await withTimeout(singleFile.read(), 30000, `read single file table ${tableName} before chunk migration`);
     const finalData = options?.mode === 'overwrite' ? items : [...existing, ...items];
     const chunkedHandler = this.getChunkedHandler(tableName);
 
@@ -1074,10 +1074,10 @@ export class DataWriter {
     let data: StorageRecord[];
     if (tableMeta.mode === 'chunked') {
       const handler = this.getChunkedHandler(tableName);
-      data = await withTimeout(handler.readAll(), 10000, `read chunked table ${tableName}`);
+      data = await withTimeout(handler.readAll(), 30000, `read chunked table ${tableName}`);
     } else {
       const handler = this.getSingleFile(tableName);
-      data = await withTimeout(handler.read(), 10000, `read single file table ${tableName}`);
+      data = await withTimeout(handler.read(), 30000, `read single file table ${tableName}`);
     }
     return data.length;
   }
@@ -1118,10 +1118,10 @@ export class DataWriter {
           let data: StorageRecord[];
           if (tableMeta.mode === 'chunked') {
             const handler = this.getChunkedHandler(tableName);
-            data = await withTimeout(handler.readAll(), 10000, `read chunked table ${tableName}`);
+            data = await withTimeout(handler.readAll(), 30000, `read chunked table ${tableName}`);
           } else {
             const handler = this.getSingleFile(tableName);
-            data = await withTimeout(handler.read(), 10000, `read single file table ${tableName}`);
+            data = await withTimeout(handler.read(), 30000, `read single file table ${tableName}`);
           }
 
           const filteredData = data.filter(item => {
