@@ -14,6 +14,10 @@
 > 发布治理：删除本地发布便利包装命令；受支持的发布路径是 tag-only GitHub workflow，并执行 tag、`main` 祖先关系、发布门禁和 provenance 校验。
 > 根目录迁移安全：不可读或格式损坏的当前 `meta.ldb` 会被视为已占用；legacy 迁移前会删除空 bootstrap 根目录，避免正确性依赖 move 覆盖既有目录。
 > 运行时卫生：删除未使用的存储抽象，把权限探测移出写入热路径，并让日志按级别输出、测试默认静默。
+> SQLite 储备引擎：新增 `IStorageEngine` 契约与 `SQLiteStorageAdapter`（逻辑表共享单一物理表、WAL、语句全链串行化、`TransactionService` 映射到物理事务）；`StorageAdapterFactory` 支持 `SQLITE` / `SQLITE_ENCRYPTED`，暂未从包根入口导出，默认引擎仍是文件系统。
+> 大文档可读性：`DataReader`/`DataWriter` 表读取安全阀从 10s 提升到 30s，50MB 级 chunked 文档在 Expo Go JS fallback 下不再被内部超时打断。
+> QA 校准：Expo Go 性能阈值首次以真实模拟器实测校准（25MB≈45s、50MB≈90s、plain-5000≈2 万 ops/s），business 大文档 case 收窄到 25MB；50MB 矩阵样本改用写入计数断言替代全表读。
+> 文档收敛：移除 CHANGELOG 中无测量环境的绝对性能数字宣称，统一改为"基准测试中可观测的提升"表述。
 
 ### 📅 2026-07-18 `v3.0.0` 安全边界、存储可靠性与工件卫生
 

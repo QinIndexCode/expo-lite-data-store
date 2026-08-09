@@ -8,17 +8,17 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 
 ## 2. Layered Architecture
 
-| Layer             | Responsibility                                             | Main Components                                                          |
-| ----------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Interface Layer   | Provides unified API interface externally                  | FileSystemStorageAdapter, EncryptedStorageAdapter, StorageAdapterFactory |
-| Data Access Layer | Handles data read/write operations                         | DataReader, DataWriter, QueryEngine                                      |
-| Cache Layer       | Provides caching mechanism to improve query performance    | CacheManager                                                             |
-| Index Layer       | Provides indexing functionality to accelerate data queries | IndexManager                                                             |
-| Encryption Layer  | Provides data encryption and key management                | EncryptedStorageAdapter, crypto-gcm, cryptoProvider                      |
-| Storage Layer     | Handles physical storage of data                           | ChunkedFileHandler, SingleFileHandler                                    |
-| Metadata Layer    | Manages database metadata                                  | MetadataManager                                                          |
-| Monitor Layer     | Monitors system performance and cache status               | PerformanceMonitor, CacheMonitor                                         |
-| Utility Layer     | Provides common utility functions                          | PathHelper, withTimeout, logger                                          |
+| Layer             | Responsibility                                             | Main Components                                                                                |
+| ----------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Interface Layer   | Provides unified API interface externally                  | FileSystemStorageAdapter, EncryptedStorageAdapter, SQLiteStorageAdapter, StorageAdapterFactory |
+| Data Access Layer | Handles data read/write operations                         | DataReader, DataWriter, QueryEngine                                                            |
+| Cache Layer       | Provides caching mechanism to improve query performance    | CacheManager                                                                                   |
+| Index Layer       | Provides indexing functionality to accelerate data queries | IndexManager                                                                                   |
+| Encryption Layer  | Provides data encryption and key management                | EncryptedStorageAdapter, crypto-gcm, cryptoProvider                                            |
+| Storage Layer     | Handles physical storage of data                           | ChunkedFileHandler, SingleFileHandler                                                          |
+| Metadata Layer    | Manages database metadata                                  | MetadataManager                                                                                |
+| Monitor Layer     | Monitors system performance and cache status               | PerformanceMonitor, CacheMonitor                                                               |
+| Utility Layer     | Provides common utility functions                          | PathHelper, withTimeout, logger                                                                |
 
 ## 3. Core Module Design
 
@@ -38,10 +38,19 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 - Field-level and full-table encryption
 - Key management with PBKDF2 + HKDF two-tier derivation
 
+#### SQLiteStorageAdapter
+
+- Experimental SQLite-backed engine built on the `IStorageEngine` contract. Logical tables share one physical `__elds_records` table keyed by `table_name` plus auto-increment id; record payloads are stored as JSON, so encrypted envelopes and plain records use the same storage shape.
+- Uses WAL journal mode with a global insert/update/delete index; all statements are serialized through a process-wide FIFO chain so explicit transactions and background writes cannot interleave.
+- Application-level `TransactionService` transactions map to real SQLite BEGIN/COMMIT; commit replay writes directly to the physical database.
+- Read paths still go through the full-scan `QueryEngine` filter; the `IndexManager`, `CacheManager`, and `DataReader` acceleration layers are not wired into the SQLite engine yet.
+- Experimental: not exported from the package root, not exercised by the consumer QA lanes, and not part of the public support contract. Defaults and factory wiring: `createSQLiteAdapter()` / `createEncryptedSQLiteAdapter()` (SQLITE / SQLITE_ENCRYPTED).
+
 #### StorageAdapterFactory
 
 - Creates appropriate storage adapters based on configuration
-- Supports FILE_SYSTEM and ENCRYPTED adapter types
+- Supports FILE_SYSTEM, ENCRYPTED, SQLITE, and SQLITE_ENCRYPTED adapter types (SQLITE adapter types are experimental and not exported from the package root)
+- FileSystem-backed adapters remain the default engine
 
 ### 3.2 Data Access Layer
 
@@ -76,13 +85,14 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 - AES-256-GCM encryption (default, recommended)
 - AES-256-CTR + HMAC (backward compatible)
 - PBKDF2 key derivation (600,000 configured default; Expo Go may use the documented runtime reduction)
+- Ciphertext payloads carry the actual PBKDF2 iteration count (`iterations`); decryption honors the payload value, so changing `keyIterations` or shipping a library upgrade that adjusts the default never makes existing data undecryptable
 - HKDF for per-record key derivation
 - Field-level and bulk encryption/decryption
 - Mixed legacy CTR/current GCM bulk decryption groups payloads by provider and restores original order
 
 #### cryptoProvider.ts
 
-- Pure JavaScript fallback for Expo Go via `crypto-js`
+- Pure JavaScript fallback for Expo Go via `@noble/hashes`
 - Native acceleration via react-native-quick-crypto (optional)
 - expo-crypto integration for secure random bytes
 
@@ -305,13 +315,13 @@ These are implementation characteristics, not device-independent latency guarant
 
 ## 7. Expo Go Compatibility
 
-| Feature       | Expo Go                          | Standalone APK/IPA           |
-| ------------- | -------------------------------- | ---------------------------- |
-| File System   | ✅ expo-file-system              | ✅ expo-file-system          |
-| Crypto        | ✅ crypto-js/native helpers (JS) | ✅ + native acceleration     |
-| Secure Store  | ✅ expo-secure-store             | ✅ expo-secure-store         |
-| Constants     | ✅ expo-constants                | ✅ expo-constants            |
-| Native Crypto | ❌ (falls back to JS)            | ✅ react-native-quick-crypto |
+| Feature       | Expo Go                       | Standalone APK/IPA           |
+| ------------- | ----------------------------- | ---------------------------- |
+| File System   | ✅ expo-file-system           | ✅ expo-file-system          |
+| Crypto        | ✅ @noble/hashes/helpers (JS) | ✅ + native acceleration     |
+| Secure Store  | ✅ expo-secure-store          | ✅ expo-secure-store         |
+| Constants     | ✅ expo-constants             | ✅ expo-constants            |
+| Native Crypto | ❌ (falls back to JS)         | ✅ react-native-quick-crypto |
 
 ## 8. Configuration
 

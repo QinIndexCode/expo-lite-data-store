@@ -14,6 +14,10 @@
 > Release Governance: Removed local publish convenience wrappers; the supported publication path is the tag-only GitHub workflow with tag, `main`-ancestry, release-gate, and provenance checks.
 > Root Migration Safety: An unreadable or malformed current `meta.ldb` is treated as occupied, while an empty bootstrap root is removed before legacy migration so correctness does not depend on moving over an existing directory.
 > Runtime Hygiene: Removed unused storage abstractions, moved permission probing out of the write hot path, and made logging level-controlled with quiet tests by default.
+> SQLite Reserve Engine: Added the `IStorageEngine` contract and `SQLiteStorageAdapter` (logical tables share one physical table, WAL journal, fully serialized statement chain, `TransactionService` mapped to physical transactions); `StorageAdapterFactory` now supports `SQLITE` / `SQLITE_ENCRYPTED`, not yet exported from the package root, with the FileSystem engine remaining the default.
+> Large-Document Readability: The `DataReader`/`DataWriter` table read guard was raised from 10s to 30s so 50MB-class chunked documents are no longer interrupted by the internal timeout on Expo Go with the JavaScript fallback provider.
+> QA Calibration: Expo Go performance thresholds were calibrated for the first time against a real emulator run (25MB≈45s, 50MB≈90s, plain-5000≈20k ops/s); the business large-document case was narrowed to 25MB, and the 50MB matrix sample asserts counts from the write result instead of a full-table read.
+> Documentation Convergence: Removed unverifiable absolute performance numbers from the changelog history, replacing them with "measurable gain in benchmarks" wording.
 
 ### 📅 2026-07-18 `v3.0.0` Security Boundary, Reliability, and Release Contract
 

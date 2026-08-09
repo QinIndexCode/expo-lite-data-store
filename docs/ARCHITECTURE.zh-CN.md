@@ -8,17 +8,17 @@ Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案�
 
 ## 2. 分层架构
 
-| 层级       | 职责                   | 主要组件                                                                 |
-| ---------- | ---------------------- | ------------------------------------------------------------------------ |
-| 接口层     | 对外提供统一 API       | FileSystemStorageAdapter、EncryptedStorageAdapter、StorageAdapterFactory |
-| 数据访问层 | 处理数据读写           | DataReader、DataWriter、QueryEngine                                      |
-| 缓存层     | 提供缓存以提高查询性能 | CacheManager                                                             |
-| 索引层     | 提供索引以加速查询     | IndexManager                                                             |
-| 加密层     | 提供数据加密和密钥管理 | EncryptedStorageAdapter、crypto-gcm、cryptoProvider                      |
-| 存储层     | 负责数据的物理存储     | ChunkedFileHandler、SingleFileHandler                                    |
-| 元数据层   | 管理数据库元数据       | MetadataManager                                                          |
-| 监控层     | 监控系统性能和缓存状态 | PerformanceMonitor、CacheMonitor                                         |
-| 工具层     | 提供通用基础能力       | PathHelper、withTimeout、logger                                          |
+| 层级       | 职责                   | 主要组件                                                                                       |
+| ---------- | ---------------------- | ---------------------------------------------------------------------------------------------- |
+| 接口层     | 对外提供统一 API       | FileSystemStorageAdapter、EncryptedStorageAdapter、SQLiteStorageAdapter、StorageAdapterFactory |
+| 数据访问层 | 处理数据读写           | DataReader、DataWriter、QueryEngine                                                            |
+| 缓存层     | 提供缓存以提高查询性能 | CacheManager                                                                                   |
+| 索引层     | 提供索引以加速查询     | IndexManager                                                                                   |
+| 加密层     | 提供数据加密和密钥管理 | EncryptedStorageAdapter、crypto-gcm、cryptoProvider                                            |
+| 存储层     | 负责数据的物理存储     | ChunkedFileHandler、SingleFileHandler                                                          |
+| 元数据层   | 管理数据库元数据       | MetadataManager                                                                                |
+| 监控层     | 监控系统性能和缓存状态 | PerformanceMonitor、CacheMonitor                                                               |
+| 工具层     | 提供通用基础能力       | PathHelper、withTimeout、logger                                                                |
 
 ## 3. 核心模块设计
 
@@ -38,10 +38,19 @@ Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案�
 - 字段级和整表加密
 - 基于 PBKDF2 + HKDF 的两级密钥派生
 
+#### SQLiteStorageAdapter
+
+- 基于 `IStorageEngine` 契约的实验性 SQLite 引擎。逻辑表共享单一物理表 `__elds_records`，以 `table_name` + 自增 id 为键；record payload 以 JSON 存储，加密信封与明文记录使用相同的存储形态。
+- 使用 WAL journal mode 与全局插入/更新/删除索引；所有语句经进程级 FIFO 链串行化，显式事务与后台写入不会交错。
+- 应用层 `TransactionService` 事务映射到真实 SQLite BEGIN/COMMIT；commit replay 直接写入物理数据库。
+- 读取路径仍走全表扫描的 `QueryEngine` 过滤；`IndexManager`、`CacheManager` 与 `DataReader` 加速层尚未接入 SQLite 引擎。
+- 实验性：未从包根入口导出，不参与 consumer QA lane，不属于公共支持契约。默认与工厂装配：`createSQLiteAdapter()` / `createEncryptedSQLiteAdapter()`（SQLITE / SQLITE_ENCRYPTED）。
+
 #### StorageAdapterFactory
 
 - 根据配置创建合适的存储适配器
-- 支持 FILE_SYSTEM 和 ENCRYPTED 适配器类型
+- 支持 FILE_SYSTEM、ENCRYPTED、SQLITE 和 SQLITE_ENCRYPTED 适配器类型（SQLITE 系列为实验性，未从包根入口导出）
+- 文件系统适配器仍为默认引擎
 
 ### 3.2 数据访问层
 
@@ -76,13 +85,14 @@ Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案�
 - 默认并推荐使用 AES-256-GCM
 - 向后兼容 AES-256-CTR + HMAC
 - PBKDF2 密钥派生，配置默认值为 600,000；Expo Go 可使用文档约定的运行时降档
+- 密文 payload 携带加密时实际的 PBKDF2 迭代数（`iterations` 字段），解密以 payload 为准；修改 `keyIterations` 或升级库调整默认工作因子不会使旧数据不可解密
 - 使用 HKDF 快速派生单记录密钥
 - 字段级和批量加解密
 - legacy CTR / 当前 GCM 混合批量解密会按 provider 分组并恢复原始顺序
 
 #### cryptoProvider.ts
 
-- Expo Go 通过 `crypto-js` 使用纯 JavaScript 路径
+- Expo Go 通过 `@noble/hashes` 使用纯 JavaScript 路径
 - 可选使用 react-native-quick-crypto 原生加速
 - 集成 expo-crypto 生成安全随机字节
 
@@ -304,13 +314,13 @@ Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案�
 
 ## 7. Expo Go 兼容性
 
-| 能力         | Expo Go                           | 独立 APK/IPA                 |
-| ------------ | --------------------------------- | ---------------------------- |
-| 文件系统     | ✅ expo-file-system               | ✅ expo-file-system          |
-| 加密         | ✅ crypto-js/native helpers（JS） | ✅ 支持原生加速              |
-| Secure Store | ✅ expo-secure-store              | ✅ expo-secure-store         |
-| Constants    | ✅ expo-constants                 | ✅ expo-constants            |
-| 原生加密     | ❌，回退到 JS                     | ✅ react-native-quick-crypto |
+| 能力         | Expo Go                        | 独立 APK/IPA                 |
+| ------------ | ------------------------------ | ---------------------------- |
+| 文件系统     | ✅ expo-file-system            | ✅ expo-file-system          |
+| 加密         | ✅ @noble/hashes/helpers（JS） | ✅ 支持原生加速              |
+| Secure Store | ✅ expo-secure-store           | ✅ expo-secure-store         |
+| Constants    | ✅ expo-constants              | ✅ expo-constants            |
+| 原生加密     | ❌，回退到 JS                  | ✅ react-native-quick-crypto |
 
 ## 8. 配置
 

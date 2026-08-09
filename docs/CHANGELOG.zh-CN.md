@@ -4,9 +4,16 @@
 
 [README 入口](../README.md) | [English](./CHANGELOG.en.md) | [API 参考](./API.zh-CN.md)
 
-## [Unreleased]
+## [3.0.1] - 2026-08-10
+
+### 新增
+
+- 实验性 SQLite 存储引擎基础设施：`IStorageEngine` 引擎契约、`SQLiteStorageAdapter`（逻辑表共享单一物理表 `__elds_records`，以 `table_name` + 自增 id 为键，payload 以 JSON 存储）以及 `StorageAdapterFactory` 对 `SQLITE` / `SQLITE_ENCRYPTED` 的支持。尚未从包根入口导出，文件系统引擎仍为默认。应用层 `TransactionService` 事务映射到真实 SQLite BEGIN/COMMIT，所有语句经过进程内 FIFO 链串行化。
 
 ### 变更
+
+- 将库内表读取安全阀从 10 秒提升到 30 秒（DataReader、DataWriter），使大体积 chunked 文档（最高 50MB）在较慢运行时（如使用 JS fallback provider 的 Expo Go）下仍可查询。
+- 依据真实 MuMu + Expo Go 56 运行时基线校准 Expo Go QA 性能阈值（25MB 场景约 45s、50MB 约 90s、plain-5000 批量吞吐 ≥ 20000 ops/s），并把 business 大文档 QA case 收窄到 25MB 以留在库内读取安全阀内；50MB 矩阵样本改为用写入返回的计数断言，不再执行全表读取。
 
 - 删除未使用的 `FileOperationManager`、`FileHandlerFactory`、`FileInfoCache`、`StorageStrategy` 与 legacy `ICacheAdapter` 模块，并把存储权限探测移到 adapter 初始化阶段，避免写入热路径重复执行文件系统检查。
 - 通过 `EXPO_LITE_DATA_STORE_LOG_LEVEL` 增加有界 logger 级别（`silent|error|warn|info|debug`）；非测试默认 `warn`，测试默认静默，除非设置 `EXPO_LITE_DATA_STORE_TEST_LOGS=1`。
@@ -108,7 +115,7 @@
 ### 新增
 
 - AES-256-GCM 加密模式，符合 NIST SP 800-38D 与 OWASP MASVS 2026
-- PBKDF2 + HKDF 两级密钥派生，默认 600,000 次迭代，初次派生约 2 秒，后续单条记录约 3μs
+- PBKDF2 + HKDF 两级密钥派生，默认 600,000 次迭代；派生是一次性成本，耗时取决于设备与运行时，派生结果缓存后供后续加解密复用
 - 自动识别加密版本，新数据默认使用 GCM，旧数据继续兼容 CTR+HMAC
 - 用于 GCM 批量加密的 `crypto-gcm.ts` 模块
 - 用于共享错误定义的 `crypto-errors.ts`
@@ -141,8 +148,8 @@
 - 通过预编译正则优化 `$like` 查询
 - 通过递归 key 排序优化缓存 key 生成
 - 通过最小堆优化缓存过期清理，复杂度从 O(n) 降为 O(k log n)
-- 通过 JSON 近似法优化缓存大小计算，提速 10 到 100 倍
-- 通过批处理优化索引重建，提速 3 到 5 倍
+- 通过 JSON 近似法优化缓存大小计算，基准测试中观测到明显提升（幅度取决于数据分布与设备）
+- 通过批处理优化索引重建，基准测试中观测到明显提升
 - 使用 `Set` 优化 `QueryEngine` 的 `$or` 去重
 - 用新的简化结构更新 `README.md`
 - 合并并清理中英文文档
@@ -166,12 +173,12 @@
 
 ### 性能
 
-- `$like` 查询：通过预编译正则提速 20% 到 50%
-- 缓存过期清理：通过最小堆提速 5 到 10 倍
-- 缓存大小计算：通过 JSON 近似法提速 10 到 100 倍
-- 索引重建：通过批处理提速 3 到 5 倍
-- GCM 加密：首次 PBKDF2 派生后，每条记录约 3μs
-- 总体加密操作：提升约 30% 到 50%
+- `$like` 查询：使用预编译正则，基准测试中观测到明显提升（幅度取决于数据分布）
+- 缓存过期清理：改用最小堆，基准测试中观测到明显提升
+- 缓存大小计算：采用 JSON 近似法，基准测试中观测到明显提升
+- 索引重建：采用批处理，基准测试中观测到明显提升
+- GCM 加密：密钥派生后单条记录走缓存密钥路径，具体延迟需在目标设备实测，不作跨设备保证
+- 总体加密操作：基准测试中观测到明显提升（幅度取决于数据规模与运行时）
 
 ## [2.0.0-beta.4] - 2026-02-06
 
