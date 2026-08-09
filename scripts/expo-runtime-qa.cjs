@@ -23,7 +23,15 @@ const emulatorCmd =
 const QA_PREFIX = 'LITESTORE_QA::';
 const DEFAULT_CHANNELS = ['single-package', 'managed-compatible'];
 const DEFAULT_LAYERS = ['contract', 'runtime'];
-const DEFAULT_RUNTIME_GROUPS = ['functional', 'edge', 'security', 'large-file', 'concurrency', 'business'];
+const DEFAULT_RUNTIME_GROUPS = [
+  'functional',
+  'edge',
+  'security',
+  'large-file',
+  'concurrency',
+  'business',
+  'performance',
+];
 const DEFAULT_PROFILES = ['expo-go-js'];
 const DEFAULT_SOAK_MINUTES = 30;
 const DEFAULT_RESTART_INTERVAL_MINUTES = 5;
@@ -68,6 +76,7 @@ const parseArgs = argv => {
     deviceSerial: null,
     keepEmulator: true,
     cleanupConsumers: true,
+    packagerHostname: null,
     artifactsDir: createDefaultArtifactsDir(),
     usesDefaultArtifacts: true,
   };
@@ -126,6 +135,9 @@ const parseArgs = argv => {
         break;
       case 'cleanup-consumers':
         options.cleanupConsumers = value !== 'false';
+        break;
+      case 'packager-hostname':
+        options.packagerHostname = value === 'auto' ? null : value;
         break;
       default:
         break;
@@ -1319,21 +1331,37 @@ const buildPhaseEventMatcher =
       event && event.channel === channel && event.mode === mode && event.profile === profile && event.runId === runId
     );
 
-const extractExpoConnectionInfo = line => {
+const isEmulatorSerial = serial => /^(?:emulator-\d+|127\.0\.0\.1:\d+|localhost:\d+)/u.test(serial || '');
+
+const resolvePackagerHostname = ({ serial, requested }) => {
+  if (requested) {
+    return requested;
+  }
+  return isEmulatorSerial(serial) ? '10.0.2.2' : null;
+};
+
+const rewriteExpUrlHost = (expUrl, hostname) => {
+  if (!hostname || !expUrl) {
+    return expUrl;
+  }
+  return expUrl.replace(/^exp:\/\/[^/]+/u, `exp://${hostname}`);
+};
+
+const extractExpoConnectionInfo = (line, packagerHostname) => {
   const expMatch = line.match(/exp:\/\/[^\s]+/u);
   if (expMatch) {
     const portMatch = expMatch[0].match(/:(\d+)(?:[/?]|$)/u);
     return {
-      expUrl: expMatch[0],
+      expUrl: rewriteExpUrlHost(expMatch[0], packagerHostname),
       port: portMatch ? Number(portMatch[1]) : null,
     };
   }
 
-  const waitingMatch = line.match(/Waiting on https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/iu);
+  const waitingMatch = line.match(/Waiting on https?:\/\/[^\s:]+:(\d+)/iu);
   if (waitingMatch) {
     const port = Number(waitingMatch[1]);
     return {
-      expUrl: `exp://127.0.0.1:${port}`,
+      expUrl: `exp://${packagerHostname || '127.0.0.1'}:${port}`,
       port,
     };
   }
@@ -1455,11 +1483,11 @@ const bringExpoToForeground = async ({ serial, expUrl, consumerDir, profile }) =
   wakeAndUnlockDevice(serial);
 };
 
-const startExpoServer = async ({ consumerDir, outputFile, profile }) => {
+const startExpoServer = async ({ consumerDir, outputFile, profile, packagerHostname }) => {
   const startPort = await findAvailablePort();
   let expUrl = null;
   let port = startPort;
-  const args = ['expo', 'start', '--localhost', '--clear', '--port', String(startPort)];
+  const args = ['expo', 'start', '--lan', '--clear', '--port', String(startPort)];
   if (profile === NATIVE_PROFILE) {
     args.splice(2, 0, '--dev-client');
   }
@@ -1482,7 +1510,7 @@ const startExpoServer = async ({ consumerDir, outputFile, profile }) => {
     processHandle,
     outputFile,
     onLine: line => {
-      const connectionInfo = extractExpoConnectionInfo(line);
+      const connectionInfo = extractExpoConnectionInfo(line, packagerHostname);
       if (connectionInfo) {
         if (!expUrl) {
           expUrl = connectionInfo.expUrl;
@@ -1543,6 +1571,7 @@ const runExpoPhase = async ({
   soakMinutes,
   restartIntervalMinutes,
   recordCase,
+  packagerHostname,
 }) => {
   const phaseRunId = `${channel}-${profile}-${mode}-${Date.now()}`;
   const matchesPhaseEvent = buildPhaseEventMatcher({
@@ -1585,6 +1614,7 @@ const runExpoPhase = async ({
     consumerDir,
     outputFile: expoLogFile,
     profile,
+    packagerHostname,
   });
 
   let expUrl = null;
@@ -2015,6 +2045,10 @@ const runChannel = async ({ channel, profile, tarballPath, options, serial, reco
   const nativeBuildContext = {
     built: false,
   };
+  const packagerHostname = resolvePackagerHostname({
+    serial,
+    requested: options.packagerHostname,
+  });
   const channelRecorder = record => {
     const normalizedRecord = {
       profile,
@@ -2118,6 +2152,7 @@ const runChannel = async ({ channel, profile, tarballPath, options, serial, reco
       soakMinutes: options.soakMinutes,
       restartIntervalMinutes: options.restartIntervalMinutes,
       recordCase: channelRecorder,
+      packagerHostname,
     });
 
     if (options.layers.includes('runtime')) {
@@ -2133,6 +2168,7 @@ const runChannel = async ({ channel, profile, tarballPath, options, serial, reco
         soakMinutes: options.soakMinutes,
         restartIntervalMinutes: options.restartIntervalMinutes,
         recordCase: channelRecorder,
+        packagerHostname,
       });
 
       if (channel === 'managed-compatible') {
@@ -2148,6 +2184,7 @@ const runChannel = async ({ channel, profile, tarballPath, options, serial, reco
           soakMinutes: options.soakMinutes,
           restartIntervalMinutes: options.restartIntervalMinutes,
           recordCase: channelRecorder,
+          packagerHostname,
         });
       }
     }
@@ -2165,6 +2202,7 @@ const runChannel = async ({ channel, profile, tarballPath, options, serial, reco
         soakMinutes: options.soakMinutes,
         restartIntervalMinutes: options.restartIntervalMinutes,
         recordCase: channelRecorder,
+        packagerHostname,
       });
     }
 
