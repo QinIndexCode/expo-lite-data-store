@@ -30,6 +30,7 @@ import {
 } from '../utils/crypto';
 import { configManager } from './config/ConfigManager';
 import storage from './adapter/FileSystemStorageAdapter';
+import type { IStorageEngine } from '../types/storageEngineInfc';
 import { ErrorHandler as StorageErrorHandler } from '../utils/StorageErrorHandler';
 import { StorageError } from '../types/storageErrorInfc';
 import { QueryEngine } from './query/QueryEngine';
@@ -63,6 +64,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   private maxCacheSize = configManager.getConfig().encryption.maxCacheSize;
   private requireAuthOnAccess: boolean = false;
   private static tableWriteLocks = new Map<string, Promise<void>>();
+  private readonly engine: IStorageEngine;
   private readonly transactionOwner: TransactionOwnerToken = {};
 
   private normalizeStorageInput<T extends object>(data: StorageInput<T>): StorageRecord[] {
@@ -129,8 +131,9 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     });
   }
 
-  constructor(options?: { requireAuthOnAccess?: boolean }) {
+  constructor(options?: { requireAuthOnAccess?: boolean; engine?: IStorageEngine }) {
     this.requireAuthOnAccess = options?.requireAuthOnAccess ?? false;
+    this.engine = options?.engine ?? storage;
     this.validateConfig();
   }
 
@@ -182,7 +185,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   async ensureInitialized(): Promise<void> {
-    await storage.ensureInitialized();
+    await this.engine.ensureInitialized();
 
     if (this.requireAuthOnAccess) {
       await this.key();
@@ -242,7 +245,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   private assertTransactionOwnership(): void {
-    storage.assertTransactionOwner(this.transactionOwner);
+    this.engine.assertTransactionOwner(this.transactionOwner);
   }
 
   private withTransactionOwner(): TableOptions & TransactionScopedOptions;
@@ -255,7 +258,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   private isStorageTransactionInProgress(): boolean {
-    return storage.isInTransaction();
+    return this.engine.isInTransaction();
   }
 
   private async withTableWriteLock<T>(tableName: string, operation: () => Promise<T>): Promise<T> {
@@ -283,8 +286,8 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
   private async getTableMeta(tableName: string) {
     this.assertTransactionOwnership();
-    await storage.ensureInitialized();
-    const tableMeta = storage.getTableMeta(tableName);
+    await this.engine.ensureInitialized();
+    const tableMeta = this.engine.getTableMeta(tableName);
     this.assertPersistedEncryptionPolicy(tableName, tableMeta);
     this.assertTableAccessPolicy(tableName, tableMeta);
     return tableMeta;
@@ -499,7 +502,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         return undefined;
       }
 
-      await storage.createTable(tableName, this.withTransactionOwner(policy));
+      await this.engine.createTable(tableName, this.withTransactionOwner(policy));
       tableMeta = await this.getTableMeta(tableName);
     }
 
@@ -702,7 +705,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       });
     }
 
-    const alreadyExists = await storage.hasTable(tableName, this.withTransactionOwner());
+    const alreadyExists = await this.engine.hasTable(tableName, this.withTransactionOwner());
     if (alreadyExists) {
       const tableMeta = await this.getTableMeta(tableName);
       if (tableMeta) {
@@ -713,7 +716,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
     const encryptionPolicy = this.getExplicitCreateTablePolicy(tableOptions, configManager.getConfig());
 
-    await storage.createTable<StorageRecord>(
+    await this.engine.createTable<StorageRecord>(
       tableName,
       this.withTransactionOwner({
         ...tableOptions,
@@ -739,7 +742,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       );
     } catch (error) {
       try {
-        await storage.deleteTable(tableName, this.withTransactionOwner());
+        await this.engine.deleteTable(tableName, this.withTransactionOwner());
       } catch (cleanupError) {
         logger.error(`Failed to clean up table ${tableName} after encrypted initialization failed`, cleanupError);
       }
@@ -752,7 +755,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     return this.withTableWriteLock(tableName, async () => {
       await this.getTableMeta(tableName);
       try {
-        return await storage.deleteTable(tableName, this.withTransactionOwner(_options));
+        return await this.engine.deleteTable(tableName, this.withTransactionOwner(_options));
       } finally {
         this.clearTableCache(tableName);
       }
@@ -761,7 +764,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
   async hasTable(tableName: string, _options?: TableOptions): Promise<boolean> {
     await this.ensureAccessAuthorized();
-    const exists = await storage.hasTable(tableName, this.withTransactionOwner(_options));
+    const exists = await this.engine.hasTable(tableName, this.withTransactionOwner(_options));
     if (exists) {
       await this.getTableMeta(tableName);
     }
@@ -770,10 +773,10 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
   async listTables(_options?: TableOptions): Promise<string[]> {
     await this.ensureAccessAuthorized();
-    const tableNames = await storage.listTables(this.withTransactionOwner(_options));
+    const tableNames = await this.engine.listTables(this.withTransactionOwner(_options));
     if (
       !this.requireAuthOnAccess &&
-      tableNames.some(tableName => storage.getTableMeta(tableName)?.requireAuthOnAccess === true)
+      tableNames.some(tableName => this.engine.getTableMeta(tableName)?.requireAuthOnAccess === true)
     ) {
       throw new StorageError('Listing tables requires strict access authentication', 'PERMISSION_DENIED', {
         details: 'At least one table is bound to the requireAuthOnAccess key scope.',
@@ -839,7 +842,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
             encryptedData = await Promise.all(encryptionPromises);
           }
 
-          return storage.write(
+          return this.engine.write(
             tableName,
             encryptedData,
             this.getStorageWriteOptions(options, tableMeta, 'overwrite', implicitFieldPolicy)
@@ -853,7 +856,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
           }
         }
 
-        const result = await storage.write(
+        const result = await this.engine.write(
           tableName,
           encryptedData,
           this.getStorageWriteOptions(options, tableMeta, 'overwrite', implicitFieldPolicy, finalData.length)
@@ -936,7 +939,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
             );
             encryptedData = await Promise.all(encryptionPromises);
           }
-          return storage.write(
+          return this.engine.write(
             tableName,
             encryptedData,
             this.getStorageWriteOptions(options, tableMeta, undefined, implicitFieldPolicy)
@@ -945,7 +948,10 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
           if (shouldEncryptFullTable) {
             if (options?.mode === 'append') {
               // A full-table append must republish one ciphertext for the combined plaintext generation.
-              const existingEncrypted = await storage.read(tableName, this.withTransactionOwner({ bypassCache: true }));
+              const existingEncrypted = await this.engine.read(
+                tableName,
+                this.withTransactionOwner({ bypassCache: true })
+              );
               let combinedData = finalData;
 
               if (existingEncrypted.length > 0) {
@@ -1002,7 +1008,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
           encryptedData = finalData;
         }
         const storageMode = fullTableTotal !== undefined ? 'overwrite' : options?.mode;
-        const result = await storage.write(
+        const result = await this.engine.write(
           tableName,
           encryptedData,
           this.getStorageWriteOptions(options, tableMeta, storageMode, implicitFieldPolicy, fullTableTotal)
@@ -1046,7 +1052,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         }
         const tableMeta = await this.getTableMeta(tableName);
         const readOptions = options ? { bypassCache: options.bypassCache } : undefined;
-        const raw = await storage.read<StorageRecord>(tableName, this.withTransactionOwner(readOptions));
+        const raw = await this.engine.read<StorageRecord>(tableName, this.withTransactionOwner(readOptions));
         if (raw.length === 0) {
           this.clearTableCache(tableName);
           return [];
@@ -1134,14 +1140,14 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     const key = await this.key();
     const tableMeta = await this.getTableMeta(tableName);
     if (!tableMeta?.encryptFullTable) {
-      return storage.verifyCount(tableName, this.withTransactionOwner());
+      return this.engine.verifyCount(tableName, this.withTransactionOwner());
     }
 
     const metadata = tableMeta.count ?? 0;
     const actual = await this.countWithKey(tableName, key);
     const match = metadata === actual;
     if (!match && !this.isStorageTransactionInProgress()) {
-      await storage.setLogicalRecordCount(tableName, actual, this.withTransactionOwner());
+      await this.engine.setLogicalRecordCount(tableName, actual, this.withTransactionOwner());
     }
     return { metadata, actual, match };
   }
@@ -1246,7 +1252,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     await this.withTableWriteLock(tableName, async () => {
       await this.getTableMeta(tableName);
       this.clearTableCache(tableName);
-      await storage.migrateToChunked(tableName, this.withTransactionOwner());
+      await this.engine.migrateToChunked(tableName, this.withTransactionOwner());
       this.clearTableCache(tableName);
     });
   }
@@ -1272,15 +1278,15 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
   async beginTransaction(options?: TableOptions): Promise<void> {
     await this.ensureAccessAuthorized();
-    await storage.beginTransaction(this.withTransactionOwner(options));
+    await this.engine.beginTransaction(this.withTransactionOwner(options));
   }
 
   async commit(options?: TableOptions): Promise<void> {
     await this.ensureAccessAuthorized();
     try {
-      await storage.commit(this.withTransactionOwner(options));
+      await this.engine.commit(this.withTransactionOwner(options));
     } finally {
-      if (!storage.isInTransaction()) {
+      if (!this.engine.isInTransaction()) {
         this.clearAllCache();
       }
     }
@@ -1289,9 +1295,9 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   async rollback(options?: TableOptions): Promise<void> {
     await this.ensureAccessAuthorized();
     try {
-      await storage.rollback(this.withTransactionOwner(options));
+      await this.engine.rollback(this.withTransactionOwner(options));
     } finally {
-      if (!storage.isInTransaction()) {
+      if (!this.engine.isInTransaction()) {
         this.clearAllCache();
       }
     }
@@ -1338,7 +1344,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     await this.withTableWriteLock(tableName, async () => {
       await this.getTableMeta(tableName);
       this.clearTableCache(tableName);
-      await storage.clearTable(tableName, this.withTransactionOwner());
+      await this.engine.clearTable(tableName, this.withTransactionOwner());
     });
   }
 
