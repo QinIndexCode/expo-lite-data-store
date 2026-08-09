@@ -451,11 +451,15 @@ const setRootKeyCacheEntry = (cacheKey: string, rootKey: Uint8Array): void => {
 };
 
 /** Derives per-record AES and HMAC keys from a cached PBKDF2 root key. */
-const deriveKey = async (masterKey: string, salt: Uint8Array): Promise<{ aesKey: Uint8Array; hmacKey: Uint8Array }> => {
+const deriveKey = async (
+  masterKey: string,
+  salt: Uint8Array,
+  iterationsOverride?: number
+): Promise<{ aesKey: Uint8Array; hmacKey: Uint8Array }> => {
   try {
     ensureKeyCacheCleanupInitialized();
 
-    const iterations = getIterations();
+    const iterations = iterationsOverride ?? getIterations();
     const rootCacheKey = `${iterations}:${bytesToBase64(providerHashBytes(masterKey, 'SHA-256'))}`;
     const cacheKey = `${rootCacheKey}:${bytesToBase64(salt)}`;
     const cachedEntry = keyCache.get(cacheKey);
@@ -596,7 +600,8 @@ const encryptCTR = async (plainText: string, masterKey: string): Promise<string>
     const saltBytes = getSecureRandomBytes(16);
     const ivBytes = getSecureRandomBytes(16);
 
-    const { aesKey, hmacKey } = await deriveKey(masterKey, saltBytes);
+    const iterations = getIterations();
+    const { aesKey, hmacKey } = await deriveKey(masterKey, saltBytes, iterations);
 
     const saltStr = bytesToBase64(saltBytes);
     const ivStr = bytesToBase64(ivBytes);
@@ -612,6 +617,7 @@ const encryptCTR = async (plainText: string, masterKey: string): Promise<string>
       iv: ivStr,
       ciphertext: ciphertextBase64,
       hmac: '',
+      iterations,
     };
     const hmacBytes = computeHMAC(getCtrHmacInput(payload), hmacKey);
     payload.hmac = bytesToBase64(hmacBytes);
@@ -701,7 +707,9 @@ const decryptCTR = async (encryptedBase64: string, masterKey: string): Promise<s
     const saltUint8Array = base64ToBytes(payload.salt);
     const ivBytes = base64ToBytes(payload.iv);
 
-    const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
+    const iterations =
+      typeof payload.iterations === 'number' ? normalizePbkdf2Iterations(payload.iterations, 10000) : getIterations();
+    const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array, iterations);
 
     const computedHmacBytes = computeHMAC(getCtrHmacInput(payload), hmacKey);
     const computedHmacBase64 = bytesToBase64(computedHmacBytes);
@@ -931,7 +939,8 @@ const encryptBulkCTR = async (plainTexts: string[], masterKey: string): Promise<
 
   try {
     const saltBytes = getSecureRandomBytes(16);
-    const { aesKey, hmacKey } = await deriveKey(masterKey, saltBytes);
+    const iterations = getIterations();
+    const { aesKey, hmacKey } = await deriveKey(masterKey, saltBytes, iterations);
     const saltStr = bytesToBase64(saltBytes);
     const encryptedResults: BulkEncryptionResult[] = [];
 
@@ -948,6 +957,7 @@ const encryptBulkCTR = async (plainTexts: string[], masterKey: string): Promise<
         iv: ivStr,
         ciphertext: ciphertextBase64,
         hmac: '',
+        iterations,
       };
       payload.hmac = bytesToBase64(computeHMAC(getCtrHmacInput(payload), hmacKey));
 
@@ -966,6 +976,7 @@ const encryptBulkCTR = async (plainTexts: string[], masterKey: string): Promise<
         iv: result.iv,
         ciphertext: result.encryptedData,
         hmac: result.hmac,
+        iterations,
       };
       return jsonToBase64(payload);
     });
@@ -1041,7 +1052,9 @@ const decryptBulkCTR = async (encryptedTexts: string[], masterKey: string): Prom
       const saltUint8Array = base64ToBytes(payload.salt);
       const ivBytes = base64ToBytes(payload.iv);
 
-      const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array);
+      const iterations =
+        typeof payload.iterations === 'number' ? normalizePbkdf2Iterations(payload.iterations, 10000) : getIterations();
+      const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array, iterations);
 
       const computedHmacBytes = computeHMAC(getCtrHmacInput(payload), hmacKey);
       const computedHmacBase64 = bytesToBase64(computedHmacBytes);

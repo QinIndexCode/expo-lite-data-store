@@ -7,6 +7,8 @@ export interface EncryptedPayload {
   ciphertext: string;
   /** Base64 HMAC that authenticates the encrypted payload. */
   hmac: string;
+  /** PBKDF2 iterations used at encryption time; lets decryption match the original work factor. */
+  iterations?: number;
 }
 
 export interface CachedKeyEntry {
