@@ -1094,6 +1094,19 @@ describe('DataWriter', () => {
       await expect(dataWriter.verifyCount(tableName)).rejects.toMatchObject({ code: 'CORRUPTED_DATA' });
       expect(metadataManager.count(tableName)).toBe(1);
     });
+
+    it('never overwrites the logical count of a full-table encrypted table', async () => {
+      const tableName = 'full_table_verify_count';
+      await dataWriter.createTable(tableName, { mode: 'single', encryptFullTable: true });
+      await dataWriter.write(tableName, [{ __enc: 'envelope' }]);
+      metadataManager.update(tableName, { count: 5 });
+
+      const result = await dataWriter.verifyCount(tableName);
+
+      expect(result).toEqual({ metadata: 5, actual: 1, match: false });
+      expect(metadataManager.count(tableName)).toBe(5);
+      await dataWriter.deleteTable(tableName);
+    });
   });
 
   describe('deleteTable', () => {

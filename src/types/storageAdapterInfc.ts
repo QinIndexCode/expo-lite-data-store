@@ -70,7 +70,7 @@ export interface IStorageAdapter {
   bulkWrite<T extends object = StorageRecord>(
     tableName: string,
     operations: BulkOperation<T>[],
-    options?: TableOptions
+    options?: WriteOptions
   ): Promise<WriteResult>;
 
   migrateToChunked(tableName: string): Promise<void>;

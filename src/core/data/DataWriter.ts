@@ -1085,8 +1085,20 @@ export class DataWriter {
   async verifyCount(tableName: string): Promise<{ metadata: number; actual: number; match: boolean }> {
     const releaseLock = await this.acquireLock(tableName);
     try {
-      await this.getLatestTableMetadata(tableName);
+      const tableMeta = await this.getLatestTableMetadata(tableName);
       const metadataCount = this.metadataManager.count(tableName);
+      // A full-table encrypted table stores one physical envelope for many
+      // logical rows, so the raw physical count must never overwrite the
+      // logical count published by the encrypted adapter. Report without
+      // correcting; only the encrypted facade can verify logical counts.
+      if (tableMeta?.encryptFullTable) {
+        const actualCount = await this.getActualCount(tableName);
+        logger.warn(
+          `[DataWriter] Skipping count correction for full-table encrypted table '${tableName}': ` +
+            `metadata=${metadataCount}, physical=${actualCount}. Use the encrypted storage facade to verify logical counts.`
+        );
+        return { metadata: metadataCount, actual: actualCount, match: metadataCount === actualCount };
+      }
       const actualCount = await this.getActualCount(tableName);
       const match = metadataCount === actualCount;
 

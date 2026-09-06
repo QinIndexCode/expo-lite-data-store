@@ -375,7 +375,7 @@ export const remove = async <T extends object = StorageRecord>(
 export const bulkWrite = async <T extends object = StorageRecord>(
   tableName: string,
   operations: BulkOperation<NonInfer<T>>[],
-  options: TableOptions = {}
+  options: WriteOptions = {}
 ): Promise<WriteResult> => {
   return runTableOperation(tableName, options, ({ adapter }) => adapter.bulkWrite<T>(tableName, operations, options));
 };

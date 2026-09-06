@@ -274,4 +274,21 @@ describe('FileSystemStorageAdapter bulkWrite', () => {
       await expect(adapter.count(tableName)).resolves.toBe(largeDataSet.length);
     });
   });
+
+  describe('implicit table creation', () => {
+    it('forwards write options when creating a table on first bulkWrite', async () => {
+      const implicitTable = 'implicit_bulk_write_table';
+      expect(await adapter.hasTable(implicitTable)).toBe(false);
+
+      const result = await adapter.bulkWrite(
+        implicitTable,
+        [{ type: 'insert' as const, data: { id: 1, name: 'Alice' } }],
+        { encryptFullTable: true }
+      );
+
+      expect(result.totalAfterWrite).toBe(1);
+      expect(adapter.getTableMeta(implicitTable)).toMatchObject({ encryptFullTable: true });
+      await adapter.deleteTable(implicitTable);
+    });
+  });
 });

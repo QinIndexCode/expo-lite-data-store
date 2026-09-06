@@ -1200,7 +1200,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   async bulkWrite<T extends object = StorageRecord>(
     tableName: string,
     operations: BulkOperation<T>[],
-    options?: TableOptions
+    options?: WriteOptions
   ): Promise<WriteResult> {
     const key = await this.key();
     const normalizedOperations = this.normalizeBulkOperations(operations);

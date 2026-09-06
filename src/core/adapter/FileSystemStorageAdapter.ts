@@ -882,7 +882,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     const normalizedOperations = this.normalizeBulkOperations(operations);
     const insertOnlyItems = this.flattenInsertOperations(normalizedOperations);
     if (insertOnlyItems) {
-      const result = await this.dataWriter.write(tableName, insertOnlyItems, { mode: 'append' });
+      const result = await this.dataWriter.write(tableName, insertOnlyItems, { ...options, mode: 'append' });
 
       this.cacheService.clearTableCache(tableName);
       performanceMonitor.record({
@@ -930,7 +930,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
         }
       }
     }
-    const result = await this.dataWriter.write(tableName, finalData, { mode: 'overwrite' });
+    const result = await this.dataWriter.write(tableName, finalData, { ...options, mode: 'overwrite' });
 
     this.cacheService.clearTableCache(tableName);
     performanceMonitor.record({
