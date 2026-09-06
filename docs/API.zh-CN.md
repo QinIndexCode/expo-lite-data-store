@@ -18,6 +18,8 @@
 
 `plainStorage` 以及 `expo-lite-data-store/dist/js/...`、`dist/cjs/...` 等包内深层导入不再属于公开 API。请从 `expo-lite-data-store` 根入口使用 `db` facade 或命名 API。对以 `encrypted: true` 创建的表，每一次表操作都必须传入 `encrypted: true`；选择明文表面的请求会以 fail-closed 方式被拒绝。
 
+上述禁令仅针对字面 `dist/...` 文件路径和已移除的 `plainStorage` 导出。`package.json` 的 `exports` 子路径 `./js`、`./cjs`、`./utils/*` 仍是受支持的兼容写法，会解析到同一份构建产物；新代码请优先使用根入口。
+
 ## 安装契约
 
 本库文档是基于正式支持的 Expo 安装契约编写的。单独执行 `npm install expo-lite-data-store` 不属于受支持的安装方式。
@@ -55,6 +57,16 @@ import { db, configManager, performanceMonitor, StorageError, StorageErrorCode }
 
 `StorageErrorCode` 既作为运行时常量映射导出，也对应 `StorageError.code` 使用的字符串字面量联合类型。
 
+### 受支持的子路径导入
+
+```ts
+import { db } from 'expo-lite-data-store/js';
+import { db } from 'expo-lite-data-store/cjs';
+import { randomBytes } from 'expo-lite-data-store/utils/cryptoProvider';
+```
+
+`./js` 与 `./cjs` 分别对应根入口的 `import` 与 `require` 条件（`./js` 走 ESM 构建，`./cjs` 走 CJS 构建），`./utils/*` 则暴露加密提供者等内部工具模块。这些子路径用于打包器与互操作兼容；新代码请从包根入口导入。
+
 ### 导出分组
 
 | 导出分组       | 公共项                                                                                                                                                                                                                                                                                                                                                                         |
@@ -65,7 +77,7 @@ import { db, configManager, performanceMonitor, StorageError, StorageErrorCode }
 | 配置导出       | `configManager`, `ConfigManager`                                                                                                                                                                                                                                                                                                                                               |
 | 监控导出       | `performanceMonitor`                                                                                                                                                                                                                                                                                                                                                           |
 | 加密辅助导出   | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`                                                                                                                                                                                                                                        |
-| 错误导出       | `StorageError`, `StorageErrorCode`, `CryptoError`                                                                                                                                                                                                                                                                                                                              |
+| 错误导出       | `StorageError`, `StorageErrorCode`, `CryptoError`, `TransactionError`                                                                                                                                                                                                                                                                                                          |
 | 类型导出       | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FindOneOptions`, `FindManyOptions`, `UpdateOptions`, `FilterCondition`, `BulkOperation`, `StorageInput`, `StorageRecord`, `UpdatePayload`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats` |
 
 ### `db` facade 与命名导出
@@ -166,7 +178,7 @@ type ReadOptions<T extends object = StorageRecord> = CommonOptions & {
 
 需要特别区分：
 
-- 顶层公开 `read()` 会剥离查询相关字段，按“原始表读取”处理；
+- 顶层公开 `read()` 会剥离查询相关字段，返回存储记录而不做服务端过滤、排序或分页；缓存（`bypassCache`）与安全（`encrypted`、`requireAuthOnAccess`）选项仍然生效；
 - 真正带过滤、排序、分页的读取应使用 `findMany()`。
 
 ### `WriteOptions`
@@ -303,7 +315,7 @@ const result = await verifyCountTable('users');
 仅建议在诊断或维护场景使用：
 
 - 它会比较元数据计数与真实存储数据；
-- 发现不一致时会自动修复元数据；
+- 发现不一致时会自动修复元数据，但明文表面的整表加密表除外：此时只上报物理信封计数，不覆盖逻辑计数（加密表面会解密后按逻辑计数并修复）；
 - 成本明显高于 `countTable()`。
 
 ### `migrateToChunked(tableName, options?)`
@@ -387,6 +399,7 @@ type BulkOperation<T extends object = StorageRecord> =
 - 保留操作顺序；
 - 内部会对纯插入场景走专门的优化路径；
 - 支持在事务中使用；
+- 接受 `WriteOptions`：`encryptFullTable` 用于选择加密表面，写入隐式建表时同样生效；
 - 更新和删除按传入的 `where` 条件匹配记录，包含没有 `id` 字段的行；
 - 返回的 `WriteResult.written` 在当前运行时中表示受影响的记录数。
 
@@ -488,6 +501,8 @@ findMany<T extends object = StorageRecord>(tableName, {
 如果你不强制指定算法，运行时会根据数据规模和排序形态自动选择更合适的实现。
 
 所有受支持的算法在升序和降序下都会保持 `null`、`undefined` 的相对顺序，并将它们放在结果末尾。
+
+数字、bigint 与日期在所有算法中都按大小排序，包括为字符串优化的 `fast` 与 `slow` 路径。
 
 ## 更新与删除 API
 
@@ -733,6 +748,8 @@ performanceMonitor.configure({
 - `resetRuntimeOptions()`
 - `destroy()`
 
+运行时默认值：`maxRecords: 1000`、`sampleRate: 0.1`、阈值 `{ minSuccessRate: 90, maxAverageDuration: 1000, maxP95Duration: 3000 }`，性能采样默认关闭（`monitoring.enablePerformanceTracking: false`）；需要采样时请显式开启。
+
 ## 加密辅助函数
 
 ### 命名加密导出
@@ -769,6 +786,8 @@ import {
 - `requireAuthOnAccess: true` 采用严格语义，当运行时无法真正强制逐次访问认证时，会抛出 `AUTH_ON_ACCESS_UNSUPPORTED`；
 - 严格密钥作用域绝不会从常规主密钥静默派生或替代；若试图原地把既有加密数据升级为严格认证、切换字段级/整表级加密或修改加密字段，在应用显式迁移并验证数据前会以 `MIGRATION_FAILED` 失败；
 - Expo Go 支持常规加密存储，但不支持严格的生物识别或逐次访问认证保证。
+- `hash(data, algorithm?)` 默认使用 `SHA-512`。
+- `encryption.keyIterations` 默认 `600000`（合法范围 `10000`–`1000000`）。Expo Go 下运行时会把工作因子压到 `20000` 并打 warning，因此同样数据在 Expo Go 下的安全强度低于独立构建。解密沿用各 payload 内记录的迭代数（钳制到同样边界），所以只解密应用自己写入的数据，外部输入先自行限流。
 
 ## 错误与失败语义
 
@@ -797,7 +816,7 @@ try {
 - `timestamp`
 - `cause`
 
-错误码以 `TRANSACTION_*` 开头或为 `NO_TRANSACTION_IN_PROGRESS` 的 `StorageError` 使用 `category: 'transaction'`。
+错误码以 `TRANSACTION_*` 开头、为 `SNAPSHOT_FAILED` 或为 `NO_TRANSACTION_IN_PROGRESS` 的 `StorageError` 使用 `category: 'transaction'`。事务生命周期失败以 `TransactionError` 抛出，它继承自 `StorageError`，因此 `instanceof StorageError` 可以捕获它们。`LOCK_TIMEOUT` 使用 `category: 'timeout'`。
 
 ### 常见 `StorageErrorCode`
 
@@ -814,6 +833,8 @@ try {
 | `TRANSACTION_IN_PROGRESS`             | 当前表面已经存在一个活动事务                                            |
 | `NO_TRANSACTION_IN_PROGRESS`          | 没有活动事务却调用了 `commit()` 或 `rollback()`                         |
 | `TRANSACTION_OPERATION_NOT_SUPPORTED` | 活动事务不能执行会立即持久化的公开 schema 操作                          |
+| `TRANSACTION_ROLLBACK_FAILED`         | 提交或回滚失败后未能把所有表恢复到快照                                  |
+| `SNAPSHOT_FAILED`                     | 事务记录数据无法隔离或生成快照                                          |
 | `LOCK_TIMEOUT`                        | 并发写锁获取超时                                                        |
 | `TIMEOUT`                             | 操作超过了配置的超时预算                                                |
 | `CORRUPTED_DATA`                      | 磁盘数据无法安全解析                                                    |
@@ -826,7 +847,7 @@ try {
 
 ### `CryptoService`
 
-`CryptoService` 面向需要更底层加密模块表面的高级使用者，而不是普通业务调用。
+`CryptoService` 为高级使用者 re-export 三个加密提供者原语：`deriveKey`（PBKDF2 密钥派生）、`randomBytes`（安全随机数生成）与 `hash`（SHA-256/SHA-512 摘要）。记录与字段加密请优先使用 `encrypt`/`decrypt` 等便捷辅助函数。
 
 ## 相关文档
 

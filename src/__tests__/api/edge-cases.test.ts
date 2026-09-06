@@ -315,6 +315,34 @@ describe('edge cases and failure handling', () => {
       expect(await findOne(ENCRYPTED_TABLE, { where: { id: 1 }, encrypted: true })).toBeNull();
       expect(await findOne(PLAIN_TABLE, { where: { id: 1 } })).toBeNull();
     });
+
+    it('commits staged writes in an encrypted transaction with read-your-write', async () => {
+      await createTable(ENCRYPTED_TABLE, { encrypted: true });
+
+      await beginTransaction({ encrypted: true });
+      await insert(ENCRYPTED_TABLE, { id: 1, name: 'Alice' }, { encrypted: true });
+      await insert(ENCRYPTED_TABLE, { id: 2, name: 'Bob' }, { encrypted: true });
+
+      const staged = await findOne<UserRecord>(ENCRYPTED_TABLE, { where: { id: 2 }, encrypted: true });
+      expect(staged?.name).toBe('Bob');
+      await commit({ encrypted: true });
+
+      const committed = await findMany<UserRecord>(ENCRYPTED_TABLE, { where: {}, encrypted: true });
+      expect(committed.map(record => record.name).sort()).toEqual(['Alice', 'Bob']);
+    });
+
+    it('rolls back staged writes in an encrypted transaction', async () => {
+      await createTable(ENCRYPTED_TABLE, { encrypted: true });
+      await insert(ENCRYPTED_TABLE, { id: 1, name: 'Alice' }, { encrypted: true });
+
+      await beginTransaction({ encrypted: true });
+      await insert(ENCRYPTED_TABLE, { id: 2, name: 'Bob' }, { encrypted: true });
+      await rollback({ encrypted: true });
+
+      expect(await findOne(ENCRYPTED_TABLE, { where: { id: 2 }, encrypted: true })).toBeNull();
+      const remaining = await findMany<UserRecord>(ENCRYPTED_TABLE, { where: {}, encrypted: true });
+      expect(remaining.map(record => record.name)).toEqual(['Alice']);
+    });
   });
 
   describe('corrupted data', () => {

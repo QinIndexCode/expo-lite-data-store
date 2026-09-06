@@ -94,6 +94,14 @@ Do not create a release tag until the corresponding `main` CI run is green.
    git push origin "v${VERSION}"
    ```
 
+   The PowerShell equivalent is:
+
+   ```powershell
+   $version = node -p "require('./package.json').version"
+   git tag -a "v$version" -m "Release v$version"
+   git push origin "v$version"
+   ```
+
 7. Watch `Release package` and verify the registry after it succeeds:
 
    ```bash

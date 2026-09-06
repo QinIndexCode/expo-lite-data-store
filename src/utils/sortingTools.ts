@@ -57,6 +57,9 @@ export function sortByColumn<T extends object>(data: T[], column: string, order:
 
 /**
  * String-comparison sort for clean, homogeneous data.
+ * Non-string pairs (numbers, bigints, dates) delegate to the shared
+ * value-aware comparator so numeric columns sort by magnitude, not by
+ * code-unit order; string pairs keep the branch-free `<` fast path.
  * @example
  * // Fast sort clean array by name
  * const sortedItems = sortByColumnFast(items, 'name', 'desc');
@@ -73,9 +76,11 @@ export function sortByColumnFast<T extends object>(data: T[], column: string, or
     const nullishComparison = compareNullishValues(va, vb);
     if (nullishComparison !== undefined) return nullishComparison;
 
-    const strA = String(va);
-    const strB = String(vb);
-    return strA === strB ? 0 : strA < strB ? -asc : asc;
+    if (typeof va !== 'string' || typeof vb !== 'string') {
+      return compareSortValues(va, vb, order);
+    }
+
+    return va === vb ? 0 : va < vb ? -asc : asc;
   });
 }
 
@@ -155,6 +160,8 @@ export function sortByColumnMerge<T extends object>(data: T[], column: string, o
 
 /**
  * Locale-aware fallback sort for user-facing text.
+ * Non-string pairs delegate to the shared value-aware comparator so numeric
+ * columns sort by magnitude; string pairs keep locale-aware ordering.
  * @example
  * // Sort array with Chinese names
  * const sortedProducts = sortByColumnSlow(products, 'name', 'asc');
@@ -171,6 +178,10 @@ export function sortByColumnSlow<T extends object>(data: T[], column: string, or
     const nullishComparison = compareNullishValues(va, vb);
     if (nullishComparison !== undefined) return nullishComparison;
 
-    return String(va).localeCompare(String(vb)) * asc;
+    if (typeof va !== 'string' || typeof vb !== 'string') {
+      return compareSortValues(va, vb, order);
+    }
+
+    return va.localeCompare(vb) * asc;
   });
 }

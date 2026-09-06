@@ -8,17 +8,18 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 
 ## 2. Layered Architecture
 
-| Layer             | Responsibility                                             | Main Components                                                                                |
-| ----------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Interface Layer   | Provides unified API interface externally                  | FileSystemStorageAdapter, EncryptedStorageAdapter, SQLiteStorageAdapter, StorageAdapterFactory |
-| Data Access Layer | Handles data read/write operations                         | DataReader, DataWriter, QueryEngine                                                            |
-| Cache Layer       | Provides caching mechanism to improve query performance    | CacheManager                                                                                   |
-| Index Layer       | Provides indexing functionality to accelerate data queries | IndexManager                                                                                   |
-| Encryption Layer  | Provides data encryption and key management                | EncryptedStorageAdapter, crypto-gcm, cryptoProvider                                            |
-| Storage Layer     | Handles physical storage of data                           | ChunkedFileHandler, SingleFileHandler                                                          |
-| Metadata Layer    | Manages database metadata                                  | MetadataManager                                                                                |
-| Monitor Layer     | Monitors system performance and cache status               | PerformanceMonitor, CacheMonitor                                                               |
-| Utility Layer     | Provides common utility functions                          | PathHelper, withTimeout, logger                                                                |
+| Layer             | Responsibility                                             | Main Components                                                                                               |
+| ----------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Interface Layer   | Provides unified API interface externally                  | FileSystemStorageAdapter, EncryptedStorageAdapter, SQLiteStorageAdapter (experimental), StorageAdapterFactory |
+| Service Layer     | Coordinates transactions, API routing, and background sync | TransactionService, AutoSyncService, CacheService, ApiRouter, ApiWrapper                                      |
+| Data Access Layer | Handles data read/write operations                         | DataReader, DataWriter, QueryEngine                                                                           |
+| Cache Layer       | Provides caching mechanism to improve query performance    | CacheManager                                                                                                  |
+| Index Layer       | Provides indexing functionality to accelerate data queries | IndexManager                                                                                                  |
+| Encryption Layer  | Provides data encryption and key management                | EncryptedStorageAdapter, crypto-gcm, cryptoProvider                                                           |
+| Storage Layer     | Handles physical storage of data                           | ChunkedFileHandler, SingleFileHandler                                                                         |
+| Metadata Layer    | Manages database metadata                                  | MetadataManager                                                                                               |
+| Monitor Layer     | Monitors system performance and cache status               | PerformanceMonitor, CacheMonitor                                                                              |
+| Utility Layer     | Provides common utility functions                          | PathHelper, withTimeout, logger                                                                               |
 
 ## 3. Core Module Design
 

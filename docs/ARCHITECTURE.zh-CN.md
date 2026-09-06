@@ -8,17 +8,18 @@ Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案�
 
 ## 2. 分层架构
 
-| 层级       | 职责                   | 主要组件                                                                                       |
-| ---------- | ---------------------- | ---------------------------------------------------------------------------------------------- |
-| 接口层     | 对外提供统一 API       | FileSystemStorageAdapter、EncryptedStorageAdapter、SQLiteStorageAdapter、StorageAdapterFactory |
-| 数据访问层 | 处理数据读写           | DataReader、DataWriter、QueryEngine                                                            |
-| 缓存层     | 提供缓存以提高查询性能 | CacheManager                                                                                   |
-| 索引层     | 提供索引以加速查询     | IndexManager                                                                                   |
-| 加密层     | 提供数据加密和密钥管理 | EncryptedStorageAdapter、crypto-gcm、cryptoProvider                                            |
-| 存储层     | 负责数据的物理存储     | ChunkedFileHandler、SingleFileHandler                                                          |
-| 元数据层   | 管理数据库元数据       | MetadataManager                                                                                |
-| 监控层     | 监控系统性能和缓存状态 | PerformanceMonitor、CacheMonitor                                                               |
-| 工具层     | 提供通用基础能力       | PathHelper、withTimeout、logger                                                                |
+| 层级       | 职责                         | 主要组件                                                                                                 |
+| ---------- | ---------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 接口层     | 对外提供统一 API             | FileSystemStorageAdapter、EncryptedStorageAdapter、SQLiteStorageAdapter（实验性）、StorageAdapterFactory |
+| 服务层     | 协调事务、API 路由与后台同步 | TransactionService、AutoSyncService、CacheService、ApiRouter、ApiWrapper                                 |
+| 数据访问层 | 处理数据读写                 | DataReader、DataWriter、QueryEngine                                                                      |
+| 缓存层     | 提供缓存以提高查询性能       | CacheManager                                                                                             |
+| 索引层     | 提供索引以加速查询           | IndexManager                                                                                             |
+| 加密层     | 提供数据加密和密钥管理       | EncryptedStorageAdapter、crypto-gcm、cryptoProvider                                                      |
+| 存储层     | 负责数据的物理存储           | ChunkedFileHandler、SingleFileHandler                                                                    |
+| 元数据层   | 管理数据库元数据             | MetadataManager                                                                                          |
+| 监控层     | 监控系统性能和缓存状态       | PerformanceMonitor、CacheMonitor                                                                         |
+| 工具层     | 提供通用基础能力             | PathHelper、withTimeout、logger                                                                          |
 
 ## 3. 核心模块设计
 

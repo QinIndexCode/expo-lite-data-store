@@ -18,6 +18,8 @@ For a narrative setup guide, start with [README.en.md](../README.en.md). For mai
 
 `plainStorage` and package deep imports (`expo-lite-data-store/dist/js/...` or `dist/cjs/...`) are no longer public. Use the root `db` facade or named APIs imported from `expo-lite-data-store`. A table created with `encrypted: true` must be accessed with `encrypted: true` on every table operation; requests that select the plain surface fail closed.
 
+The ban covers literal `dist/...` file paths and the removed `plainStorage` export only. The `package.json` `exports` subpaths `./js`, `./cjs`, and `./utils/*` remain supported compatibility spellings that resolve to the same built files; prefer the root entrypoint for new code.
+
 ## Installation Contract
 
 This library is documented against the supported Expo install contract. `npm install expo-lite-data-store` on its own is not a supported setup.
@@ -55,6 +57,16 @@ import { db, configManager, performanceMonitor, StorageError, StorageErrorCode }
 
 `StorageErrorCode` is available as a runtime constant map, and the `StorageError.code` field uses the corresponding string-literal union type.
 
+### Supported subpath imports
+
+```ts
+import { db } from 'expo-lite-data-store/js';
+import { db } from 'expo-lite-data-store/cjs';
+import { randomBytes } from 'expo-lite-data-store/utils/cryptoProvider';
+```
+
+`./js` and `./cjs` expose the same builds as the root entrypoint's `import` and `require` conditions respectively (ESM via `./js`, CJS via `./cjs`), and `./utils/*` exposes internal utility modules such as the crypto provider. These subpaths exist for bundler and interop compatibility; new code should import from the package root.
+
 ### Export groups
 
 | Export group          | Public items                                                                                                                                                                                                                                                                                                                                                                   |
@@ -65,7 +77,7 @@ import { db, configManager, performanceMonitor, StorageError, StorageErrorCode }
 | Config exports        | `configManager`, `ConfigManager`                                                                                                                                                                                                                                                                                                                                               |
 | Monitoring exports    | `performanceMonitor`; type-only `PerformanceStats`, `HealthCheckResult`                                                                                                                                                                                                                                                                                                        |
 | Crypto helpers        | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`; type-only `KeyCacheStats`                                                                                                                                                                                                             |
-| Error exports         | `StorageError`, `StorageErrorCode`, `CryptoError`                                                                                                                                                                                                                                                                                                                              |
+| Error exports         | `StorageError`, `StorageErrorCode`, `CryptoError`, `TransactionError`                                                                                                                                                                                                                                                                                                          |
 | Type exports          | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FindOneOptions`, `FindManyOptions`, `UpdateOptions`, `FilterCondition`, `BulkOperation`, `StorageInput`, `StorageRecord`, `UpdatePayload`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats` |
 
 ### `db` facade vs named exports
@@ -166,7 +178,7 @@ type ReadOptions<T extends object = StorageRecord> = CommonOptions & {
 
 Important distinction:
 
-- the public top-level `read()` call strips query-oriented fields and acts as a raw table read;
+- the public top-level `read()` call strips query-oriented fields and returns the stored rows without server-side filtering, sorting, or pagination; cache (`bypassCache`) and security (`encrypted`, `requireAuthOnAccess`) options still apply;
 - query-oriented reads should use `findMany()` instead.
 
 ### `WriteOptions`
@@ -303,7 +315,7 @@ const result = await verifyCountTable('users');
 Use this only for diagnosis or maintenance:
 
 - it compares metadata count to actual stored rows;
-- it repairs metadata if a mismatch is detected;
+- it repairs metadata if a mismatch is detected, except for full-table encrypted tables on the plain surface, where the raw physical envelope count is reported without overwriting the logical count (the encrypted surface decrypts, counts logically, and repairs instead);
 - it is more expensive than `countTable()`.
 
 ### `migrateToChunked(tableName, options?)`
@@ -387,6 +399,7 @@ Behavior:
 - preserves operation order;
 - supports pure insert fast-path optimization internally;
 - can run inside a transaction;
+- accepts `WriteOptions`: `encryptFullTable` selects the encrypted surface and is honored when the write implicitly creates the table;
 - matches update and delete operations by the supplied `where` condition, including rows without `id` fields;
 - returns a `WriteResult` whose `written` count reflects affected records under current runtime behavior.
 
@@ -488,6 +501,8 @@ findMany<T extends object = StorageRecord>(tableName, {
 If you do not force an algorithm, the runtime may choose a more suitable one based on dataset size and sort shape.
 
 Every supported algorithm keeps `null` and `undefined` values stable at the end in both ascending and descending order.
+
+Numbers, bigints, and dates sort by magnitude in every algorithm, including the string-tuned `fast` and `slow` paths.
 
 ## Update and Delete API
 
@@ -733,6 +748,8 @@ Other available control methods:
 - `resetRuntimeOptions()`
 - `destroy()`
 
+Runtime defaults are `maxRecords: 1000`, `sampleRate: 0.1`, thresholds `{ minSuccessRate: 90, maxAverageDuration: 1000, maxP95Duration: 3000 }`, and performance tracking off (`monitoring.enablePerformanceTracking: false`); opt in explicitly when sampling is wanted.
+
 ## Crypto Helpers
 
 ### Named crypto exports
@@ -769,6 +786,8 @@ Current helper set:
 - `requireAuthOnAccess: true` is strict and throws `AUTH_ON_ACCESS_UNSUPPORTED` if the runtime cannot truly enforce per-access authentication;
 - a strict key scope is never silently derived from or substituted for a regular master key; attempting an in-place strict upgrade, switching field-level/full-table encryption, or changing encrypted fields for existing encrypted data fails with `MIGRATION_FAILED` until the application migrates and verifies the data explicitly;
 - Expo Go supports regular encrypted storage but not strict biometric or per-access authentication guarantees.
+- `hash(data, algorithm?)` defaults to `SHA-512`.
+- `encryption.keyIterations` defaults to `600000` (valid range `10000`–`1000000`). On Expo Go the runtime caps the work factor at `20000` iterations with a warning, so the same data has a lighter security posture there than in standalone builds. Decryption honors the iteration count stored in each payload (clamped to the same bounds), so only decrypt payloads the app wrote and rate-limit externally supplied data.
 
 ## Errors and Failure Semantics
 
@@ -797,7 +816,7 @@ try {
 - `timestamp`
 - `cause`
 
-`StorageError` instances with a `TRANSACTION_*` code or `NO_TRANSACTION_IN_PROGRESS` use `category: 'transaction'`.
+`StorageError` instances with a `TRANSACTION_*` code, `SNAPSHOT_FAILED`, or `NO_TRANSACTION_IN_PROGRESS` use `category: 'transaction'`. Transaction lifecycle failures are raised as `TransactionError`, which extends `StorageError`, so `instanceof StorageError` catches them. `LOCK_TIMEOUT` uses `category: 'timeout'`.
 
 ### Common `StorageErrorCode` values
 
@@ -814,6 +833,8 @@ try {
 | `TRANSACTION_IN_PROGRESS`             | A transaction already exists on the current surface                                                                    |
 | `NO_TRANSACTION_IN_PROGRESS`          | `commit()` or `rollback()` was called with no active transaction                                                       |
 | `TRANSACTION_OPERATION_NOT_SUPPORTED` | An active transaction cannot perform a public schema operation that persists immediately                               |
+| `TRANSACTION_ROLLBACK_FAILED`         | A failed commit or rollback could not restore every table to its snapshot                                              |
+| `SNAPSHOT_FAILED`                     | Transaction record data could not be isolated or snapshotted                                                           |
 | `LOCK_TIMEOUT`                        | Concurrent write lock acquisition exceeded the timeout budget                                                          |
 | `TIMEOUT`                             | An operation exceeded a configured timeout                                                                             |
 | `CORRUPTED_DATA`                      | On-disk data could not be parsed safely                                                                                |
@@ -826,7 +847,7 @@ Crypto helper failures may raise `CryptoError` for crypto-specific fault paths.
 
 ### `CryptoService`
 
-`CryptoService` is re-exported for advanced consumers that need the lower-level crypto module surface rather than the convenience helpers.
+`CryptoService` re-exports three cryptographic provider primitives for advanced consumers: `deriveKey` (PBKDF2 key derivation), `randomBytes` (secure random generation), and `hash` (SHA-256/SHA-512 digests). For record and field encryption, prefer the `encrypt`/`decrypt` convenience helpers.
 
 ## Related Documents
 

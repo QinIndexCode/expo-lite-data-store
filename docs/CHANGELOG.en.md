@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 [README Entry](../README.md) | [简体中文](./CHANGELOG.zh-CN.md) | [API Reference](./API.en.md)
 
+## [Unreleased]
+
+### Fixed
+
+- Converged `TransactionError` onto `StorageError`: transaction lifecycle failures now carry `category: 'transaction'` and are catchable with `instanceof StorageError`; added the missing `SNAPSHOT_FAILED` error code.
+- Fixed `PerformanceMonitor` treating an unset `enablePerformanceTracking` as enabled; tracking now stays off unless explicitly enabled, matching the documented default.
+- Aligned the SQLite engine's missing-table behavior with the file-system engine inside transactions (staged empty view with implicit creation on commit, preserving `encryptedFields`/`columns` and the commit-time direct-write capability); the public `read()` `TABLE_NOT_FOUND` contract is unchanged.
+- Made `DataWriter.verifyCount()` skip count correction for full-table encrypted tables so the physical envelope count can no longer overwrite the logical count.
+- Widened `bulkWrite()` options to `WriteOptions` (`encryptFullTable` is honored for routing and implicit creation) and forwarded file-system `bulkWrite()` options into implicit table creation.
+- Fixed `fast`/`slow` sorts comparing numbers, bigints, and dates lexicographically; non-string pairs now use the shared value-aware comparator.
+- Categorized `LOCK_TIMEOUT` as a timeout instead of unknown.
+- Made `RateLimitWrapper` fall back to the global `api.rateLimit` config when constructor options omit fields, and documented `api.retry` as reserved (validated but not consumed; `ApiWrapper` performs no automatic retries).
+
+### Changed
+
+- Clarified that the v3 deep-import ban covers literal `dist/...` paths only and documented the supported `./js`, `./cjs`, and `./utils/*` exports subpaths.
+- Corrected the `CryptoService` description to the three provider primitives it re-exports (`deriveKey`, `randomBytes`, `hash`).
+- Documented the `SNAPSHOT_FAILED` and `TRANSACTION_ROLLBACK_FAILED` codes, the `fast`/`slow` magnitude ordering, and the `WriteOptions` accepted by `bulkWrite()`.
+
 ## [3.0.1] - 2026-08-10
 
 ### Added
@@ -121,7 +140,7 @@ All notable changes to this project will be documented in this file.
 - `crypto-errors.ts` for shared error definitions
 - `crypto-types.ts` for encryption type definitions
 - `PathHelper.ts` for independent path management (resolves circular dependency)
-- `envUtils.ts` for centralized environment detection
+- `envUtils.ts` for centralized environment detection (removed again in the same release's dead-code cleanup below)
 - `.prettierignore` file
 - TransactionService tests (23 tests)
 - SingleFileHandler tests (13 tests)

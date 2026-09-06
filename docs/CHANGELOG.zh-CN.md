@@ -4,6 +4,25 @@
 
 [README 入口](../README.md) | [English](./CHANGELOG.en.md) | [API 参考](./API.zh-CN.md)
 
+## [Unreleased]
+
+### 修复
+
+- 收敛 `TransactionError` 到 `StorageError`：事务生命周期失败现在携带 `category: 'transaction'`，可用 `instanceof StorageError` 捕获；补齐缺失的 `SNAPSHOT_FAILED` 错误码。
+- 修复 `PerformanceMonitor` 把未设置的 `enablePerformanceTracking` 当成开启；现在与文档默认一致，保持关闭直到显式开启。
+- 对齐 SQLite 引擎在事务内的缺表行为与文件系统引擎（暂存空视图、提交时隐式建表，保留 `encryptedFields`/`columns` 与提交期 direct-write 能力）；公开 `read()` 的 `TABLE_NOT_FOUND` 契约不变。
+- `DataWriter.verifyCount()` 对整表加密表跳过计数修正，物理信封计数不再覆盖逻辑计数。
+- `bulkWrite()` 参数放宽到 `WriteOptions`（`encryptFullTable` 用于路由与隐式建表），文件系统 `bulkWrite()` 隐式建表时透传 options。
+- 修复 `fast`/`slow` 排序对数字、bigint、日期按字典序比较的问题；非字符串统一走共享的值感知比较器。
+- `LOCK_TIMEOUT` 改归类为 timeout，不再是 unknown。
+- `RateLimitWrapper` 在构造参数缺省时回退到全局 `api.rateLimit` 配置；`api.retry` 明确为保留项（仅校验、不消费，`ApiWrapper` 不做自动重试）。
+
+### 变更
+
+- 澄清 v3 深层导入禁令仅针对字面 `dist/...` 路径，并文档化受支持的 `./js`、`./cjs`、`./utils/*` 子路径。
+- 修正 `CryptoService` 描述为其实际 re-export 的三个提供者原语（`deriveKey`、`randomBytes`、`hash`）。
+- 补齐 `SNAPSHOT_FAILED`、`TRANSACTION_ROLLBACK_FAILED` 错误码、`fast`/`slow` 按大小排序以及 `bulkWrite()` 接受 `WriteOptions` 的文档。
+
 ## [3.0.1] - 2026-08-10
 
 ### 新增
@@ -121,7 +140,7 @@
 - 用于共享错误定义的 `crypto-errors.ts`
 - 用于加密类型定义的 `crypto-types.ts`
 - 用于独立路径管理的 `PathHelper.ts`，解决循环依赖
-- 用于集中环境检测的 `envUtils.ts`
+- 用于集中环境检测的 `envUtils.ts`（在同一次发布的死代码清理中又被删除，见下文）
 - `.prettierignore` 文件
 - `TransactionService` 测试，23 个测试用例
 - `SingleFileHandler` 测试，13 个测试用例
