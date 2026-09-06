@@ -224,4 +224,90 @@ describe('smoke expo consumer helpers', () => {
     expect(createdDirectories).toHaveLength(2);
     expect(createdDirectories.every(directory => !fs.existsSync(directory))).toBe(true);
   });
+
+  describe('expo-doctor Hermes advisory', () => {
+    const hermesOnlyOutput = [
+      'Running 22 checks on your project...',
+      '21/22 checks passed. 1 checks failed. Possible issues detected:',
+      '✔ Check for Expo SDK versions affected by Hermes V1 regressions',
+      'This project uses Hermes V1 with expo@56.0.21, which is affected by a known memory regression.',
+    ].join('\n');
+
+    it('recognizes a lone Hermes V1 advisory as non-blocking', () => {
+      const smokeModule = require(scriptPath) as {
+        isHermesOnlyDoctorFailure: (output: string) => boolean;
+      };
+
+      expect(smokeModule.isHermesOnlyDoctorFailure(hermesOnlyOutput)).toBe(true);
+    });
+
+    it('keeps failing closed for other expo-doctor failures', () => {
+      const smokeModule = require(scriptPath) as {
+        isHermesOnlyDoctorFailure: (output: string) => boolean;
+      };
+
+      expect(smokeModule.isHermesOnlyDoctorFailure('20/22 checks passed. 2 checks failed.')).toBe(false);
+      expect(smokeModule.isHermesOnlyDoctorFailure('21/22 checks passed. 1 checks failed: missing dependency.')).toBe(
+        false
+      );
+      expect(smokeModule.isHermesOnlyDoctorFailure('')).toBe(false);
+    });
+
+    it('continues the smoke run when expo-doctor reports only the Hermes advisory', () => {
+      const { spawnSync } = require('child_process') as { spawnSync: jest.Mock };
+      const originalMkdtempSync = fs.mkdtempSync;
+      const createdDirectories: string[] = [];
+      const packagedFiles = ['dist/js/index.js', 'dist/cjs/index.js', 'dist/types/index.d.ts'].map(file => ({
+        path: file,
+      }));
+
+      jest.spyOn(fs, 'mkdtempSync').mockImplementation(prefix => {
+        const directory = originalMkdtempSync(prefix);
+        createdDirectories.push(directory);
+        return directory;
+      });
+      spawnSync.mockImplementation((_command: string, args: string[]) => {
+        if (args.includes('expo-doctor')) {
+          return { status: 1, stdout: hermesOnlyOutput, stderr: '', error: null };
+        }
+        return {
+          status: 0,
+          stdout: args.includes('pack')
+            ? JSON.stringify([{ filename: 'expo-lite-data-store-smoke.tgz', files: packagedFiles }])
+            : '',
+          stderr: '',
+          error: null,
+        };
+      });
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      const smokeModule = require(scriptPath) as { main: () => void };
+
+      expect(() => smokeModule.main()).not.toThrow();
+      expect(createdDirectories).toHaveLength(2);
+      expect(createdDirectories.every(directory => !fs.existsSync(directory))).toBe(true);
+    });
+
+    it('still fails the smoke run when expo-doctor reports other failures', () => {
+      const { spawnSync } = require('child_process') as { spawnSync: jest.Mock };
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      spawnSync.mockImplementation((_command: string, args: string[]) => {
+        if (args.includes('expo-doctor')) {
+          return { status: 1, stdout: '20/22 checks passed. 2 checks failed.', stderr: '', error: null };
+        }
+        return {
+          status: 0,
+          stdout: args.includes('pack')
+            ? JSON.stringify([{ filename: 'expo-lite-data-store-smoke.tgz', files: [] }])
+            : '',
+          stderr: '',
+          error: null,
+        };
+      });
+
+      const smokeModule = require(scriptPath) as { main: () => void };
+
+      expect(() => smokeModule.main()).toThrow('Command failed (1)');
+    });
+  });
 });

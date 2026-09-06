@@ -16,6 +16,7 @@
 - 修复 `fast`/`slow` 排序对数字、bigint、日期按字典序比较的问题；非字符串统一走共享的值感知比较器。
 - `LOCK_TIMEOUT` 改归类为 timeout，不再是 unknown。
 - `RateLimitWrapper` 在构造参数缺省时回退到全局 `api.rateLimit` 配置；`api.retry` 明确为保留项（仅校验、不消费，`ApiWrapper` 不做自动重试）。
+- Expo consumer smoke 对 pinned 的 Expo SDK 56 消费应用容忍 expo-doctor 的已知 Hermes V1 提示（仅当它是唯一失败项时警告并继续）；其它 doctor 失败仍然导致 smoke 失败。
 
 ### 变更
 

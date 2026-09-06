@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Fixed `fast`/`slow` sorts comparing numbers, bigints, and dates lexicographically; non-string pairs now use the shared value-aware comparator.
 - Categorized `LOCK_TIMEOUT` as a timeout instead of unknown.
 - Made `RateLimitWrapper` fall back to the global `api.rateLimit` config when constructor options omit fields, and documented `api.retry` as reserved (validated but not consumed; `ApiWrapper` performs no automatic retries).
+- Made the Expo consumer smoke test tolerate expo-doctor's known Hermes V1 advisory for the pinned Expo SDK 56 consumer (warn and continue when it is the only failing check); every other doctor failure still fails the run.
 
 ### Changed
 
