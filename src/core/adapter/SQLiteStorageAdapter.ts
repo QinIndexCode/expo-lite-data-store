@@ -251,15 +251,37 @@ export class SQLiteStorageAdapter implements IStorageEngine {
     return rows.map(row => JSON.parse(row.payload) as StorageRecord);
   }
 
-  private async createTableIfMissing(tableName: string, options?: InternalWriteOptions): Promise<void> {
+  private async readPersistedRecordsOrEmpty(tableName: string): Promise<StorageRecord[]> {
+    // Transaction staging mirrors the file-system engine: a table that does not
+    // exist yet materializes as an empty view so implicit creation can be
+    // staged. Public reads keep the tested TABLE_NOT_FOUND contract.
+    if (!this.metadataManager.get(tableName)) {
+      return [];
+    }
+    return this.readPersistedRecords(tableName);
+  }
+
+  private async createTableIfMissing(
+    tableName: string,
+    options?: InternalWriteOptions & Pick<CreateTableOptions<StorageRecord>, 'columns' | 'encryptedFields'>
+  ): Promise<void> {
     await this.ensureInitialized();
     if (!this.metadataManager.get(tableName)) {
-      await this.createTable(tableName, {
-        mode: options?.forceChunked ? 'chunked' : undefined,
+      // Commit replay carries the internal direct-write capability in `options`
+      // but builds a fresh object here; propagate it so implicit creation can
+      // run inside the commit instead of tripping the public DDL guard.
+      const createOptions = {
+        mode: (options?.forceChunked ? 'chunked' : undefined) as 'chunked' | undefined,
+        columns: options?.columns,
         encrypted: options?.encrypted === true || options?.encryptFullTable === true,
         encryptFullTable: options?.encryptFullTable,
+        encryptedFields: options?.encryptedFields,
         requireAuthOnAccess: options?.requireAuthOnAccess,
-      });
+      };
+      await this.createTable(
+        tableName,
+        hasInternalDirectWrite(options) ? withInternalDirectWrite(createOptions) : createOptions
+      );
     }
   }
 
@@ -321,7 +343,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
   private getCurrentTransactionData(tableName: string, owner?: TransactionOwnerToken): Promise<StorageRecord[]> {
     return this.transactionService.getCurrentTransactionData(
       tableName,
-      (currentTableName: string) => this.readPersistedRecords(currentTableName),
+      (currentTableName: string) => this.readPersistedRecordsOrEmpty(currentTableName),
       owner
     );
   }
@@ -509,7 +531,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
         const logicalCount = getLogicalRecordCount(options);
 
         if (this.transactionService.isInTransaction() && !directWrite) {
-          const persistedData = await this.readPersistedRecords(tableName);
+          const persistedData = await this.readPersistedRecordsOrEmpty(tableName);
           this.saveTransactionSnapshot(tableName, persistedData, transactionOwner);
           this.transactionService.addOperation(
             {
@@ -653,7 +675,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
         if (this.transactionService.isInTransaction() && !directWrite) {
           const transactionData = await this.getCurrentTransactionData(tableName, transactionOwner);
           const deletedCount = QueryEngine.filter(transactionData, storageWhere).length;
-          const persisted = await this.readPersistedRecords(tableName);
+          const persisted = await this.readPersistedRecordsOrEmpty(tableName);
           this.saveTransactionSnapshot(tableName, persisted, transactionOwner);
           this.transactionService.addOperation(
             { tableName, type: 'delete', where: storageWhere, options },
@@ -662,7 +684,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
           return deletedCount;
         }
 
-        const data = await this.readPersistedRecords(tableName);
+        const data = await this.readPersistedRecordsOrEmpty(tableName);
         const filteredData = data.filter(item => QueryEngine.filter([item], storageWhere).length === 0);
         const deletedCount = data.length - filteredData.length;
 
@@ -704,7 +726,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
         const normalizedOperations = this.normalizeBulkOperations(operations);
 
         if (this.transactionService.isInTransaction() && !directWrite) {
-          const persisted = await this.readPersistedRecords(tableName);
+          const persisted = await this.readPersistedRecordsOrEmpty(tableName);
           this.saveTransactionSnapshot(tableName, persisted, transactionOwner);
           this.transactionService.addOperation(
             { tableName, type: 'bulkWrite', operations: normalizedOperations, options },
@@ -791,7 +813,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
         if (this.transactionService.isInTransaction()) {
           allData = await this.getCurrentTransactionData(tableName, transactionOwner);
         } else {
-          allData = await this.readPersistedRecords(tableName);
+          allData = await this.readPersistedRecordsOrEmpty(tableName);
         }
 
         const matchedItems = QueryEngine.filter(allData, storageWhere);
@@ -807,7 +829,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
         );
 
         if (this.transactionService.isInTransaction() && !directWrite) {
-          const persisted = await this.readPersistedRecords(tableName);
+          const persisted = await this.readPersistedRecordsOrEmpty(tableName);
           this.saveTransactionSnapshot(tableName, persisted, transactionOwner);
           this.transactionService.addOperation(
             { tableName, type: 'update', data: storageData, where: storageWhere, options },

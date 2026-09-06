@@ -1,6 +1,6 @@
 import { MetadataManager } from '../../meta/MetadataManager';
 import { transactionOwnerOption } from '../../service/TransactionService';
-import type { TableOptions } from '../../../types/storageTypes';
+import type { InternalWriteOptions, TableOptions } from '../../../types/storageTypes';
 import { SQLiteStorageAdapter } from '../SQLiteStorageAdapter';
 
 type UserRecord = {
@@ -246,6 +246,29 @@ describe('SQLiteStorageAdapter', () => {
       expect(records).toHaveLength(1);
       expect(records[0]).toMatchObject({ name: 'Alice' });
       expect(adapter.isInTransaction()).toBe(false);
+    });
+
+    it('stages writes to a missing table inside a transaction and creates it on commit', async () => {
+      const missingTable = 'implicit_tx_table';
+      expect(await adapter.hasTable(missingTable)).toBe(false);
+
+      await adapter.beginTransaction();
+      await adapter.write(missingTable, [{ id: 1, name: 'Staged' }]);
+      await expect(adapter.read<UserRecord>(missingTable)).resolves.toEqual([{ id: 1, name: 'Staged' }]);
+      await adapter.commit();
+
+      await expect(adapter.read<UserRecord>(missingTable)).resolves.toEqual([{ id: 1, name: 'Staged' }]);
+      await adapter.deleteTable(missingTable);
+    });
+
+    it('preserves encryptedFields on implicit table creation', async () => {
+      const implicitTable = 'implicit_policy_table';
+      await adapter.write(implicitTable, [{ id: 1, secret: 'x' }], {
+        encryptedFields: ['secret'],
+      } as unknown as InternalWriteOptions);
+
+      expect(adapter.getTableMeta(implicitTable)).toMatchObject({ encryptedFields: ['secret'] });
+      await adapter.deleteTable(implicitTable);
     });
 
     it('rejects table structure changes inside a transaction', async () => {

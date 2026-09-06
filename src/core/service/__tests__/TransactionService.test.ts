@@ -4,6 +4,7 @@ import {
   TransactionService,
   TransactionError,
 } from '../TransactionService';
+import { StorageError, ErrorCategory } from '../../../types/storageErrorInfc';
 
 type WriteFn = Parameters<TransactionService['commit']>[0];
 type DeleteFn = Parameters<TransactionService['commit']>[1];
@@ -344,6 +345,31 @@ describe('TransactionService', () => {
       const readFn = createReadFn([{ id: 1, name: 'Alice' }]);
       const data = await service.getCurrentTransactionData('users', readFn);
       expect(data).toEqual([{ id: 1, name: 'Alice' }]);
+    });
+  });
+
+  describe('error surface', () => {
+    it('exposes transaction failures as StorageError with transaction category', async () => {
+      await service.beginTransaction();
+      let failure: unknown;
+      try {
+        await service.beginTransaction();
+      } catch (error: unknown) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(TransactionError);
+      expect(failure).toBeInstanceOf(StorageError);
+      expect(failure).toMatchObject({
+        code: 'TRANSACTION_IN_PROGRESS',
+        category: ErrorCategory.TRANSACTION,
+      });
+      await service.rollback(createWriteFn(), undefined, false);
+    });
+
+    it('maps SNAPSHOT_FAILED to the transaction category', () => {
+      const failure = new TransactionError('snapshot failed', 'SNAPSHOT_FAILED');
+      expect(failure).toBeInstanceOf(StorageError);
+      expect(failure.category).toBe(ErrorCategory.TRANSACTION);
     });
   });
 });

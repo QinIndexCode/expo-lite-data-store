@@ -14,6 +14,7 @@ import {
   type WriteResult,
 } from '../../types/storageTypes';
 import { StorageError } from '../../types/storageErrorInfc';
+import type { StorageErrorCode } from '../../types/storageErrorCode';
 
 const internalDirectWriteOption: unique symbol = Symbol('internalDirectWrite');
 const encryptAllFieldsOption: unique symbol = Symbol('encryptAllFields');
@@ -117,17 +118,10 @@ export function getTransactionOwner(options: unknown): TransactionOwnerToken | u
   return (options as TransactionScopedOptions)[transactionOwnerOption];
 }
 /** Reports an invalid transaction lifecycle operation. */
-export class TransactionError extends Error {
-  code: string;
-  details?: string;
-  suggestion?: string;
-
-  constructor(message: string, code: string, details?: string, suggestion?: string) {
-    super(message);
+export class TransactionError extends StorageError {
+  constructor(message: string, code: StorageErrorCode, details?: string, suggestion?: string) {
+    super(message, code, { details, suggestion });
     this.name = 'TransactionError';
-    this.code = code;
-    this.details = details;
-    this.suggestion = suggestion;
   }
 }
 

@@ -12,6 +12,7 @@ export default {
       requestsPerSecond: 10,
       burstCapacity: 20,
     },
+    // Reserved: validated but not consumed by ApiWrapper (no retry loop yet).
     retry: {
       maxAttempts: 3,
       backoffMultiplier: 2,

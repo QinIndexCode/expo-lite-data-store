@@ -470,6 +470,7 @@ export type {
 
 export { StorageError } from './types/storageErrorInfc';
 export { StorageErrorCode } from './types/storageErrorCode';
+export { TransactionError } from './core/service/TransactionService';
 export type { LiteStoreConfig, DeepPartial } from './types/config';
 export { CryptoError } from './utils/crypto-errors';
 export { encrypt, decrypt, encryptBulk, decryptBulk, hash, resetMasterKey };

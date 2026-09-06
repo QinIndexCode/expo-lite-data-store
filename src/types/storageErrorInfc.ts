@@ -59,9 +59,9 @@ export class StorageError extends Error {
       return ErrorCategory.DISK;
     } else if (code === 'CORRUPTED_DATA' || code === 'DATA_INCOMPLETE') {
       return ErrorCategory.DATA;
-    } else if (code === 'TIMEOUT') {
+    } else if (code === 'TIMEOUT' || code === 'LOCK_TIMEOUT') {
       return ErrorCategory.TIMEOUT;
-    } else if (code.startsWith('TRANSACTION_') || code === 'NO_TRANSACTION_IN_PROGRESS') {
+    } else if (code.startsWith('TRANSACTION_') || code === 'NO_TRANSACTION_IN_PROGRESS' || code === 'SNAPSHOT_FAILED') {
       return ErrorCategory.TRANSACTION;
     } else {
       return ErrorCategory.UNKNOWN;

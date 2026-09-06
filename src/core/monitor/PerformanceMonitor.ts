@@ -296,7 +296,7 @@ export class PerformanceMonitor {
   }
 
   static isPerformanceTrackingEnabled(): boolean {
-    return configManager.getConfig().monitoring?.enablePerformanceTracking !== false;
+    return configManager.getConfig().monitoring?.enablePerformanceTracking === true;
   }
 
   static isHealthChecksEnabled(): boolean {

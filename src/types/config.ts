@@ -66,6 +66,11 @@ export interface LiteStoreConfig {
       requestsPerSecond: number;
       burstCapacity: number;
     };
+    /**
+     * Reserved retry policy. Validated by the config validator but not yet
+     * consumed: ApiWrapper performs no automatic retries, so changing these
+     * values currently has no effect on API traffic.
+     */
     retry: {
       maxAttempts: number;
       backoffMultiplier: number;
