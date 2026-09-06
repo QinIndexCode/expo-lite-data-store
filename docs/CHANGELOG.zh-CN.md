@@ -4,7 +4,7 @@
 
 [README 入口](../README.md) | [English](./CHANGELOG.en.md) | [API 参考](./API.zh-CN.md)
 
-## [Unreleased]
+## [3.1.0] - 2026-09-06
 
 ### 修复
 

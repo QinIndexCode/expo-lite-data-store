@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 [README Entry](../README.md) | [简体中文](./CHANGELOG.zh-CN.md) | [API Reference](./API.en.md)
 
-## [Unreleased]
+## [3.1.0] - 2026-09-06
 
 ### Fixed
 
