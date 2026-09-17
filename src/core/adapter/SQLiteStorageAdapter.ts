@@ -1,4 +1,5 @@
-import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
+import type { SQLiteDatabase, SQLiteBindParams } from 'expo-sqlite';
+import { loadRequiredExpoModule } from '../../utils/expoModuleLoader';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
 import { IStorageEngine } from '../../types/storageEngineInfc';
 import { StorageError } from '../../types/storageErrorInfc';
@@ -22,9 +23,11 @@ import { ErrorHandler as StorageErrorHandler } from '../../utils/StorageErrorHan
 import logger from '../../utils/logger';
 import { pathHelper } from '../../utils/PathHelper';
 import { QueryEngine } from '../query/QueryEngine';
+import { SqlQueryBuilder } from '../query/SqlQueryBuilder';
 import {
   getLogicalRecordCount,
   getTransactionOwner,
+  hasDynamicFieldEncryption,
   hasInternalDirectWrite,
   TransactionService,
   withInternalDirectWrite,
@@ -34,6 +37,7 @@ import {
 import { meta, type TableSchema } from '../meta/MetadataManager';
 import { configManager } from '../config/ConfigManager';
 import { assertValidTableName } from '../../utils/tableName';
+import { ensureStorageRootReady } from '../../utils/ROOTPath';
 
 type PayloadRow = {
   id: number;
@@ -187,17 +191,19 @@ export class SQLiteStorageAdapter implements IStorageEngine {
     await this.enqueue(async () => {
       const db = this.assertDatabase();
       this.sqlTxDepth = 1;
-      await db.execAsync('BEGIN');
       try {
-        await task();
-        await db.execAsync('COMMIT');
-      } catch (error) {
+        await db.execAsync('BEGIN');
         try {
-          await db.execAsync('ROLLBACK');
-        } catch (rollbackError) {
-          logger.warn('[SQLiteStorageAdapter] rollback failed after write error', rollbackError);
+          await task();
+          await db.execAsync('COMMIT');
+        } catch (error) {
+          try {
+            await db.execAsync('ROLLBACK');
+          } catch (rollbackError) {
+            logger.warn('[SQLiteStorageAdapter] rollback failed after write error', rollbackError);
+          }
+          throw error;
         }
-        throw error;
       } finally {
         this.sqlTxDepth = 0;
       }
@@ -366,12 +372,21 @@ export class SQLiteStorageAdapter implements IStorageEngine {
   }
 
   private async initialize(): Promise<void> {
+    await ensureStorageRootReady();
     const directory = pathHelper.getStorageFolder();
     const options = { enableChangeListener: false } as const;
-    this.db = await openDatabaseAsync(this.databaseName, options, directory);
+    const sqliteModule = loadRequiredExpoModule<{
+      openDatabaseAsync: (
+        name: string,
+        options?: { enableChangeListener?: boolean },
+        directory?: string
+      ) => Promise<SQLiteDatabase>;
+    }>('expo-sqlite', 'To use the SQLite engine, please install expo-sqlite: `npx expo install expo-sqlite`');
+    this.db = await sqliteModule.openDatabaseAsync(this.databaseName, options, directory);
     await this.enqueue(async () => {
       const db = this.assertDatabase();
       await db.execAsync('PRAGMA journal_mode = WAL');
+      await db.execAsync('PRAGMA busy_timeout = 5000');
       await db.execAsync(
         'CREATE TABLE IF NOT EXISTS __elds_records (' +
           'table_name TEXT NOT NULL, ' +
@@ -405,8 +420,21 @@ export class SQLiteStorageAdapter implements IStorageEngine {
 
       const initialData = options.initialData ? this.normalizeStorageInput(options.initialData) : [];
 
+      const indexesRecord: Record<string, 'unique' | 'normal'> = {};
       await this.withSqlTransaction(async () => {
         await this.sqlWrite(tableName, initialData, true);
+        if (Array.isArray(options.indexes)) {
+          const db = this.assertDatabase();
+          for (const idx of options.indexes) {
+            const isUnique = typeof idx === 'object' && idx?.unique === true;
+            const fieldName = typeof idx === 'string' ? idx : idx.field;
+            const stmt = SqlQueryBuilder.buildIndexStatement(tableName, fieldName, isUnique);
+            if (stmt) {
+              await db.execAsync(stmt);
+              indexesRecord[`${fieldName}_${isUnique ? 'unique' : 'normal'}`] = isUnique ? 'unique' : 'normal';
+            }
+          }
+        }
       });
 
       try {
@@ -417,12 +445,14 @@ export class SQLiteStorageAdapter implements IStorageEngine {
           createdAt: Date.now(),
           updatedAt: Date.now(),
           columns: this.normalizeColumnSchema(options.columns),
+          indexes: Object.keys(indexesRecord).length > 0 ? indexesRecord : undefined,
           isHighRisk: options.isHighRisk || false,
           highRiskFields: options.highRiskFields || [],
           encryptedFields: options.encryptedFields || [],
           encrypted:
             options.encrypted === true || options.encryptFullTable === true || options.requireAuthOnAccess === true,
           encryptFullTable: options.encryptFullTable || false,
+          ...(hasDynamicFieldEncryption(options) ? { encryptAllFields: true } : {}),
           requireAuthOnAccess: options.requireAuthOnAccess === true,
           ...(hasInternalDirectWrite(options) ? { storageCommitToken: undefined } : {}),
         });
@@ -432,6 +462,55 @@ export class SQLiteStorageAdapter implements IStorageEngine {
         throw error;
       }
     });
+  }
+
+  async createIndex(tableName: string, field: string, unique = false): Promise<void> {
+    await this.ensureInitialized();
+    this.validateTableName(tableName);
+    const stmt = SqlQueryBuilder.buildIndexStatement(tableName, field, unique);
+    if (!stmt) {
+      throw new StorageError(`Cannot create index on unsafe field: ${field}`, 'TABLE_INDEX_INVALID');
+    }
+    await this.enqueue(async () => {
+      const db = this.assertDatabase();
+      await db.execAsync(stmt);
+    });
+    const tableMeta = this.metadataManager.get(tableName);
+    if (tableMeta) {
+      const indexName = `${field}_${unique ? 'unique' : 'normal'}`;
+      this.metadataManager.update(tableName, {
+        indexes: {
+          ...tableMeta.indexes,
+          [indexName]: unique ? 'unique' : 'normal',
+        },
+        updatedAt: Date.now(),
+      });
+      await this.metadataManager.saveImmediately?.();
+    }
+  }
+
+  async dropIndex(tableName: string, field: string): Promise<void> {
+    await this.ensureInitialized();
+    this.validateTableName(tableName);
+    const stmt = SqlQueryBuilder.buildDropIndexStatement(tableName, field);
+    if (!stmt) {
+      throw new StorageError(`Cannot drop index on unsafe field: ${field}`, 'TABLE_INDEX_INVALID');
+    }
+    await this.enqueue(async () => {
+      const db = this.assertDatabase();
+      await db.execAsync(stmt);
+    });
+    const tableMeta = this.metadataManager.get(tableName);
+    if (tableMeta?.indexes) {
+      const newIndexes = { ...tableMeta.indexes };
+      delete newIndexes[`${field}_normal`];
+      delete newIndexes[`${field}_unique`];
+      this.metadataManager.update(tableName, {
+        indexes: Object.keys(newIndexes).length > 0 ? newIndexes : undefined,
+        updatedAt: Date.now(),
+      });
+      await this.metadataManager.saveImmediately?.();
+    }
   }
 
   private normalizeColumnSchema(columns?: CreateTableOptions<StorageRecord>['columns']): TableSchema['columns'] {
@@ -465,7 +544,18 @@ export class SQLiteStorageAdapter implements IStorageEngine {
 
       const cleanupError = await this.enqueue(async () => {
         try {
+          const db = this.assertDatabase();
           await this.sqlDeleteAll(tableName);
+          const cleanTable = SqlQueryBuilder.cleanIdentifier(tableName);
+          const escapedPrefix = `idx_${cleanTable.replace(/([_%])/g, '\\$1')}__`;
+          const legacyEscapedPrefix = `idx_${cleanTable.replace(/([_%])/g, '\\$1')}_`;
+          const indexRows = await db.getAllAsync<{ name: string }>(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND (name LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\')",
+            [`${escapedPrefix}%`, `${legacyEscapedPrefix}%`]
+          );
+          for (const idx of indexRows) {
+            await db.execAsync(`DROP INDEX IF EXISTS ${idx.name}`);
+          }
           return undefined;
         } catch (error) {
           return error;
@@ -581,6 +671,22 @@ export class SQLiteStorageAdapter implements IStorageEngine {
           return this.toPublicRecords<T>(this.applyReadOptions(transactionData, storageOptions));
         }
 
+        if (!this.metadataManager.get(tableName)) {
+          throw new StorageError(`Table '${tableName}' not found`, 'TABLE_NOT_FOUND');
+        }
+
+        const customSortAlgorithm = options?.sortAlgorithm && options.sortAlgorithm !== 'default';
+        if (!customSortAlgorithm) {
+          const query = SqlQueryBuilder.buildFindQuery(tableName, storageOptions?.filter, storageOptions);
+          if (query.canPushdown) {
+            const rows = await this.enqueue(async () => {
+              const db = this.assertDatabase();
+              return db.getAllAsync<PayloadRow>(query.sql, query.params as SQLiteBindParams);
+            });
+            return rows.map(row => JSON.parse(row.payload) as T);
+          }
+        }
+
         const data = await this.readPersistedRecords(tableName);
         return this.toPublicRecords<T>(this.applyReadOptions(data, storageOptions));
       },
@@ -682,6 +788,27 @@ export class SQLiteStorageAdapter implements IStorageEngine {
             transactionOwner
           );
           return deletedCount;
+        }
+
+        if (!this.metadataManager.get(tableName)) {
+          return 0;
+        }
+
+        const deleteQuery = SqlQueryBuilder.buildDeleteQuery(tableName, storageWhere);
+        if (deleteQuery.canPushdown) {
+          let changes = 0;
+          await this.withSqlTransaction(async () => {
+            const db = this.assertDatabase();
+            const res = await db.runAsync(deleteQuery.sql, deleteQuery.params as SQLiteBindParams);
+            changes = res.changes;
+          });
+
+          if (changes > 0) {
+            const finalCount = await this.enqueue(async () => this.sqlCount(tableName));
+            this.metadataManager.update(tableName, { count: finalCount, updatedAt: Date.now() });
+            await this.metadataManager.saveImmediately?.();
+          }
+          return changes;
         }
 
         const data = await this.readPersistedRecordsOrEmpty(tableName);
@@ -809,13 +936,57 @@ export class SQLiteStorageAdapter implements IStorageEngine {
         const storageWhere = where as FilterCondition<StorageRecord>;
         const storageData = this.normalizeStorageRecord(data as object);
 
-        let allData: StorageRecord[];
-        if (this.transactionService.isInTransaction()) {
-          allData = await this.getCurrentTransactionData(tableName, transactionOwner);
-        } else {
-          allData = await this.readPersistedRecordsOrEmpty(tableName);
+        if (this.transactionService.isInTransaction() && !directWrite) {
+          const allData = await this.getCurrentTransactionData(tableName, transactionOwner);
+          const matchedItems = QueryEngine.filter(allData, storageWhere);
+          const updatedCount = matchedItems.length;
+          if (updatedCount === 0) {
+            return 0;
+          }
+          const persisted = await this.readPersistedRecordsOrEmpty(tableName);
+          this.saveTransactionSnapshot(tableName, persisted, transactionOwner);
+          this.transactionService.addOperation(
+            { tableName, type: 'update', data: storageData, where: storageWhere, options },
+            transactionOwner
+          );
+          return updatedCount;
         }
 
+        if (!this.metadataManager.get(tableName)) {
+          return 0;
+        }
+
+        const findQuery = SqlQueryBuilder.buildFindQuery(tableName, storageWhere);
+        if (findQuery.canPushdown) {
+          let updatedCount = 0;
+          await this.withSqlTransaction(async () => {
+            const db = this.assertDatabase();
+            const matchedRows = await db.getAllAsync<PayloadRow>(findQuery.sql, findQuery.params as SQLiteBindParams);
+
+            if (matchedRows.length === 0) {
+              return;
+            }
+
+            for (const row of matchedRows) {
+              const original = JSON.parse(row.payload) as StorageRecord;
+              const updated = QueryEngine.update(original, storageData);
+              await db.runAsync('UPDATE __elds_records SET payload = ? WHERE table_name = ? AND id = ?', [
+                JSON.stringify(updated),
+                tableName,
+                row.id,
+              ]);
+            }
+            updatedCount = matchedRows.length;
+          });
+
+          if (updatedCount > 0) {
+            this.metadataManager.update(tableName, { updatedAt: Date.now() });
+            await this.metadataManager.saveImmediately?.();
+          }
+          return updatedCount;
+        }
+
+        const allData = await this.readPersistedRecordsOrEmpty(tableName);
         const matchedItems = QueryEngine.filter(allData, storageWhere);
         const updatedCount = matchedItems.length;
 
@@ -827,16 +998,6 @@ export class SQLiteStorageAdapter implements IStorageEngine {
         const finalData = allData.map(item =>
           matchedItemRefs.has(item) ? QueryEngine.update(item, storageData) : item
         );
-
-        if (this.transactionService.isInTransaction() && !directWrite) {
-          const persisted = await this.readPersistedRecordsOrEmpty(tableName);
-          this.saveTransactionSnapshot(tableName, persisted, transactionOwner);
-          this.transactionService.addOperation(
-            { tableName, type: 'update', data: storageData, where: storageWhere, options },
-            transactionOwner
-          );
-          return updatedCount;
-        }
 
         await this.withSqlTransaction(async () => {
           await this.sqlWrite(tableName, finalData, true);
@@ -941,5 +1102,22 @@ export class SQLiteStorageAdapter implements IStorageEngine {
     };
 
     await this.withSqlTransaction(restoreOperation);
+  }
+
+  async cleanup(): Promise<void> {
+    if (this.db) {
+      const dbToClose = this.db as { closeAsync?: () => Promise<void> };
+      if (typeof dbToClose.closeAsync === 'function') {
+        try {
+          await dbToClose.closeAsync();
+        } catch {
+          // ignore close error
+        }
+      }
+      this.db = null;
+    }
+    this.initializationPromise = null;
+    this.sqlChain = Promise.resolve();
+    this.sqlTxDepth = 0;
   }
 }

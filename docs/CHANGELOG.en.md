@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 [README Entry](../README.md) | [简体中文](./CHANGELOG.zh-CN.md) | [API Reference](./API.en.md)
 
+## [3.2.0] - 2026-09-16
+
+### Added
+
+- **SQLite High-Performance Storage Engine Upgrade**: Upgraded SQLite from an experimental adapter to an officially supported high-performance engine while maintaining 100% public API compatibility. Can be enabled globally via `init({ engine: 'sqlite' })` or `configure({ engine: 'sqlite' })`.
+- **SQL Query and Pagination Pushdown**: Added `SqlQueryBuilder` to convert NoSQL conditions (`$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$like`, `$and`, `$or`) directly to SQLite JSON1 `json_extract(payload, '$.field')` expressions. Sorting (`ORDER BY ... NULLS LAST`) and pagination (`LIMIT ? OFFSET ?`) are pushed down to SQLite execution, eliminating full-table loads and in-memory deserialization bottlenecks.
+- **Native JSON Expression Indexes**: Added support for field indexing in `createTable` (via `indexes`) as well as new `createIndex` and `dropIndex` APIs. Automatically manages `CREATE [UNIQUE] INDEX IF NOT EXISTS idx_<clean_table>_<clean_field> ON __elds_records (table_name, json_extract(payload, '$.<field>'))`, enabling B-tree binary acceleration for JSON field queries and intercepting unique index violations at the engine level.
+- **On-Demand Page Decryption**: For field-level encrypted tables, when query filters and sort criteria only touch unencrypted fields, queries and pagination push down fully to SQLite. The decryption layer only invokes `decryptFieldsBulk` on the paginated slice (e.g. 20 items), dramatically lowering CPU overhead and memory footprint.
+- **Bidirectional Engine Online Migration (`migrateEngine`)**: Seamless, zero-data-loss bidirectional full-database migration between `'file-system'` and `'sqlite'`. Replicates schema definitions, records, and expression indexes with strict row count verification before switching the active engine configuration. Supports `cleanSource: true` to purge source data.
+- **Public Index Management APIs**: Exported `createIndex(tableName, field, options?)` and `dropIndex(tableName, field, options?)` from package root and `db`.
+
+### Optimized & Compatibility
+
+- **Strict Zero-Configuration Principle**: `expo-sqlite` is marked as an optional peer dependency and loaded dynamically. The default engine remains `'file-system'`. Standard Expo Go applications with only `expo-file-system` bundle cleanly without missing module errors. Clear, actionable instructions are provided if `sqlite` is configured without `expo-sqlite` installed.
+
 ## [3.1.0] - 2026-09-06
 
 ### Fixed

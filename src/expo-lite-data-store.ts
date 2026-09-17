@@ -31,6 +31,8 @@ import type { PerformanceStats, HealthCheckResult } from './core/monitor/Perform
 import type { KeyCacheStats } from './utils/crypto';
 import { StorageError } from './types/storageErrorInfc';
 import * as CryptoService from './core/crypto/CryptoService';
+import { migrateEngine, EngineMigrationService } from './core/service/EngineMigrationService';
+export type { MigrateEngineOptions, MigrationResult } from './core/service/EngineMigrationService';
 
 const normalizeSecurity = (opts?: {
   encrypted?: boolean;
@@ -234,6 +236,9 @@ export type { KeyCacheStats };
 export { CryptoService };
 
 export const init = async (options: TableOptions = {}): Promise<void> => {
+  if (options.engine) {
+    configManager.updateConfig({ engine: options.engine });
+  }
   const { adapter: baseAdapter } = resolveStorageAdapter(options);
   const adapter = baseAdapter as typeof baseAdapter & { ensureInitialized?: () => Promise<void> };
 
@@ -430,6 +435,26 @@ export const clearTable = async (tableName: string, options: TableOptions = {}):
   return runTableOperation(tableName, options, ({ adapter }) => adapter.clearTable(tableName));
 };
 
+export const createIndex = async (
+  tableName: string,
+  field: string,
+  options: TableOptions & { unique?: boolean } = {}
+): Promise<void> => {
+  return runTableOperation(tableName, options, async ({ adapter }) => {
+    if (typeof adapter.createIndex === 'function') {
+      await adapter.createIndex(tableName, field, options.unique);
+    }
+  });
+};
+
+export const dropIndex = async (tableName: string, field: string, options: TableOptions = {}): Promise<void> => {
+  return runTableOperation(tableName, options, async ({ adapter }) => {
+    if (typeof adapter.dropIndex === 'function') {
+      await adapter.dropIndex(tableName, field);
+    }
+  });
+};
+
 export const db = {
   init,
   createTable,
@@ -451,6 +476,9 @@ export const db = {
   migrateToChunked,
   clearTable,
   update,
+  createIndex,
+  dropIndex,
+  migrateEngine,
 } as const;
 
 export type {
@@ -474,6 +502,7 @@ export { TransactionError } from './core/service/TransactionService';
 export type { LiteStoreConfig, DeepPartial } from './types/config';
 export { CryptoError } from './utils/crypto-errors';
 export { encrypt, decrypt, encryptBulk, decryptBulk, hash, resetMasterKey };
+export { migrateEngine, EngineMigrationService };
 
 export default {
   init,
@@ -503,4 +532,7 @@ export default {
   decryptBulk,
   hash,
   resetMasterKey,
+  createIndex,
+  dropIndex,
+  migrateEngine,
 } as const;

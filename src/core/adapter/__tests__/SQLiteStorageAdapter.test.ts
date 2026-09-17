@@ -340,4 +340,97 @@ describe('SQLiteStorageAdapter', () => {
       await expect(adapter.count(tableName)).resolves.toBe(25);
     });
   });
+
+  describe('expression indexes and pushdown optimization', () => {
+    it('creates expression indexes via createTable options and enforces unique constraint', async () => {
+      const indexedTable = 'users_indexed';
+      await adapter.createTable(indexedTable, {
+        indexes: ['name', { field: 'email', unique: true }],
+      });
+
+      await adapter.write(indexedTable, [{ id: 1, name: 'Alice', email: 'alice@example.com' }]);
+
+      // Duplicate email must violate UNIQUE constraint
+      await expect(adapter.write(indexedTable, [{ id: 2, name: 'Bob', email: 'alice@example.com' }])).rejects.toThrow();
+
+      await adapter.deleteTable(indexedTable);
+    });
+
+    it('creates and drops expression index dynamically via createIndex / dropIndex', async () => {
+      await adapter.createIndex(tableName, 'age', false);
+      await adapter.createIndex(tableName, 'email', true);
+
+      await adapter.dropIndex(tableName, 'age');
+      await adapter.dropIndex(tableName, 'email');
+
+      await expect(adapter.createIndex(tableName, 'bad;identifier')).rejects.toMatchObject({
+        code: 'TABLE_INDEX_INVALID',
+      });
+      await expect(adapter.dropIndex(tableName, 'bad;identifier')).rejects.toMatchObject({
+        code: 'TABLE_INDEX_INVALID',
+      });
+    });
+
+    it('cleans up expression indexes when deleteTable is called', async () => {
+      const tempTable = 'temp_idx_table';
+      await adapter.createTable(tempTable, {
+        indexes: ['score', { field: 'code', unique: true }],
+      });
+      await adapter.deleteTable(tempTable);
+      expect(await adapter.hasTable(tempTable)).toBe(false);
+    });
+
+    it('pushes down complex queries, sorting, and pagination to SQLite', async () => {
+      const records = [
+        { id: 1, name: 'Alice', age: 25, active: true },
+        { id: 2, name: 'Bob', age: 30, active: true },
+        { id: 3, name: 'Charlie', age: 35, active: false },
+        { id: 4, name: 'David', age: 28, active: true },
+        { id: 5, name: 'Eve', age: 22, active: true },
+      ];
+      await adapter.write(tableName, records);
+
+      // findMany with filter, sort desc, limit and skip
+      const results = await adapter.findMany<UserRecord>(
+        tableName,
+        { active: true, age: { $gt: 24 } },
+        { sortBy: 'age', order: 'desc', limit: 2, skip: 1 }
+      );
+
+      // Matching: Bob (30), David (28), Alice (25).
+      // Sorted desc: Bob (30), David (28), Alice (25).
+      // skip 1, limit 2: David (28), Alice (25).
+      expect(results.map(r => r.name)).toEqual(['David', 'Alice']);
+    });
+
+    it('safely falls back to QueryEngine for non-pushdown conditions', async () => {
+      await adapter.write(tableName, [
+        { id: 1, name: 'Alice', age: 25 },
+        { id: 2, name: 'Bob', age: 30 },
+      ]);
+
+      // Function filter cannot be pushed down to SQL
+      const results = await adapter.findMany<UserRecord>(tableName, (record: UserRecord) => record.age === 30);
+      expect(results).toHaveLength(1);
+      expect(results[0]?.name).toBe('Bob');
+    });
+
+    it('executes pushdown updates and deletes', async () => {
+      await adapter.write(tableName, [
+        { id: 1, name: 'Alice', age: 25, active: true },
+        { id: 2, name: 'Bob', age: 30, active: true },
+        { id: 3, name: 'Charlie', age: 35, active: false },
+      ]);
+
+      const updated = await adapter.update(tableName, { active: false }, { age: { $gte: 30 } });
+      expect(updated).toBe(2);
+
+      const bob = await adapter.findOne<UserRecord>(tableName, { id: 2 });
+      expect(bob?.active).toBe(false);
+
+      const deleted = await adapter.delete(tableName, { age: { $lt: 28 } });
+      expect(deleted).toBe(1);
+      expect(await adapter.count(tableName)).toBe(2);
+    });
+  });
 });

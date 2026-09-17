@@ -14,6 +14,7 @@ export interface LiteStoreConfig {
   storageFolder: string;
   sortMethods: 'default' | 'fast' | 'counting' | 'merge' | 'slow';
   timeout: number;
+  engine?: 'file-system' | 'sqlite' | 'auto';
 
   /** Encryption configuration */
   encryption: {

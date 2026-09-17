@@ -1,11 +1,13 @@
 import storage from './adapter/FileSystemStorageAdapter';
 import { EncryptedStorageAdapter } from './EncryptedStorageAdapter';
 import type { IStorageAdapter } from '../types/storageAdapterInfc';
+import { StorageAdapterFactory } from './adapter/StorageAdapterFactory';
+import { configManager } from './config/ConfigManager';
+import { loadOptionalExpoModule } from '../utils/expoModuleLoader';
 
 export class DbInstanceManager {
   private static instance: DbInstanceManager;
-  private defaultInstance: IStorageAdapter = storage;
-  private encryptedInstances: Map<boolean, EncryptedStorageAdapter> = new Map();
+  private adapterInstances: Map<string, IStorageAdapter> = new Map();
 
   private constructor() {}
 
@@ -13,27 +15,82 @@ export class DbInstanceManager {
     return DbInstanceManager.instance ?? (DbInstanceManager.instance = new DbInstanceManager());
   }
 
+  public resolveActiveEngine(): 'file-system' | 'sqlite' {
+    const configuredEngine = configManager.getConfig().engine ?? 'file-system';
+    if (configuredEngine === 'sqlite') {
+      return 'sqlite';
+    }
+    if (configuredEngine === 'auto') {
+      const sqliteModule = loadOptionalExpoModule('expo-sqlite');
+      if (sqliteModule) {
+        return 'sqlite';
+      }
+      return 'file-system';
+    }
+    return 'file-system';
+  }
+
   public getDbInstance(encrypted: boolean = false, requireAuthOnAccess: boolean = false): IStorageAdapter {
-    if (!encrypted) {
-      return this.defaultInstance;
+    const engineType = this.resolveActiveEngine();
+    const cacheKey = `${engineType}:${encrypted}:${requireAuthOnAccess}`;
+
+    const existing = this.adapterInstances.get(cacheKey);
+    if (existing) {
+      return existing;
     }
 
-    const instanceKey = requireAuthOnAccess;
-    if (!this.encryptedInstances.has(instanceKey)) {
-      this.encryptedInstances.set(instanceKey, new EncryptedStorageAdapter({ requireAuthOnAccess }));
+    let adapter: IStorageAdapter;
+    if (engineType === 'sqlite') {
+      if (!encrypted) {
+        adapter = StorageAdapterFactory.createSQLiteAdapter();
+      } else {
+        adapter = StorageAdapterFactory.createEncryptedSQLiteAdapter({ requireAuthOnAccess });
+      }
+    } else {
+      if (!encrypted) {
+        adapter = storage;
+      } else {
+        adapter = new EncryptedStorageAdapter({ requireAuthOnAccess });
+      }
     }
 
-    return this.encryptedInstances.get(instanceKey)!;
+    this.adapterInstances.set(cacheKey, adapter);
+    return adapter;
   }
 
   public getDefaultInstance(): IStorageAdapter {
-    return this.defaultInstance;
+    return this.getDbInstance(false, false);
+  }
+
+  public async resetInstances(): Promise<void> {
+    const instances = Array.from(this.adapterInstances.values());
+    this.adapterInstances.clear();
+    for (const adapter of instances) {
+      if (typeof adapter.cleanup === 'function') {
+        try {
+          await adapter.cleanup();
+        } catch {
+          // ignore cleanup errors during instance reset
+        }
+      }
+    }
   }
 }
 
 export const dbManager = DbInstanceManager.getInstance();
 
-export const db = dbManager.getDbInstance();
+export const db: IStorageAdapter = new Proxy({} as IStorageAdapter, {
+  get(_target, prop, receiver): unknown {
+    const activeInstance = dbManager.getDbInstance();
+    const targetObj = activeInstance as unknown as Record<string | symbol, unknown>;
+    const value = Reflect.get(targetObj, prop, receiver);
+    if (typeof value === 'function') {
+      return (...args: unknown[]): unknown =>
+        Reflect.apply(value as (...callArgs: unknown[]) => unknown, activeInstance, args);
+    }
+    return value;
+  },
+});
 
 /** Exposes unencrypted storage for diagnostics. */
 export const plainStorage = storage;

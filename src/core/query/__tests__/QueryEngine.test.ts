@@ -100,6 +100,23 @@ describe('QueryEngine', () => {
       expect(result.length).toBe(3);
       result.forEach(item => expect(item.tags).toContain('a'));
     });
+
+    it('matches nested dotted field paths', () => {
+      const nestedData = [
+        { id: 1, profile: { name: 'Alice', age: 30 } },
+        { id: 2, profile: { name: 'Bob', age: 25 } },
+        { id: 3, profile: null },
+      ];
+      const result = QueryEngine.filter(nestedData, { 'profile.name': 'Alice' });
+      expect(result).toEqual([nestedData[0]]);
+
+      const resultGt = QueryEngine.filter(nestedData, { 'profile.age': { $gt: 26 } });
+      expect(resultGt).toEqual([nestedData[0]]);
+
+      const sorted = QueryEngine.sort(nestedData, 'profile.age', 'asc');
+      expect(sorted[0].id).toBe(2);
+      expect(sorted[1].id).toBe(1);
+    });
   });
 
   describe('compound queries', () => {
@@ -138,6 +155,25 @@ describe('QueryEngine', () => {
       expect(result.length).toBe(2);
       expect(result).toContain(testData[0]);
       expect(result).toContain(testData[3]);
+    });
+
+    it('evaluates mixed normal fields with $or conditions', () => {
+      // id 1 is active, id 2 is inactive. $or has id 1 and id 2, but active: true should restrict to only id 1
+      const result = QueryEngine.filter(testData, {
+        active: true,
+        $or: [{ id: 1 }, { id: 2 }],
+      });
+      expect(result.length).toBe(1);
+      expect(result[0]).toEqual(testData[0]);
+    });
+
+    it('evaluates mixed normal fields with $and conditions', () => {
+      const result = QueryEngine.filter(testData, {
+        active: false,
+        $and: [{ age: { $gte: 30 } }],
+      });
+      expect(result.length).toBe(1);
+      expect(result[0]).toEqual(testData[4]);
     });
   });
 

@@ -22,7 +22,21 @@ const MAX_FILTER_DEPTH = 10;
 
 type SortFunction = <T extends object>(data: T[], column: string, order?: SortOrder) => T[];
 
-const getRecordValue = (value: object, key: string): unknown => (isStorageRecord(value) ? value[key] : undefined);
+const getRecordValue = (value: object, key: string): unknown => {
+  if (!isStorageRecord(value)) return undefined;
+  if (Object.prototype.hasOwnProperty.call(value, key)) return value[key];
+  if (!key.includes('.')) return value[key];
+
+  const parts = key.split('.');
+  let current: unknown = value;
+  for (const part of parts) {
+    if (current === null || current === undefined || typeof current !== 'object') {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+};
 
 const isFilterCondition = <T extends object>(value: unknown): value is FilterCondition<T> =>
   typeof value === 'function' || isStorageRecord(value);
@@ -102,150 +116,158 @@ export class QueryEngine {
     }
 
     const conditionRecord = condition as StorageRecord;
+    let current = data;
+
+    const fieldEntries = Object.entries(conditionRecord).filter(([key]) => key !== '$and' && key !== '$or');
+    if (fieldEntries.length > 0) {
+      current = current.filter(item => {
+        let matches = true;
+
+        for (const [key, value] of fieldEntries) {
+          const itemValue = getRecordValue(item, key);
+
+          if (isStorageRecord(value)) {
+            for (const [op, opValue] of Object.entries(value)) {
+              switch (op) {
+                case '$eq':
+                  if (itemValue === null || itemValue === undefined) {
+                    if (itemValue !== opValue) {
+                      matches = false;
+                    }
+                  } else if (itemValue !== opValue) {
+                    matches = false;
+                  }
+                  break;
+                case '$ne':
+                  if (itemValue === null || itemValue === undefined) {
+                    if (itemValue === opValue) {
+                      matches = false;
+                    }
+                  } else if (itemValue === opValue) {
+                    matches = false;
+                  }
+                  break;
+                case '$gt':
+                  if (!(typeof itemValue === 'number' && typeof opValue === 'number') || itemValue <= opValue) {
+                    matches = false;
+                  }
+                  break;
+                case '$gte':
+                  if (!(typeof itemValue === 'number' && typeof opValue === 'number') || itemValue < opValue) {
+                    matches = false;
+                  }
+                  break;
+                case '$lt':
+                  if (!(typeof itemValue === 'number' && typeof opValue === 'number') || itemValue >= opValue) {
+                    matches = false;
+                  }
+                  break;
+                case '$lte':
+                  if (!(typeof itemValue === 'number' && typeof opValue === 'number') || itemValue > opValue) {
+                    matches = false;
+                  }
+                  break;
+                case '$in':
+                  if (!Array.isArray(opValue)) {
+                    matches = false;
+                  } else {
+                    const opValueSet = new Set(opValue);
+                    if (itemValue === null || itemValue === undefined) {
+                      if (!opValueSet.has(itemValue)) {
+                        matches = false;
+                      }
+                    } else if (Array.isArray(itemValue)) {
+                      if (!itemValue.some(item => opValueSet.has(item))) {
+                        matches = false;
+                      }
+                    } else {
+                      if (!opValueSet.has(itemValue)) {
+                        matches = false;
+                      }
+                    }
+                  }
+                  break;
+                case '$nin':
+                  if (!Array.isArray(opValue)) {
+                    matches = false;
+                  } else {
+                    const opValueSet = new Set(opValue);
+                    if (itemValue === null || itemValue === undefined) {
+                      if (opValueSet.has(itemValue)) {
+                        matches = false;
+                      }
+                    } else if (Array.isArray(itemValue)) {
+                      if (itemValue.some(item => opValueSet.has(item))) {
+                        matches = false;
+                      }
+                    } else {
+                      if (opValueSet.has(itemValue)) {
+                        matches = false;
+                      }
+                    }
+                  }
+                  break;
+                case '$like':
+                  if (typeof itemValue !== 'string' || typeof opValue !== 'string') {
+                    matches = false;
+                  } else if (!matchesLike(itemValue, opValue)) {
+                    matches = false;
+                  }
+                  break;
+                default:
+                  matches = false;
+              }
+
+              if (!matches) break;
+            }
+          } else {
+            if (itemValue === null || itemValue === undefined) {
+              if (itemValue !== value) {
+                matches = false;
+              }
+            } else if (Array.isArray(itemValue) && Array.isArray(value)) {
+              if (JSON.stringify(itemValue) !== JSON.stringify(value)) {
+                matches = false;
+              }
+            } else if (itemValue !== value) {
+              matches = false;
+            }
+          }
+
+          if (!matches) break;
+        }
+
+        return matches;
+      });
+    }
+
     const andConditions = conditionRecord.$and;
     if (Array.isArray(andConditions)) {
-      let result = [...data];
       for (const subCondition of andConditions) {
         if (!isFilterCondition<T>(subCondition)) {
           return [];
         }
-        result = this.filterWithDepth(result, subCondition, depth + 1);
+        current = this.filterWithDepth(current, subCondition, depth + 1);
       }
-      return result;
     }
 
     const orConditions = conditionRecord.$or;
     if (Array.isArray(orConditions)) {
+      if (orConditions.length === 0) {
+        return [];
+      }
       const results = new Set<T>();
       for (const subCondition of orConditions) {
         if (!isFilterCondition<T>(subCondition)) {
           continue;
         }
-        const filtered = this.filterWithDepth(data, subCondition, depth + 1);
+        const filtered = this.filterWithDepth(current, subCondition, depth + 1);
         filtered.forEach(item => results.add(item));
       }
-      return Array.from(results);
+      current = current.filter(item => results.has(item));
     }
 
-    return data.filter(item => {
-      let matches = true;
-
-      for (const [key, value] of Object.entries(conditionRecord)) {
-        const itemValue = getRecordValue(item, key);
-
-        if (isStorageRecord(value)) {
-          for (const [op, opValue] of Object.entries(value)) {
-            switch (op) {
-              case '$eq':
-                if (itemValue === null || itemValue === undefined) {
-                  if (itemValue !== opValue) {
-                    matches = false;
-                  }
-                } else if (itemValue !== opValue) {
-                  matches = false;
-                }
-                break;
-              case '$ne':
-                if (itemValue === null || itemValue === undefined) {
-                  if (itemValue === opValue) {
-                    matches = false;
-                  }
-                } else if (itemValue === opValue) {
-                  matches = false;
-                }
-                break;
-              case '$gt':
-                if (!(typeof itemValue === 'number' && typeof opValue === 'number') || itemValue <= opValue) {
-                  matches = false;
-                }
-                break;
-              case '$gte':
-                if (!(typeof itemValue === 'number' && typeof opValue === 'number') || itemValue < opValue) {
-                  matches = false;
-                }
-                break;
-              case '$lt':
-                if (!(typeof itemValue === 'number' && typeof opValue === 'number') || itemValue >= opValue) {
-                  matches = false;
-                }
-                break;
-              case '$lte':
-                if (!(typeof itemValue === 'number' && typeof opValue === 'number') || itemValue > opValue) {
-                  matches = false;
-                }
-                break;
-              case '$in':
-                if (!Array.isArray(opValue)) {
-                  matches = false;
-                } else {
-                  const opValueSet = new Set(opValue);
-                  if (itemValue === null || itemValue === undefined) {
-                    if (!opValueSet.has(itemValue)) {
-                      matches = false;
-                    }
-                  } else if (Array.isArray(itemValue)) {
-                    if (!itemValue.some(item => opValueSet.has(item))) {
-                      matches = false;
-                    }
-                  } else {
-                    if (!opValueSet.has(itemValue)) {
-                      matches = false;
-                    }
-                  }
-                }
-                break;
-              case '$nin':
-                if (!Array.isArray(opValue)) {
-                  matches = false;
-                } else {
-                  const opValueSet = new Set(opValue);
-                  if (itemValue === null || itemValue === undefined) {
-                    if (opValueSet.has(itemValue)) {
-                      matches = false;
-                    }
-                  } else if (Array.isArray(itemValue)) {
-                    if (itemValue.some(item => opValueSet.has(item))) {
-                      matches = false;
-                    }
-                  } else {
-                    if (opValueSet.has(itemValue)) {
-                      matches = false;
-                    }
-                  }
-                }
-                break;
-              case '$like':
-                if (typeof itemValue !== 'string' || typeof opValue !== 'string') {
-                  matches = false;
-                } else if (!matchesLike(itemValue, opValue)) {
-                  matches = false;
-                }
-                break;
-              default:
-                matches = false;
-            }
-
-            if (!matches) break;
-          }
-        } else {
-          if (itemValue === null || itemValue === undefined) {
-            if (itemValue !== value) {
-              matches = false;
-            }
-          } else if (Array.isArray(itemValue) && Array.isArray(value)) {
-            if (JSON.stringify(itemValue) !== JSON.stringify(value)) {
-              matches = false;
-            }
-          } else if (itemValue !== value) {
-            matches = false;
-          }
-        }
-
-        if (!matches) break;
-      }
-
-      return matches;
-    });
+    return current;
   }
 
   static filter<T extends object>(data: T[], condition?: FilterCondition<T>): T[] {

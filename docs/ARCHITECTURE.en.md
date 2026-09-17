@@ -8,18 +8,18 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 
 ## 2. Layered Architecture
 
-| Layer             | Responsibility                                             | Main Components                                                                                               |
-| ----------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Interface Layer   | Provides unified API interface externally                  | FileSystemStorageAdapter, EncryptedStorageAdapter, SQLiteStorageAdapter (experimental), StorageAdapterFactory |
-| Service Layer     | Coordinates transactions, API routing, and background sync | TransactionService, AutoSyncService, CacheService, ApiRouter, ApiWrapper                                      |
-| Data Access Layer | Handles data read/write operations                         | DataReader, DataWriter, QueryEngine                                                                           |
-| Cache Layer       | Provides caching mechanism to improve query performance    | CacheManager                                                                                                  |
-| Index Layer       | Provides indexing functionality to accelerate data queries | IndexManager                                                                                                  |
-| Encryption Layer  | Provides data encryption and key management                | EncryptedStorageAdapter, crypto-gcm, cryptoProvider                                                           |
-| Storage Layer     | Handles physical storage of data                           | ChunkedFileHandler, SingleFileHandler                                                                         |
-| Metadata Layer    | Manages database metadata                                  | MetadataManager                                                                                               |
-| Monitor Layer     | Monitors system performance and cache status               | PerformanceMonitor, CacheMonitor                                                                              |
-| Utility Layer     | Provides common utility functions                          | PathHelper, withTimeout, logger                                                                               |
+| Layer             | Responsibility                                                     | Main Components                                                                                  |
+| ----------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| Interface Layer   | Provides unified API interface externally                          | FileSystemStorageAdapter, EncryptedStorageAdapter, SQLiteStorageAdapter, StorageAdapterFactory   |
+| Service Layer     | Coordinates transactions, engine migration, and background sync    | TransactionService, EngineMigrationService, AutoSyncService, CacheService, ApiRouter, ApiWrapper |
+| Data Access Layer | Handles data read/write operations and SQL pushdown translation    | DataReader, DataWriter, QueryEngine, SqlQueryBuilder                                             |
+| Cache Layer       | Provides caching mechanism to improve query performance            | CacheManager                                                                                     |
+| Index Layer       | Provides indexing functionality to accelerate data queries         | IndexManager (in-memory index for FileSystem), Native SQLite JSON Expression Indexes             |
+| Encryption Layer  | Provides data encryption, key management, and on-demand decryption | EncryptedStorageAdapter (with on-demand pagination decryption), crypto-gcm, cryptoProvider       |
+| Storage Layer     | Handles physical storage of data                                   | ChunkedFileHandler, SingleFileHandler, SQLiteStorageAdapter                                      |
+| Metadata Layer    | Manages database metadata                                          | MetadataManager                                                                                  |
+| Monitor Layer     | Monitors system performance and cache status                       | PerformanceMonitor, CacheMonitor                                                                 |
+| Utility Layer     | Provides common utility functions                                  | PathHelper, withTimeout, logger, expoModuleLoader                                                |
 
 ## 3. Core Module Design
 
@@ -38,20 +38,27 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 - AES-256-GCM encryption (NIST SP 800-38D compliant)
 - Field-level and full-table encryption
 - Key management with PBKDF2 + HKDF two-tier derivation
+- **On-Demand Decryption**: When query predicates (WHERE) and sorting criteria (ORDER BY) only touch unencrypted plaintext fields, filtering, sorting, and pagination are fully pushed down to the underlying storage engine (`read` / `findMany`). The encryption layer only decrypts the sliced records (e.g. 20 items) via `decryptFieldsBulk`, drastically reducing CPU time and memory footprint on large datasets.
 
 #### SQLiteStorageAdapter
 
-- Experimental SQLite-backed engine built on the `IStorageEngine` contract. Logical tables share one physical `__elds_records` table keyed by `table_name` plus auto-increment id; record payloads are stored as JSON, so encrypted envelopes and plain records use the same storage shape.
-- Uses WAL journal mode with a global insert/update/delete index; all statements are serialized through a process-wide FIFO chain so explicit transactions and background writes cannot interleave.
-- Application-level `TransactionService` transactions map to real SQLite BEGIN/COMMIT; commit replay writes directly to the physical database.
-- Read paths still go through the full-scan `QueryEngine` filter; the `IndexManager`, `CacheManager`, and `DataReader` acceleration layers are not wired into the SQLite engine yet.
-- Experimental: not exported from the package root, not exercised by the consumer QA lanes, and not part of the public support contract. Defaults and factory wiring: `createSQLiteAdapter()` / `createEncryptedSQLiteAdapter()` (SQLITE / SQLITE_ENCRYPTED).
+- Production-grade, high-performance SQLite engine built on the `IStorageEngine` contract. Logical tables share a single physical table `__elds_records` keyed by `(table_name, id)` as composite primary key (`WITHOUT ROWID`); record payloads are stored as JSON.
+- Uses WAL journal mode with statements serialized through a process-wide FIFO queue to preserve ACID transaction isolation and concurrency safety.
+- **SQL Query Pushdown**: Integrates `SqlQueryBuilder` to translate MongoDB/NoSQL-style conditions (`$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$like`, `$and`, `$or`) into SQLite JSON1 `json_extract(payload, '$.field')` expressions. Evaluates `ORDER BY ... NULLS LAST` and `LIMIT ? OFFSET ?` directly in native SQLite, returning and parsing only the matching page rows.
+- **Native Expression Indexes**: Supports declaring indexes during `createTable` or via `createIndex`. Automatically creates `CREATE [UNIQUE] INDEX IF NOT EXISTS idx_<clean_table>_<clean_field> ON __elds_records (table_name, json_extract(payload, '$.<field>'))`, enabling B-tree index acceleration on JSON properties and enforcing unique constraints at the database engine level.
+- **Pushdown Update and Delete**: `delete()` and `update()` execute pushdown SQL queries directly without full-table deserialization and rewrite cycles.
+- **Zero-Config Compatibility**: Marked as optional peer dependency (`expo-sqlite`); dynamically loaded via `expoModuleLoader`. Consumer applications using `'file-system'` incur zero native dependency friction and zero bundling errors.
+
+#### EngineMigrationService
+
+- Provides `migrateEngine(targetEngine, options)` to migrate tables and data bidirectionally between `'file-system'` and `'sqlite'` with zero data loss.
+- Replicates schemas, copies records, verifies counts, cleans up source tables when requested, and automatically recreates expression indexes when switching to SQLite.
 
 #### StorageAdapterFactory
 
 - Creates appropriate storage adapters based on configuration
-- Supports FILE_SYSTEM, ENCRYPTED, SQLITE, and SQLITE_ENCRYPTED adapter types (SQLITE adapter types are experimental and not exported from the package root)
-- FileSystem-backed adapters remain the default engine
+- Supports FILE_SYSTEM, ENCRYPTED, SQLITE, and SQLITE_ENCRYPTED adapter types
+- FileSystem-backed adapters remain the default engine; SQLite can be selected globally via `init({ engine: 'sqlite' })` or configuration managers
 
 ### 3.2 Data Access Layer
 

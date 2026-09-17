@@ -26,7 +26,7 @@ import { CacheConfig, CacheManager, CacheStrategy } from '../cache/CacheManager'
 import { CACHE } from '../constants';
 import { DataReader } from '../data/DataReader';
 import { DataWriter } from '../data/DataWriter';
-import { IndexManager } from '../index/IndexManager';
+import { IndexManager, IndexType } from '../index/IndexManager';
 import { MetadataManager, type TableSchema } from '../meta/MetadataManager';
 import { CacheMonitor } from '../monitor/CacheMonitor';
 import { performanceMonitor } from '../monitor/PerformanceMonitor';
@@ -1050,6 +1050,22 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       await this.dataWriter.migrateToChunked(tableName);
       this.cacheService.clearTableCache(tableName);
     });
+  }
+
+  async createIndex(tableName: string, field: string, unique = false): Promise<void> {
+    await this.ensureInitialized();
+    assertValidTableName(tableName);
+    await this.indexManager.createIndex(tableName, field, unique ? IndexType.UNIQUE : IndexType.NORMAL);
+  }
+
+  async dropIndex(tableName: string, field: string): Promise<void> {
+    await this.ensureInitialized();
+    assertValidTableName(tableName);
+    try {
+      await this.indexManager.dropIndex(tableName, field, IndexType.NORMAL);
+    } catch {
+      await this.indexManager.dropIndex(tableName, field, IndexType.UNIQUE);
+    }
   }
 }
 let storageInstance: FileSystemStorageAdapter | null = null;

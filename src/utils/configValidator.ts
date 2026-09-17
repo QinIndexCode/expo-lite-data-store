@@ -8,6 +8,7 @@ type ConfigDraft = DeepPartial<LiteStoreConfig>;
 const VALID_SORT_METHODS = ['default', 'fast', 'counting', 'merge', 'slow'] as const;
 const VALID_ENCRYPTION_ALGORITHMS = ['auto', 'AES-GCM', 'AES-CTR'] as const;
 const VALID_HMAC_ALGORITHMS = ['SHA-256', 'SHA-512'] as const;
+const VALID_STORAGE_ENGINES = ['file-system', 'sqlite', 'auto'] as const;
 
 export interface ConfigValidationResult {
   isValid: boolean;
@@ -71,6 +72,16 @@ export class ConfigValidator {
         result.isValid = false;
       } else if (config.timeout <= 0) {
         result.errors.push('timeout must be greater than 0');
+        result.isValid = false;
+      }
+    }
+
+    if (config.engine !== undefined) {
+      if (typeof config.engine !== 'string') {
+        result.errors.push('engine must be a string');
+        result.isValid = false;
+      } else if (!VALID_STORAGE_ENGINES.includes(config.engine as (typeof VALID_STORAGE_ENGINES)[number])) {
+        result.errors.push(`engine must be one of ${VALID_STORAGE_ENGINES.join(', ')}`);
         result.isValid = false;
       }
     }

@@ -126,6 +126,8 @@ export type CreateTableOptions<T extends object = StorageRecord> = CommonOptions
   encryptedFields?: string[];
   /** Whether to encrypt the table as one envelope. */
   encryptFullTable?: boolean;
+  /** Expression or secondary indexes to create on fields. */
+  indexes?: (string | { field: string; unique?: boolean })[];
 };
 
 export type WriteOptions = CommonOptions & {
@@ -140,7 +142,10 @@ export type WriteOptions = CommonOptions & {
 /** Internal alias for write paths that can also carry module-private capabilities. */
 export type InternalWriteOptions = WriteOptions;
 
-export type TableOptions = CommonOptions;
+export type TableOptions = CommonOptions & {
+  /** Storage engine to use. */
+  engine?: 'file-system' | 'sqlite' | 'auto';
+};
 
 export type FindOptions<T extends object = StorageRecord> = CommonOptions & {
   /** Number of records to skip. */

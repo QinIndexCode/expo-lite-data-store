@@ -8,18 +8,18 @@ Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案�
 
 ## 2. 分层架构
 
-| 层级       | 职责                         | 主要组件                                                                                                 |
-| ---------- | ---------------------------- | -------------------------------------------------------------------------------------------------------- |
-| 接口层     | 对外提供统一 API             | FileSystemStorageAdapter、EncryptedStorageAdapter、SQLiteStorageAdapter（实验性）、StorageAdapterFactory |
-| 服务层     | 协调事务、API 路由与后台同步 | TransactionService、AutoSyncService、CacheService、ApiRouter、ApiWrapper                                 |
-| 数据访问层 | 处理数据读写                 | DataReader、DataWriter、QueryEngine                                                                      |
-| 缓存层     | 提供缓存以提高查询性能       | CacheManager                                                                                             |
-| 索引层     | 提供索引以加速查询           | IndexManager                                                                                             |
-| 加密层     | 提供数据加密和密钥管理       | EncryptedStorageAdapter、crypto-gcm、cryptoProvider                                                      |
-| 存储层     | 负责数据的物理存储           | ChunkedFileHandler、SingleFileHandler                                                                    |
-| 元数据层   | 管理数据库元数据             | MetadataManager                                                                                          |
-| 监控层     | 监控系统性能和缓存状态       | PerformanceMonitor、CacheMonitor                                                                         |
-| 工具层     | 提供通用基础能力             | PathHelper、withTimeout、logger                                                                          |
+| 层级       | 职责                         | 主要组件                                                                                         |
+| ---------- | ---------------------------- | ------------------------------------------------------------------------------------------------ |
+| 接口层     | 对外提供统一 API             | FileSystemStorageAdapter、EncryptedStorageAdapter、SQLiteStorageAdapter、StorageAdapterFactory   |
+| 服务层     | 协调事务、引擎迁移与后台同步 | TransactionService、EngineMigrationService、AutoSyncService、CacheService、ApiRouter、ApiWrapper |
+| 数据访问层 | 处理数据读写与 SQL 构建      | DataReader、DataWriter、QueryEngine、SqlQueryBuilder                                             |
+| 缓存层     | 提供缓存以提高查询性能       | CacheManager                                                                                     |
+| 索引层     | 提供索引以加速查询           | IndexManager（文件系统内存索引）、SQLite 原生 JSON 表达式索引                                    |
+| 加密层     | 提供数据加密和密钥管理       | EncryptedStorageAdapter（支持分页按需解密）、crypto-gcm、cryptoProvider                          |
+| 存储层     | 负责数据的物理存储           | ChunkedFileHandler、SingleFileHandler、SQLiteStorageAdapter                                      |
+| 元数据层   | 管理数据库元数据             | MetadataManager                                                                                  |
+| 监控层     | 监控系统性能和缓存状态       | PerformanceMonitor、CacheMonitor                                                                 |
+| 工具层     | 提供通用基础能力             | PathHelper、withTimeout、logger、expoModuleLoader                                                |
 
 ## 3. 核心模块设计
 
@@ -38,20 +38,27 @@ Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案�
 - AES-256-GCM 加密，符合 NIST SP 800-38D
 - 字段级和整表加密
 - 基于 PBKDF2 + HKDF 的两级密钥派生
+- **按需分页解密（On-Demand Decryption）**：当查询条件（WHERE）和排序字段（ORDER BY）均命中未加密的明文字段时，查询与分页完整下推到底层存储引擎（`read` / `findMany`），解密层仅对当前页的实际切片记录（如 20 条）调用 `decryptFieldsBulk`，大幅降低海量数据或大文档下的解密 CPU 开销与内存峰值。
 
 #### SQLiteStorageAdapter
 
-- 基于 `IStorageEngine` 契约的实验性 SQLite 引擎。逻辑表共享单一物理表 `__elds_records`，以 `table_name` + 自增 id 为键；record payload 以 JSON 存储，加密信封与明文记录使用相同的存储形态。
-- 使用 WAL journal mode 与全局插入/更新/删除索引；所有语句经进程级 FIFO 链串行化，显式事务与后台写入不会交错。
-- 应用层 `TransactionService` 事务映射到真实 SQLite BEGIN/COMMIT；commit replay 直接写入物理数据库。
-- 读取路径仍走全表扫描的 `QueryEngine` 过滤；`IndexManager`、`CacheManager` 与 `DataReader` 加速层尚未接入 SQLite 引擎。
-- 实验性：未从包根入口导出，不参与 consumer QA lane，不属于公共支持契约。默认与工厂装配：`createSQLiteAdapter()` / `createEncryptedSQLiteAdapter()`（SQLITE / SQLITE_ENCRYPTED）。
+- 基于 `IStorageEngine` 契约的高性能 SQLite 引擎。逻辑表共享单一物理表 `__elds_records`，以 `table_name` + 自增 id 为复合主键（WITHOUT ROWID）；记录 payload 以 JSON 格式存储，保持统一存储形态。
+- 使用 WAL journal mode，所有 SQL 语句经进程级 FIFO 链串行化，保证事务隔离性与并发安全性。
+- **SQL 查询与分页下推（Pushdown）**：集成 `SqlQueryBuilder`，将 NoSQL 过滤条件（`$eq`、`$ne`、`$gt`、`$gte`、`$lt`、`$lte`、`$in`、`$nin`、`$like`、`$and`、`$or`）转换为 SQLite JSON1 `json_extract(payload, '$.field')` 表达式，并在 SQL 层完成 `ORDER BY ... NULLS LAST` 和 `LIMIT ? OFFSET ?`，仅将匹配的少量行反序列化为 JS 对象。
+- **原生表达式索引（Expression Indexes）**：支持在 `createTable` 或 `createIndex` 时声明字段索引，自动在 SQLite 中建立 `CREATE [UNIQUE] INDEX IF NOT EXISTS idx_<table_name>_<field> ON __elds_records (table_name, json_extract(payload, '$.<field>'))`，使 JSON 字段查询直接享受 B-tree 二分加速，并在唯一索引冲突时在底层拦截。
+- **按需删除与更新下推**：`delete()` 与 `update()` 在条件支持下推时直接执行 SQL 删除或按 ID 精确回写，消除全表反序列化与覆写开销。
+- **坚守 0 配置与可选依赖**：`expo-sqlite` 作为可选 peer 依赖通过 `expoModuleLoader` 动态装配，未安装时不产生顶层打包错误；默认引擎保持为 `'file-system'`。
+
+#### EngineMigrationService
+
+- 提供 `migrateEngine(targetEngine, options)` 工具服务，支持在 `'file-system'` 与 `'sqlite'` 之间进行双向零数据丢失的在线全库迁移。
+- 自动复制全部表元数据、列规范与数据记录，校验行数一致性，并在切换到 SQLite 时自动重现表达式索引。
 
 #### StorageAdapterFactory
 
 - 根据配置创建合适的存储适配器
-- 支持 FILE_SYSTEM、ENCRYPTED、SQLITE 和 SQLITE_ENCRYPTED 适配器类型（SQLITE 系列为实验性，未从包根入口导出）
-- 文件系统适配器仍为默认引擎
+- 支持 FILE_SYSTEM、ENCRYPTED、SQLITE 和 SQLITE_ENCRYPTED 适配器类型
+- 文件系统适配器仍为默认引擎，用户可通过 `init({ engine: 'sqlite' })` 或配置管理器全局启用 SQLite 引擎
 
 ### 3.2 数据访问层
 

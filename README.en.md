@@ -63,6 +63,7 @@ That design avoids version drift such as:
 | Contract                                                                                              | Status        | Notes                                                                       |
 | ----------------------------------------------------------------------------------------------------- | ------------- | --------------------------------------------------------------------------- |
 | `npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store` | Supported     | Required managed-compatible contract for Expo SDK 56                        |
+| Previous command plus `expo-sqlite`                                                                   | Supported     | Required when enabling the SQLite high-performance engine & SQL pushdown    |
 | Previous command plus `react-native-quick-crypto`                                                     | Supported     | Required for native flagship validation in a dev client or standalone build |
 | `npm install expo-lite-data-store` only                                                               | Not supported | May leave Expo peer dependencies missing or version-misaligned              |
 
@@ -307,6 +308,69 @@ await db.bulkWrite('users', [
 ```
 
 This is useful when a workflow needs a single high-level mutation call while still preserving ordered semantics.
+
+### Storage Engines & SQLite Native Acceleration
+
+The library supports two pluggable storage engines, defaulting to zero-config `'file-system'`. When handling larger datasets and requiring maximum query performance, switch to `'sqlite'`:
+
+- **Zero-Config Guarantee**: `expo-sqlite` is an optional peer dependency. When using the default `'file-system'` engine, bundling works without `expo-sqlite` installed; only if explicitly configured to use `sqlite` without the package installed will an informative `StorageError` be thrown.
+- **Performance Leap**: Under the SQLite engine, `findMany`, `findOne`, `update`, and `delete` queries, sorting, and pagination compile directly into SQLite SQL statements (using JSON1 expression indexing), avoiding full-table deserialization. Benchmarks show **10x+ faster** queries.
+- **On-Demand Decryption**: For field-level encrypted tables, only the final paginated records are decrypted in bulk, significantly reducing CPU and memory overhead.
+
+#### Enabling SQLite Engine
+
+Install the optional peer dependency:
+
+```bash
+npx expo install expo-sqlite
+```
+
+Configure in `app.json` or pass via runtime initialization:
+
+```ts
+import { db, init } from 'expo-lite-data-store';
+
+await init({ engine: 'sqlite' });
+```
+
+#### Expression Index Management
+
+```ts
+import { db, createIndex, dropIndex } from 'expo-lite-data-store';
+
+// Create expression index (native SQLite json_extract index)
+await createIndex('users', 'email', { unique: true });
+
+// Drop index
+await dropIndex('users', 'email');
+```
+
+Indexes can also be declared in `createTable`:
+
+```ts
+await db.createTable('products', {
+  indexes: ['category', { field: 'sku', unique: true }],
+});
+```
+
+#### Bidirectional Seamless Migration
+
+Migrate all tables, metadata, and expression indexes between `'file-system'` and `'sqlite'` with zero data loss:
+
+```ts
+import { migrateEngine } from 'expo-lite-data-store';
+
+const result = await migrateEngine('sqlite', {
+  cleanSource: true, // Purge source data after strict verification
+  progressCallback: ({ table, copied, total }) => {
+    console.log(`Migrating ${table}: ${copied}/${total}`);
+  },
+});
+
+console.log(
+  `Migrated ${result.totalRecords} records across ${result.migratedTables.length} tables in ${result.durationMs}ms`
+);
+```
 
 ### Deleting tables
 

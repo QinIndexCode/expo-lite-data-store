@@ -4,6 +4,21 @@
 
 [README 入口](../README.md) | [English](./CHANGELOG.en.md) | [API 参考](./API.zh-CN.md)
 
+## [3.2.0] - 2026-09-16
+
+### 新增
+
+- **SQLite 高性能底层存储引擎全面升级**：将 SQLite 从实验性适配器升级为正式支持的高性能引擎，保持公共 API 表面 100% 兼容。通过 `init({ engine: 'sqlite' })` 或配置管理器全局启用。
+- **SQL 查询与分页下推（SQL Pushdown）**：新增 `SqlQueryBuilder`，将 NoSQL 条件（`$eq`、`$ne`、`$gt`、`$gte`、`$lt`、`$lte`、`$in`、`$nin`、`$like`、`$and`、`$or`）直接转换为 SQLite JSON1 `json_extract(payload, '$.field')` 表达式，并将排序（`ORDER BY ... NULLS LAST`）与分页（`LIMIT ? OFFSET ?`）下推到底层 SQL 执行，消除了全表数据读取与内存反序列化瓶颈。
+- **原生 JSON 表达式索引（Expression Indexes）**：在 `createTable` 及新增的 `createIndex`/`dropIndex` API 中支持字段索引，自动在 SQLite 中建立 `CREATE [UNIQUE] INDEX IF NOT EXISTS idx_<clean_table>_<clean_field> ON __elds_records (table_name, json_extract(payload, '$.<field>'))`，使 JSON 字段查询直接享受 B-tree 二分加速，并在唯一索引冲突时在底层拦截。
+- **按需分页解密（On-Demand Decryption）**：在字段级加密表中，当查询过滤与排序命中明文字段时，查询与分页完整下推到底层引擎，解密层仅对当前切片结果（如 20 条）调用 `decryptFieldsBulk`，大幅降低 CPU 开销与内存峰值。
+- **双向引擎在线迁移服务（`migrateEngine`）**：支持在 `'file-system'` 与 `'sqlite'` 之间进行零数据丢失的双向全库迁移，自动复制表定义、数据记录与表达式索引，并在行数严格校验一致后自动切换活动引擎配置；支持 `cleanSource: true` 自动清理源数据。
+- **公开索引管理 API**：导出 `createIndex(tableName, field, options?)` 和 `dropIndex(tableName, field, options?)`。
+
+### 优化与兼容
+
+- **坚守 0 配置原则**：`expo-sqlite` 标记为可选 peer 依赖并采用动态加载机制，默认引擎维持 `'file-system'`。仅安装 `expo-file-system` 的纯净 Expo Go 应用导入此库时绝无任何打包或原生模块缺失错误；仅当显式配置 `sqlite` 但未安装时抛出清晰友好的指引异常。
+
 ## [3.1.0] - 2026-09-06
 
 ### 修复

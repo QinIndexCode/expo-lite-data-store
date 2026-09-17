@@ -1,7 +1,21 @@
 const isRecord = (value: object): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const getSortValue = (record: object, column: string): unknown => (isRecord(record) ? record[column] : undefined);
+const getSortValue = (record: object, column: string): unknown => {
+  if (!isRecord(record)) return undefined;
+  if (Object.prototype.hasOwnProperty.call(record, column)) return record[column];
+  if (!column.includes('.')) return record[column];
+
+  const parts = column.split('.');
+  let current: unknown = record;
+  for (const part of parts) {
+    if (current === null || current === undefined || typeof current !== 'object') {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+};
 
 const compareNullishValues = (left: unknown, right: unknown): number | undefined => {
   const leftIsNullish = left === null || left === undefined;

@@ -102,4 +102,10 @@ export interface IStorageAdapter {
   commit(options?: TableOptions): Promise<void>;
 
   rollback(options?: TableOptions): Promise<void>;
+
+  createIndex?(tableName: string, field: string, unique?: boolean): Promise<void>;
+
+  dropIndex?(tableName: string, field: string): Promise<void>;
+
+  cleanup?(): Promise<void>;
 }

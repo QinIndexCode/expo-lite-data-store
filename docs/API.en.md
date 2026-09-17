@@ -69,16 +69,17 @@ import { randomBytes } from 'expo-lite-data-store/utils/cryptoProvider';
 
 ### Export groups
 
-| Export group          | Public items                                                                                                                                                                                                                                                                                                                                                                   |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Facade object         | `db`                                                                                                                                                                                                                                                                                                                                                                           |
-| Named CRUD functions  | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked`                                                                                                                                                      |
-| Transaction functions | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                                                                                                                                                                       |
-| Config exports        | `configManager`, `ConfigManager`                                                                                                                                                                                                                                                                                                                                               |
-| Monitoring exports    | `performanceMonitor`; type-only `PerformanceStats`, `HealthCheckResult`                                                                                                                                                                                                                                                                                                        |
-| Crypto helpers        | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`; type-only `KeyCacheStats`                                                                                                                                                                                                             |
-| Error exports         | `StorageError`, `StorageErrorCode`, `CryptoError`, `TransactionError`                                                                                                                                                                                                                                                                                                          |
-| Type exports          | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FindOneOptions`, `FindManyOptions`, `UpdateOptions`, `FilterCondition`, `BulkOperation`, `StorageInput`, `StorageRecord`, `UpdatePayload`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats` |
+| Export group          | Public items                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Facade object         | `db`                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Named CRUD functions  | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked`, `createIndex`, `dropIndex`, `migrateEngine`                                                                                                                                                    |
+| Transaction functions | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                                                                                                                                                                                                                  |
+| Engine Migration      | `migrateEngine`, `EngineMigrationService`                                                                                                                                                                                                                                                                                                                                                                                 |
+| Config exports        | `configManager`, `ConfigManager`                                                                                                                                                                                                                                                                                                                                                                                          |
+| Monitoring exports    | `performanceMonitor`; type-only `PerformanceStats`, `HealthCheckResult`                                                                                                                                                                                                                                                                                                                                                   |
+| Crypto helpers        | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`; type-only `KeyCacheStats`                                                                                                                                                                                                                                                        |
+| Error exports         | `StorageError`, `StorageErrorCode`, `CryptoError`, `TransactionError`                                                                                                                                                                                                                                                                                                                                                     |
+| Type exports          | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FindOneOptions`, `FindManyOptions`, `UpdateOptions`, `FilterCondition`, `BulkOperation`, `StorageInput`, `StorageRecord`, `UpdatePayload`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats`, `MigrateEngineOptions`, `MigrationResult` |
 
 ### `db` facade vs named exports
 
@@ -151,6 +152,7 @@ type CreateTableOptions<T extends object = StorageRecord> = CommonOptions & {
   mode?: 'single' | 'chunked';
   encryptedFields?: string[];
   encryptFullTable?: boolean;
+  indexes?: (string | { field: string; unique?: boolean })[];
 };
 ```
 
@@ -590,6 +592,95 @@ Discards the active transaction.
 - Commit execution and failed-commit snapshot restoration use a module-private symbol capability for direct writes. Adding a public `directWrite` property to options cannot bypass transaction staging.
 - AutoSync retains dirty entries and performs no storage write while a transaction is active. A later scheduled or explicit sync may flush them after the transaction settles.
 - Transactions are in-process and are not crash-durable or cross-process ACID transactions.
+
+## Storage Engine and Index APIs
+
+### Storage Engine Configuration
+
+The library supports two pluggable backing storage engines:
+
+1. `'file-system'` (default): Purely based on `expo-file-system`. Incurs zero additional native peer dependencies, working out-of-the-box in Expo Go and pure JS environments.
+2. `'sqlite'` (high-performance engine): Backed by `expo-sqlite`. Logical tables share a single physical `__elds_records` table with WAL journal mode enabled. Supports SQL query pushdown, JSON1 expression indexes, and on-demand pagination decryption.
+
+Switch engines using `init()` or `configManager`:
+
+```ts
+import { db, init } from 'expo-lite-data-store';
+
+// Initialize and switch to the high-performance SQLite engine
+await init({ engine: 'sqlite' });
+```
+
+> **Zero-Config Guarantee**: `expo-sqlite` is an optional peer dependency. When using the default `'file-system'` engine, consumer applications without `expo-sqlite` will never encounter bundling errors or missing module exceptions. Only when explicitly configuring `sqlite` without installing `expo-sqlite` will the library raise a clear, actionable `StorageError` guiding installation.
+
+### Index Management APIs
+
+#### `createIndex(tableName, field, options?)`
+
+Creates an index for the specified table field. Under the SQLite engine, automatically creates a native B-tree index on `json_extract(payload, '$.<field>')`; under the FileSystem engine, maintains it in the in-memory index manager.
+
+```ts
+import { db, createIndex } from 'expo-lite-data-store';
+
+// Create a normal field index
+await createIndex('users', 'city');
+
+// Create a unique constraint index
+await createIndex('users', 'email', { unique: true });
+```
+
+#### `dropIndex(tableName, field, options?)`
+
+Drops an existing field index.
+
+```ts
+import { db, dropIndex } from 'expo-lite-data-store';
+
+await dropIndex('users', 'city');
+```
+
+#### Declaring Indexes in `createTable`
+
+Indexes can be declared during table creation via the `indexes` option:
+
+```ts
+await db.createTable('products', {
+  indexes: ['category', { field: 'sku', unique: true }],
+});
+```
+
+### Bidirectional Engine Migration API
+
+#### `migrateEngine(targetEngine, options?)`
+
+Performs an online, zero-data-loss migration of all tables and data between `'file-system'` and `'sqlite'`. The migration service reads table metadata, column definitions, and records from the source engine, recreates tables and expression indexes in the target engine, verifies row count equality, and updates the active runtime engine configuration.
+
+```ts
+import { db, migrateEngine } from 'expo-lite-data-store';
+
+const result = await migrateEngine('sqlite', {
+  cleanSource: true, // Cleans up source data upon successful migration (defaults to false)
+  progressCallback: ({ table, copied, total }) => {
+    console.log(`Migrating ${table}: ${copied}/${total}`);
+  },
+});
+
+console.log(
+  `Migrated ${result.migratedTables.length} tables (${result.totalRecords} records) in ${result.durationMs}ms`
+);
+```
+
+#### `MigrationResult`
+
+```ts
+interface MigrationResult {
+  fromEngine: 'file-system' | 'sqlite';
+  toEngine: 'file-system' | 'sqlite';
+  migratedTables: string[];
+  totalRecords: number;
+  durationMs: number;
+}
+```
 
 ## Configuration API
 

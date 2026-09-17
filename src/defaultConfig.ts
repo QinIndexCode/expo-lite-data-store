@@ -5,6 +5,7 @@ export default {
   storageFolder: 'lite-data-store',
   sortMethods: 'default' as const,
   timeout: 10000,
+  engine: 'file-system' as const,
 
   api: {
     rateLimit: {

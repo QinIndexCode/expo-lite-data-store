@@ -301,6 +301,15 @@ export class CacheManager {
     this.cleanupTimer = setInterval(() => {
       this.cleanupExpired();
     }, CacheManager.getDefaultCleanupInterval());
+    const timer = this.cleanupTimer as unknown;
+    if (
+      typeof timer === 'object' &&
+      timer !== null &&
+      'unref' in timer &&
+      typeof (timer as { unref: () => void }).unref === 'function'
+    ) {
+      (timer as { unref: () => void }).unref();
+    }
   }
 
   private cleanupExpired(): void {

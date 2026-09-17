@@ -562,13 +562,23 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     return records;
   }
 
+  private get effectiveCacheTimeout(): number {
+    return configManager.getConfig().encryption?.cacheTimeout ?? this.cacheTimeout;
+  }
+
   private getCachedFullTableData(tableName: string, sourceCiphertext: string): StorageRecord[] | undefined {
-    if (this.cacheTimeout <= 0) {
+    const timeout = this.effectiveCacheTimeout;
+    if (timeout <= 0) {
+      this.clearTableCache(tableName);
       return undefined;
     }
 
-    const entry = this.fullTableCache.get(this.fullTableCacheKey(tableName));
-    if (!entry || entry.sourceCiphertext !== sourceCiphertext || Date.now() - entry.timestamp >= this.cacheTimeout) {
+    const key = this.fullTableCacheKey(tableName);
+    const entry = this.fullTableCache.get(key);
+    if (!entry || entry.sourceCiphertext !== sourceCiphertext || Date.now() - entry.timestamp >= timeout) {
+      if (entry) {
+        this.fullTableCache.delete(key);
+      }
       return undefined;
     }
 
@@ -576,7 +586,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   }
 
   private cacheFullTableData(tableName: string, data: StorageRecord[], sourceCiphertext: string): void {
-    if (this.cacheTimeout <= 0) {
+    if (this.effectiveCacheTimeout <= 0) {
       return;
     }
 
@@ -1039,6 +1049,74 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     );
   }
 
+  private extractReferencedFields(condition?: FilterCondition<StorageRecord>): string[] | null {
+    if (!condition) return [];
+    if (typeof condition === 'function') return null;
+    if (!isStorageRecord(condition)) return null;
+
+    const fields: string[] = [];
+    const record = condition as StorageRecord;
+
+    for (const [key, val] of Object.entries(record)) {
+      if (key === '$and' || key === '$or') {
+        if (!Array.isArray(val)) return null;
+        for (const sub of val) {
+          const subFields = this.extractReferencedFields(sub as FilterCondition<StorageRecord>);
+          if (subFields === null) return null;
+          fields.push(...subFields);
+        }
+      } else if (key.startsWith('$')) {
+        return null;
+      } else {
+        fields.push(key);
+        if (key.includes('.')) {
+          fields.push(key.split('.')[0]);
+        }
+      }
+    }
+
+    return fields;
+  }
+
+  private canPushdownUnencryptedQuery(
+    tableMeta: TableSchema | undefined,
+    config: LiteStoreConfig,
+    readOptions?: ReadOptions<StorageRecord>
+  ): boolean {
+    if (!tableMeta) return false;
+    if (tableMeta.encryptFullTable) return false;
+    if (this.isStorageTransactionInProgress()) return false;
+
+    const encryptedFields = this.resolveConfiguredEncryptedFields(tableMeta, config);
+    if (tableMeta.encrypted && encryptedFields.length === 0) {
+      return false;
+    }
+    if (encryptedFields.length === 0) {
+      return true;
+    }
+
+    const encryptedSet = new Set(encryptedFields);
+
+    if (readOptions?.filter) {
+      const filterFields = this.extractReferencedFields(readOptions.filter);
+      if (filterFields === null) return false;
+      if (filterFields.some(f => encryptedSet.has(f))) return false;
+    }
+
+    if (readOptions?.sortBy) {
+      const sortFields = Array.isArray(readOptions.sortBy) ? readOptions.sortBy : [readOptions.sortBy];
+      for (const field of sortFields) {
+        if (typeof field !== 'string') continue;
+        const rootField = field.includes('.') ? field.split('.')[0] : field;
+        if (encryptedSet.has(field) || (rootField && encryptedSet.has(rootField))) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
   private async readWithKey(
     tableName: string,
     options: ReadOptions<StorageRecord> | undefined,
@@ -1047,12 +1125,18 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     return StorageErrorHandler.handleAsyncError(
       async () => {
         // A zero timeout explicitly disables the ciphertext-bound decrypted cache.
-        if (this.cacheTimeout === 0) {
+        if (this.effectiveCacheTimeout <= 0) {
           this.fullTableCache.clear();
         }
         const tableMeta = await this.getTableMeta(tableName);
-        const readOptions = options ? { bypassCache: options.bypassCache } : undefined;
-        const raw = await this.engine.read<StorageRecord>(tableName, this.withTransactionOwner(readOptions));
+        const config = configManager.getConfig();
+        const canPushdown = this.canPushdownUnencryptedQuery(tableMeta, config, options);
+
+        const engineReadOptions = canPushdown
+          ? this.withTransactionOwner(options)
+          : this.withTransactionOwner(options ? { bypassCache: options.bypassCache } : undefined);
+
+        const raw = await this.engine.read<StorageRecord>(tableName, engineReadOptions);
         if (raw.length === 0) {
           this.clearTableCache(tableName);
           return [];
@@ -1060,7 +1144,6 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
 
         const first = raw[0];
         let result: StorageRecord[] = [];
-        const config = configManager.getConfig();
         const encryptedFields = this.resolveFieldsForRead(raw, tableMeta, config);
 
         const encryptedTablePayload = first?.['__enc'];
@@ -1106,14 +1189,18 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         }
         // Filtering and sorting must observe decrypted fields rather than encrypted envelopes.
         let visibleRecords = result;
-        if (options?.filter) {
-          visibleRecords = QueryEngine.filter(visibleRecords, options.filter);
-        }
-        if (options?.sortBy) {
-          visibleRecords = QueryEngine.sort(visibleRecords, options.sortBy, options.order, options.sortAlgorithm);
+        if (!canPushdown) {
+          if (options?.filter) {
+            visibleRecords = QueryEngine.filter(visibleRecords, options.filter);
+          }
+          if (options?.sortBy) {
+            visibleRecords = QueryEngine.sort(visibleRecords, options.sortBy, options.order, options.sortAlgorithm);
+          }
+
+          return this.cloneRecords(QueryEngine.paginate(visibleRecords, options?.skip, options?.limit));
         }
 
-        return this.cloneRecords(QueryEngine.paginate(visibleRecords, options?.skip, options?.limit));
+        return this.cloneRecords(visibleRecords);
       },
       cause =>
         StorageErrorHandler.createGeneralError(
@@ -1161,9 +1248,16 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     const result = await StorageErrorHandler.handleAsyncError(
       async () => {
         const key = await this.key();
-        const data = await this.readWithKey(tableName, options, key);
-        const filtered = QueryEngine.filter(data, storageFilter);
-        return filtered.length > 0 ? this.cloneRecords([filtered[0]])[0] : null;
+        const records = await this.readWithKey(
+          tableName,
+          {
+            ...options,
+            filter: storageFilter,
+            limit: 1,
+          },
+          key
+        );
+        return records.length > 0 ? this.cloneRecords([records[0]])[0] : null;
       },
       cause =>
         StorageErrorHandler.createGeneralError(
@@ -1354,5 +1448,27 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     options?: WriteOptions
   ): Promise<WriteResult> {
     return this.write(tableName, data, { ...options, mode: 'append' });
+  }
+
+  async createIndex(tableName: string, field: string, unique = false): Promise<void> {
+    await this.ensureAccessAuthorized();
+    if (typeof this.engine.createIndex === 'function') {
+      await this.engine.createIndex(tableName, field, unique);
+    }
+  }
+
+  async dropIndex(tableName: string, field: string): Promise<void> {
+    await this.ensureAccessAuthorized();
+    if (typeof this.engine.dropIndex === 'function') {
+      await this.engine.dropIndex(tableName, field);
+    }
+  }
+
+  async cleanup(): Promise<void> {
+    this.clearAllCache();
+    this.keyPromise = null;
+    if (typeof this.engine.cleanup === 'function') {
+      await this.engine.cleanup();
+    }
   }
 }

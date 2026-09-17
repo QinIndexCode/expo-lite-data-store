@@ -69,16 +69,17 @@ import { randomBytes } from 'expo-lite-data-store/utils/cryptoProvider';
 
 ### 导出分组
 
-| 导出分组       | 公共项                                                                                                                                                                                                                                                                                                                                                                         |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Facade 对象    | `db`                                                                                                                                                                                                                                                                                                                                                                           |
-| 命名 CRUD 函数 | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked`                                                                                                                                                      |
-| 事务函数       | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                                                                                                                                                                       |
-| 配置导出       | `configManager`, `ConfigManager`                                                                                                                                                                                                                                                                                                                                               |
-| 监控导出       | `performanceMonitor`                                                                                                                                                                                                                                                                                                                                                           |
-| 加密辅助导出   | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`                                                                                                                                                                                                                                        |
-| 错误导出       | `StorageError`, `StorageErrorCode`, `CryptoError`, `TransactionError`                                                                                                                                                                                                                                                                                                          |
-| 类型导出       | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FindOneOptions`, `FindManyOptions`, `UpdateOptions`, `FilterCondition`, `BulkOperation`, `StorageInput`, `StorageRecord`, `UpdatePayload`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats` |
+| 导出分组       | 公共项                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Facade 对象    | `db`                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 命名 CRUD 函数 | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked`, `createIndex`, `dropIndex`, `migrateEngine`                                                                                                                                                    |
+| 事务函数       | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                                                                                                                                                                                                                  |
+| 引擎迁移服务   | `migrateEngine`, `EngineMigrationService`                                                                                                                                                                                                                                                                                                                                                                                 |
+| 配置导出       | `configManager`, `ConfigManager`                                                                                                                                                                                                                                                                                                                                                                                          |
+| 监控导出       | `performanceMonitor`                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 加密辅助导出   | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`                                                                                                                                                                                                                                                                                   |
+| 错误导出       | `StorageError`, `StorageErrorCode`, `CryptoError`, `TransactionError`                                                                                                                                                                                                                                                                                                                                                     |
+| 类型导出       | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FindOneOptions`, `FindManyOptions`, `UpdateOptions`, `FilterCondition`, `BulkOperation`, `StorageInput`, `StorageRecord`, `UpdatePayload`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats`, `MigrateEngineOptions`, `MigrationResult` |
 
 ### `db` facade 与命名导出
 
@@ -151,6 +152,7 @@ type CreateTableOptions<T extends object = StorageRecord> = CommonOptions & {
   mode?: 'single' | 'chunked';
   encryptedFields?: string[];
   encryptFullTable?: boolean;
+  indexes?: (string | { field: string; unique?: boolean })[];
 };
 ```
 
@@ -590,6 +592,95 @@ await rollback();
 - commit 执行和 commit 失败后的快照恢复使用模块私有 symbol capability 进行直接写；在公开 options 中加入 `directWrite` 属性不能绕过事务暂存；
 - 活动事务期间 AutoSync 会保留脏数据且不执行存储写；事务结束后的后续定时或显式 sync 才可能刷出这些数据；
 - 事务仅在进程内协调，不提供崩溃持久化或跨进程 ACID 语义。
+
+## 存储引擎与索引 API
+
+### 存储引擎配置
+
+本库支持两种可插拔底层存储引擎：
+
+1. `'file-system'`（默认引擎）：完全基于 `expo-file-system`，零额外原生 peer 依赖，在纯净 Expo Go 与纯 JS 环境中开箱即用。
+2. `'sqlite'`（高性能引擎）：基于 `expo-sqlite`，逻辑表共享单一物理表 `__elds_records` 并启用 WAL journal 模式，支持 SQL 查询下推、JSON1 表达式索引与按需分页解密。
+
+可以通过 `init()` 或 `configManager` 切换引擎：
+
+```ts
+import { db, init } from 'expo-lite-data-store';
+
+// 初始化并切换到 SQLite 高性能引擎
+await init({ engine: 'sqlite' });
+```
+
+> **0 配置保障**：`expo-sqlite` 是可选 peer 依赖。当使用默认的 `'file-system'` 引擎时，即使应用没有安装 `expo-sqlite` 也绝不会发生打包错误或模块缺失异常；仅当显式启用 `sqlite` 但未安装时，库会抛出清晰友好的 `StorageError` 指引安装。
+
+### 索引管理 API
+
+#### `createIndex(tableName, field, options?)`
+
+为指定表的字段建立索引。在 SQLite 引擎下，会自动生成 `json_extract(payload, '$.<field>')` 的原生 B-tree 索引；在文件系统引擎下，会自动在内存索引管理器中维护。
+
+```ts
+import { db, createIndex } from 'expo-lite-data-store';
+
+// 创建普通字段索引
+await createIndex('users', 'city');
+
+// 创建唯一约束索引
+await createIndex('users', 'email', { unique: true });
+```
+
+#### `dropIndex(tableName, field, options?)`
+
+删除已建立的字段索引。
+
+```ts
+import { db, dropIndex } from 'expo-lite-data-store';
+
+await dropIndex('users', 'city');
+```
+
+#### 在 `createTable` 中声明索引
+
+建表时可通过 `indexes` 选项一并声明：
+
+```ts
+await db.createTable('products', {
+  indexes: ['category', { field: 'sku', unique: true }],
+});
+```
+
+### 双向引擎迁移 API
+
+#### `migrateEngine(targetEngine, options?)`
+
+支持在 `'file-system'` 与 `'sqlite'` 之间进行在线、零数据丢失的双向全库迁移。迁移服务会自动读取源引擎的全部表元数据、列定义与数据记录，在目标引擎中重建表与表达式索引，并在行数严格校验一致后自动更新运行时活动引擎配置。
+
+```ts
+import { db, migrateEngine } from 'expo-lite-data-store';
+
+const result = await migrateEngine('sqlite', {
+  cleanSource: true, // 迁移成功后清理源引擎数据（默认为 false）
+  progressCallback: ({ table, copied, total }) => {
+    console.log(`Migrating ${table}: ${copied}/${total}`);
+  },
+});
+
+console.log(
+  `Migrated ${result.migratedTables.length} tables (${result.totalRecords} records) in ${result.durationMs}ms`
+);
+```
+
+#### `MigrationResult`
+
+```ts
+interface MigrationResult {
+  fromEngine: 'file-system' | 'sqlite';
+  toEngine: 'file-system' | 'sqlite';
+  migratedTables: string[];
+  totalRecords: number;
+  durationMs: number;
+}
+```
 
 ## 配置 API
 

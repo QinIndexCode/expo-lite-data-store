@@ -142,6 +142,7 @@ const AUTH_MASTER_KEY_ALIAS = 'expo_litedb_master_key_auth_v2026';
 const CTR_PAYLOAD_VERSION = 'ctr-v2' as const;
 let masterKeyGeneration = 0;
 let authMasterKeyProvisioning: Promise<void> | null = null;
+let authMasterKeyRetrieval: Promise<string> | null = null;
 
 /**
  * Changes whenever resetMasterKey successfully removes at least one persisted
@@ -389,6 +390,15 @@ const initializeKeyCacheCleanup = (): void => {
   keyCacheCleanupTimer = setInterval(() => {
     keyCache.cleanup();
   }, KEY_CACHE_CLEANUP_INTERVAL);
+  const timer = keyCacheCleanupTimer as unknown;
+  if (
+    typeof timer === 'object' &&
+    timer !== null &&
+    'unref' in timer &&
+    typeof (timer as { unref: () => void }).unref === 'function'
+  ) {
+    (timer as { unref: () => void }).unref();
+  }
 
   if (typeof window !== 'undefined') {
     const addEventListener = window['addEventListener'];
@@ -744,22 +754,35 @@ export const getMasterKey = async (requireAuthOnAccess: boolean = false): Promis
 
   try {
     if (requireAuthOnAccess) {
-      const secureStore = await ensureAuthOnAccessSupported();
-      const authOptions = {
-        requireAuthentication: true as const,
-        authenticationPrompt: 'Authenticate to access database',
-      };
-      let key = await secureStore.getItemAsync(AUTH_MASTER_KEY_ALIAS, authOptions);
-
-      if (!key) {
-        await provisionAuthMasterKey(secureStore, authOptions);
-        key = await secureStore.getItemAsync(AUTH_MASTER_KEY_ALIAS, authOptions);
-        if (!key) {
-          throw new CryptoError('Strict master key was not persisted after provisioning', 'KEY_DERIVE_FAILED');
-        }
+      if (authMasterKeyRetrieval) {
+        return await authMasterKeyRetrieval;
       }
 
-      return key;
+      const fetchKey = (async (): Promise<string> => {
+        const secureStore = await ensureAuthOnAccessSupported();
+        const authOptions = {
+          requireAuthentication: true as const,
+          authenticationPrompt: 'Authenticate to access database',
+        };
+        let key = await secureStore.getItemAsync(AUTH_MASTER_KEY_ALIAS, authOptions);
+
+        if (!key) {
+          await provisionAuthMasterKey(secureStore, authOptions);
+          key = await secureStore.getItemAsync(AUTH_MASTER_KEY_ALIAS, authOptions);
+          if (!key) {
+            throw new CryptoError('Strict master key was not persisted after provisioning', 'KEY_DERIVE_FAILED');
+          }
+        }
+
+        return key;
+      })();
+
+      authMasterKeyRetrieval = fetchKey;
+      try {
+        return await fetchKey;
+      } finally {
+        authMasterKeyRetrieval = null;
+      }
     }
 
     const secureStore = getOptionalSecureStore();
@@ -845,6 +868,7 @@ export const resetMasterKey = async (): Promise<void> => {
       removedKeyMaterial = removedNormalKey || removedAuthKey;
     }
   } finally {
+    authMasterKeyRetrieval = null;
     clearKeyCache();
     if (removedKeyMaterial) {
       masterKeyGeneration++;

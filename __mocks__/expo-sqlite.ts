@@ -1,81 +1,119 @@
-type MockRecordRow = {
-  table_name: string;
-  id: number;
-  payload: string;
+type MockParams = (string | number | null | boolean | undefined)[] | undefined;
+
+interface NodeSqliteStatement {
+  run(...params: unknown[]): { changes: number | bigint; lastInsertRowid: number | bigint };
+  get(...params: unknown[]): unknown;
+  all(...params: unknown[]): unknown[];
+}
+
+interface NodeSqliteDatabase {
+  exec(sql: string): void;
+  prepare(sql: string): NodeSqliteStatement;
+  close(): void;
+}
+
+interface NodeSqliteModule {
+  DatabaseSync: new (location: string) => NodeSqliteDatabase;
+}
+
+let sqliteModule: NodeSqliteModule | undefined;
+try {
+  sqliteModule = require('node:sqlite') as NodeSqliteModule;
+} catch {
+  // node:sqlite fallback handled below
+}
+
+interface MockState {
+  databases: Record<string, unknown[]>;
+  syncDbs: Record<string, NodeSqliteDatabase>;
+}
+
+declare global {
+  var __expo_sqlite_mock__: MockState | undefined;
+}
+
+if (!globalThis.__expo_sqlite_mock__) {
+  globalThis.__expo_sqlite_mock__ = {
+    databases: {},
+    syncDbs: {},
+  };
+}
+
+const getMockState = (): MockState => {
+  if (!globalThis.__expo_sqlite_mock__) {
+    globalThis.__expo_sqlite_mock__ = {
+      databases: {},
+      syncDbs: {},
+    };
+  }
+  return globalThis.__expo_sqlite_mock__;
 };
 
-type MockParams = (string | number | null | boolean)[] | undefined;
-
-const mockDatabases: Record<string, MockRecordRow[]> = {};
-
-const INSERT_RE = /^INSERT INTO __elds_records \(table_name, id, payload\) VALUES \(\?, \?, \?\)/i;
-const DELETE_ALL_RE = /^DELETE FROM __elds_records WHERE table_name = \?/i;
-const MAX_ID_RE = /^SELECT COALESCE\(MAX\(id\), 0\) \+ 1 AS nextId FROM __elds_records WHERE table_name = \?/i;
-const READ_ALL_RE = /^SELECT id, payload FROM __elds_records WHERE table_name = \? ORDER BY id ASC/i;
-const COUNT_ALL_RE = /^SELECT COUNT\(\*\) AS count FROM __elds_records WHERE table_name = \?/i;
+const normalizeParams = (params: MockParams = []): (string | number | null)[] =>
+  (params || []).map(p => {
+    if (typeof p === 'boolean') return p ? 1 : 0;
+    if (p === undefined) return null;
+    return p;
+  });
 
 class MockSQLiteDatabase {
   constructor(public readonly name: string) {}
 
-  async execAsync(sql: string): Promise<void> {
-    const trimmed = sql.trim();
-    if (/^(BEGIN|COMMIT|ROLLBACK|PRAGMA|CREATE TABLE|CREATE INDEX|CREATE UNIQUE INDEX)/i.test(trimmed)) {
-      return;
+  private getDb(): NodeSqliteDatabase {
+    const state = getMockState();
+    if (!state.databases[this.name] || !state.syncDbs[this.name]) {
+      if (state.syncDbs[this.name]) {
+        try {
+          state.syncDbs[this.name].close();
+        } catch {
+          // ignore close error
+        }
+      }
+      if (sqliteModule) {
+        state.syncDbs[this.name] = new sqliteModule.DatabaseSync(':memory:');
+      } else {
+        throw new Error('node:sqlite is required for SQLite mock execution');
+      }
+      state.databases[this.name] = [];
     }
-    throw new Error(`Unsupported execAsync statement: ${sql}`);
+    return state.syncDbs[this.name];
+  }
+
+  async execAsync(sql: string): Promise<void> {
+    this.getDb().exec(sql);
   }
 
   async runAsync(sql: string, params: MockParams = []): Promise<{ changes: number; lastInsertRowId: number }> {
-    const rows = mockDatabases[this.name] ?? (mockDatabases[this.name] = []);
-    if (INSERT_RE.test(sql)) {
-      const [tableName, id, payload] = params as [string, number, string];
-      const existingIndex = rows.findIndex(row => row.table_name === tableName && row.id === id);
-      const inserted = { table_name: tableName, id, payload };
-      if (existingIndex >= 0) {
-        rows[existingIndex] = inserted;
-        return { changes: 1, lastInsertRowId: id };
-      }
-      rows.push(inserted);
-      return { changes: 1, lastInsertRowId: id };
-    }
-    if (DELETE_ALL_RE.test(sql)) {
-      const [tableName] = params as [string];
-      const before = rows.length;
-      for (let index = rows.length - 1; index >= 0; index -= 1) {
-        if (rows[index].table_name === tableName) {
-          rows.splice(index, 1);
-        }
-      }
-      return { changes: before - rows.length, lastInsertRowId: 0 };
-    }
-    throw new Error(`Unsupported runAsync statement: ${sql}`);
+    const stmt = this.getDb().prepare(sql);
+    const result = stmt.run(...normalizeParams(params));
+    return {
+      changes: Number(result.changes),
+      lastInsertRowId: Number(result.lastInsertRowid),
+    };
   }
 
   async getFirstAsync<T>(sql: string, params: MockParams = []): Promise<T | null> {
-    const rows = mockDatabases[this.name] ?? [];
-    if (MAX_ID_RE.test(sql)) {
-      const [tableName] = params as [string];
-      const maxId = rows.reduce((max, row) => (row.table_name === tableName ? Math.max(max, row.id) : max), 0);
-      return { nextId: maxId + 1 } as T;
-    }
-    if (COUNT_ALL_RE.test(sql)) {
-      const [tableName] = params as [string];
-      const count = rows.reduce((acc, row) => (row.table_name === tableName ? acc + 1 : acc), 0);
-      return { count } as T;
-    }
-    throw new Error(`Unsupported getFirstAsync statement: ${sql}`);
+    const stmt = this.getDb().prepare(sql);
+    const row = stmt.get(...normalizeParams(params));
+    return (row ?? null) as T | null;
   }
 
   async getAllAsync<T>(sql: string, params: MockParams = []): Promise<T[]> {
-    const rows = mockDatabases[this.name] ?? [];
-    if (READ_ALL_RE.test(sql)) {
-      const [tableName] = params as [string];
-      return rows
-        .filter(row => row.table_name === tableName)
-        .sort((a, b) => a.id - b.id)
-        .map(row => ({ id: row.id, payload: row.payload })) as T[];
+    const stmt = this.getDb().prepare(sql);
+    return stmt.all(...normalizeParams(params)) as T[];
+  }
+
+  async closeAsync(): Promise<void> {
+    const state = getMockState();
+    if (state.syncDbs[this.name]) {
+      try {
+        state.syncDbs[this.name].close();
+      } catch {
+        // ignore
+      }
+      delete state.syncDbs[this.name];
+      delete state.databases[this.name];
     }
-    throw new Error(`Unsupported getAllAsync statement: ${sql}`);
   }
 }
 
@@ -84,8 +122,9 @@ const openDatabaseAsync = async (
   _options?: unknown,
   _directory?: string
 ): Promise<MockSQLiteDatabase> => {
-  if (!mockDatabases[databaseName]) {
-    mockDatabases[databaseName] = [];
+  const state = getMockState();
+  if (!state.databases[databaseName]) {
+    state.databases[databaseName] = [];
   }
   return new MockSQLiteDatabase(databaseName);
 };
@@ -93,6 +132,8 @@ const openDatabaseAsync = async (
 const expoSqliteMock = {
   openDatabaseAsync,
   SQLiteProvider: undefined,
+  useSQLiteContext: undefined,
 };
 
-module.exports = Object.assign(expoSqliteMock, { default: expoSqliteMock });
+export default expoSqliteMock;
+export { openDatabaseAsync };
