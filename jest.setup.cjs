@@ -460,6 +460,9 @@ jest.mock('expo-sqlite', () => {
     getDb() {
       const mockState = global.__expo_sqlite_mock__;
       if (!mockState.databases[this.name] || !mockState.syncDbs[this.name]) {
+        if (!sqliteModule || typeof sqliteModule.DatabaseSync !== 'function') {
+          throw new Error('SQLite test suite requires Node.js >= 22.5.0 with built-in node:sqlite module.');
+        }
         if (mockState.syncDbs[this.name]) {
           try {
             mockState.syncDbs[this.name].close();
