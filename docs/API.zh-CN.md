@@ -611,7 +611,7 @@ import { db, init } from 'expo-lite-data-store';
 await init({ engine: 'sqlite' });
 ```
 
-> **0 配置保障**：`expo-sqlite` 是可选 peer 依赖。当使用默认的 `'file-system'` 引擎时，即使应用没有安装 `expo-sqlite` 也绝不会发生打包错误或模块缺失异常；仅当显式启用 `sqlite` 但未安装时，库会抛出清晰友好的 `StorageError` 指引安装。
+> **依赖说明**：`expo-sqlite` 是可选 peer 依赖。使用默认的 `'file-system'` 引擎时无需安装 `expo-sqlite`；仅当显式启用 `sqlite` 引擎时才需要安装该模块。
 
 ### 索引管理 API
 

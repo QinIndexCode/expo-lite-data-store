@@ -611,7 +611,7 @@ import { db, init } from 'expo-lite-data-store';
 await init({ engine: 'sqlite' });
 ```
 
-> **Zero-Config Guarantee**: `expo-sqlite` is an optional peer dependency. When using the default `'file-system'` engine, consumer applications without `expo-sqlite` will never encounter bundling errors or missing module exceptions. Only when explicitly configuring `sqlite` without installing `expo-sqlite` will the library raise a clear, actionable `StorageError` guiding installation.
+> **Dependency Note**: `expo-sqlite` is an optional peer dependency. When using the default `'file-system'` engine, `expo-sqlite` is not required; it only needs to be installed when explicitly configuring `engine: 'sqlite'`.
 
 ### Index Management APIs
 

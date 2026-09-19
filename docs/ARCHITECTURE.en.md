@@ -47,7 +47,7 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 - **SQL Query Pushdown**: Integrates `SqlQueryBuilder` to translate MongoDB/NoSQL-style conditions (`$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$like`, `$and`, `$or`) into SQLite JSON1 `json_extract(payload, '$.field')` expressions. Evaluates `ORDER BY ... NULLS LAST` and `LIMIT ? OFFSET ?` directly in native SQLite, returning and parsing only the matching page rows.
 - **Native Expression Indexes**: Supports declaring indexes during `createTable` or via `createIndex`. Automatically creates `CREATE [UNIQUE] INDEX IF NOT EXISTS idx_<clean_table>_<clean_field> ON __elds_records (table_name, json_extract(payload, '$.<field>'))`, enabling B-tree index acceleration on JSON properties and enforcing unique constraints at the database engine level.
 - **Pushdown Update and Delete**: `delete()` and `update()` execute pushdown SQL queries directly without full-table deserialization and rewrite cycles.
-- **Zero-Config Compatibility**: Marked as optional peer dependency (`expo-sqlite`); dynamically loaded via `expoModuleLoader`. Consumer applications using `'file-system'` incur zero native dependency friction and zero bundling errors.
+- **Optional Dependency & Dynamic Loading**: Marked as optional peer dependency (`expo-sqlite`); dynamically loaded via `expoModuleLoader`. Applications using the default `'file-system'` engine can bundle and run without installing `expo-sqlite`.
 
 #### EngineMigrationService
 

@@ -22,7 +22,7 @@ All notable changes to this project will be documented in this file.
 - **Cross-Engine Table Access Policy Penetration**: Resolved inspector lookup in `assertTableAccessPolicy` and `listTables`, ensuring encrypted tables in the SQLite engine fully enforce security checks and isolation policies.
 - **Encrypted Deep-Field Query Routing**: Implemented bidirectional ancestor and descendant field checking in `EncryptedStorageAdapter`, preventing encrypted nested fields from being mistakenly pushed down to SQL.
 - **Task Queue Synchronization Safety**: Hardened `SQLiteStorageAdapter.enqueue` to consistently return a Promise when `sqlTxDepth > 0`, eliminating unhandled synchronous exceptions.
-- **Strict Zero-Configuration Guarantee**: `expo-sqlite` is marked as an optional peer dependency and loaded dynamically. The default engine remains `'file-system'`. Standard Expo Go applications bundle cleanly with 0 configuration.
+- **Optional Dependency & Dynamic Loading**: `expo-sqlite` is marked as an optional peer dependency and loaded dynamically. The default engine remains `'file-system'`, allowing applications without `expo-sqlite` to bundle and run seamlessly.
 
 ## [3.1.0] - 2026-09-06
 

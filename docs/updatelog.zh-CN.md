@@ -4,7 +4,7 @@
 
 ### 📅 2026-09-19 `v3.1.1` SQLite 高性能存储引擎、表达式索引与安全加固
 
-> 存储引擎全面升级：正式引入生产级 SQLite 高性能底层存储引擎，坚守 0 配置原则（`expo-sqlite` 为可选依赖、动态加载），默认引擎保持零额外依赖的 `'file-system'`。
+> 存储引擎全面升级：正式引入生产级 SQLite 高性能底层存储引擎（默认引擎保持 `'file-system'`，`expo-sqlite` 作为可选 peer 依赖按需动态加载）。
 > SQL 与分页下推：新增 `SqlQueryBuilder`，将 NoSQL 过滤条件（`$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$like`, `$and`, `$or`）、排序（`ORDER BY ... NULLS LAST`）和分页（`LIMIT ? OFFSET ?`）直接编译为原生 SQLite JSON1 `json_extract(payload, '$.field')` 语句并在引擎层执行，消除了全表读取与内存反序列化瓶颈，查询提速 11x。
 > 原生 JSON 表达式索引：在 `createTable` 以及新增的 `createIndex`/`dropIndex` API 中支持字段索引，自动在底层建立 `CREATE [UNIQUE] INDEX IF NOT EXISTS idx_<clean_table>__<clean_field> ON __elds_records (table_name, json_extract(payload, '$.<field>'))`，使 JSON 字段查询直接享受 B-tree 二分加速并在引擎层拦截唯一约束冲突。
 > 字段级按需分页解密：在字段级加密表中，当查询过滤与排序命中明文字段时，查询和分页完整下推到底层 SQLite，解密层仅对切片后的分页结果（如 20 条）调用 `decryptFieldsBulk`，大幅降低 CPU 开销与内存峰值。

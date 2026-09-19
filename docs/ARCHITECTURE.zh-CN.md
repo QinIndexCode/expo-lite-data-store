@@ -47,7 +47,7 @@ Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案�
 - **SQL 查询与分页下推（Pushdown）**：集成 `SqlQueryBuilder`，将 NoSQL 过滤条件（`$eq`、`$ne`、`$gt`、`$gte`、`$lt`、`$lte`、`$in`、`$nin`、`$like`、`$and`、`$or`）转换为 SQLite JSON1 `json_extract(payload, '$.field')` 表达式，并在 SQL 层完成 `ORDER BY ... NULLS LAST` 和 `LIMIT ? OFFSET ?`，仅将匹配的少量行反序列化为 JS 对象。
 - **原生表达式索引（Expression Indexes）**：支持在 `createTable` 或 `createIndex` 时声明字段索引，自动在 SQLite 中建立 `CREATE [UNIQUE] INDEX IF NOT EXISTS idx_<table_name>_<field> ON __elds_records (table_name, json_extract(payload, '$.<field>'))`，使 JSON 字段查询直接享受 B-tree 二分加速，并在唯一索引冲突时在底层拦截。
 - **按需删除与更新下推**：`delete()` 与 `update()` 在条件支持下推时直接执行 SQL 删除或按 ID 精确回写，消除全表反序列化与覆写开销。
-- **坚守 0 配置与可选依赖**：`expo-sqlite` 作为可选 peer 依赖通过 `expoModuleLoader` 动态装配，未安装时不产生顶层打包错误；默认引擎保持为 `'file-system'`。
+- **可选依赖与按需加载**：`expo-sqlite` 作为可选 peer 依赖通过 `expoModuleLoader` 按需动态装配，未安装时不影响默认 `'file-system'` 引擎的打包与运行。
 
 #### EngineMigrationService
 

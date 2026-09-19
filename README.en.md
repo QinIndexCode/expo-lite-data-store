@@ -12,7 +12,7 @@ The package is designed around the following runtime guarantees:
 
 - lazy initialization, so importing the package does not immediately require storage access or Expo native modules;
 - explicit Expo install contract, so peer dependencies stay aligned with the host Expo SDK instead of being hidden inside the library;
-- pluggable dual storage engines: default zero-extra-dependency `'file-system'` engine, plus optional production-grade `'sqlite'` high-performance engine;
+- pluggable dual storage engines: default `'file-system'` engine, plus optional production-grade `'sqlite'` high-performance engine;
 - native SQL and expression index pushdown: under the SQLite engine, filters, sorting, and pagination compile directly to SQLite JSON1 statements with `json_extract` B-tree expression indexes, eliminating deserialization bottlenecks;
 - field-level on-demand page decryption: encrypted tables decrypt only sliced pagination results, minimizing CPU overhead and memory footprint;
 - online zero-data-loss bidirectional migration: seamless live engine switching between `'file-system'` and `'sqlite'` via `migrateEngine`;
@@ -315,9 +315,9 @@ This is useful when a workflow needs a single high-level mutation call while sti
 
 ### Storage Engines & SQLite Native Acceleration
 
-The library supports two pluggable storage engines, defaulting to zero-config `'file-system'`. When handling larger datasets and requiring maximum query performance, switch to `'sqlite'`:
+The library supports two pluggable storage engines, defaulting to `'file-system'`. When handling larger datasets and requiring maximum query performance, switch to `'sqlite'`:
 
-- **Zero-Config Guarantee**: `expo-sqlite` is an optional peer dependency. When using the default `'file-system'` engine, bundling works without `expo-sqlite` installed; only if explicitly configured to use `sqlite` without the package installed will an informative `StorageError` be thrown.
+- **Optional Dependency & On-Demand Loading**: `expo-sqlite` is an optional peer dependency. Applications using the default `'file-system'` engine do not need `expo-sqlite` installed; simply install it when configuring `engine: 'sqlite'`.
 - **Performance Leap**: Under the SQLite engine, `findMany`, `findOne`, `update`, and `delete` queries, sorting, and pagination compile directly into SQLite SQL statements (using JSON1 expression indexing), avoiding full-table deserialization. Benchmarks show **10x+ faster** queries.
 - **On-Demand Decryption**: For field-level encrypted tables, only the final paginated records are decrypted in bulk, significantly reducing CPU and memory overhead.
 

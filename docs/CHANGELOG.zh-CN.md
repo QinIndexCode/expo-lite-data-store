@@ -22,7 +22,7 @@
 - **跨引擎安全访问策略穿透**：修复 `assertTableAccessPolicy` 与 `listTables` 的检查器解析，确保 SQLite 引擎加密表完全执行权限校验与隔离策略。
 - **加密深层字段查询安全路由**：在 `EncryptedStorageAdapter` 中增加祖先/子孙字段双向判定，杜绝加密嵌套字段在 SQL 层的误下推。
 - **并发任务队列安全保护**：加固 `SQLiteStorageAdapter.enqueue`，在事务深度大于 0 时统一返回 Promise 避免同步异常悬挂。
-- **坚守 0 配置原则**：`expo-sqlite` 标记为可选 peer 依赖并采用动态加载机制，默认引擎维持 `'file-system'`。纯净 Expo Go 零配置打包 100% 兼容。
+- **可选依赖与动态加载**：`expo-sqlite` 标记为可选 peer 依赖并按需动态加载，默认引擎保持 `'file-system'`，未安装 `expo-sqlite` 的工程可直接打包运行。
 
 ## [3.1.0] - 2026-09-06
 
