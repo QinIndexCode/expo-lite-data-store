@@ -10,6 +10,7 @@ Only the current stable major line receives security fixes.
 
 | Version   | Supported |
 | --------- | --------- |
+| `3.1.x`   | Yes       |
 | `3.0.x`   | Yes       |
 | `< 3.0.0` | No        |
 

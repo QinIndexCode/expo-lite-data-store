@@ -12,6 +12,10 @@ The package is designed around the following runtime guarantees:
 
 - lazy initialization, so importing the package does not immediately require storage access or Expo native modules;
 - explicit Expo install contract, so peer dependencies stay aligned with the host Expo SDK instead of being hidden inside the library;
+- pluggable dual storage engines: default zero-extra-dependency `'file-system'` engine, plus optional production-grade `'sqlite'` high-performance engine;
+- native SQL and expression index pushdown: under the SQLite engine, filters, sorting, and pagination compile directly to SQLite JSON1 statements with `json_extract` B-tree expression indexes, eliminating deserialization bottlenecks;
+- field-level on-demand page decryption: encrypted tables decrypt only sliced pagination results, minimizing CPU overhead and memory footprint;
+- online zero-data-loss bidirectional migration: seamless live engine switching between `'file-system'` and `'sqlite'` via `migrateEngine`;
 - support for plain and encrypted storage surfaces;
 - compatibility with Expo Go for the documented feature set;
 - optional native crypto acceleration in development builds and standalone apps;

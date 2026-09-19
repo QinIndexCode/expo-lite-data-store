@@ -2,9 +2,17 @@
 
 [README 入口](../README.md) | [English](./updatelog.en.md) | [消费者文档](../README.zh-CN.md)
 
-### Unreleased - `3.0.0` 发布后加固
+### 📅 2026-09-19 `v3.1.1` SQLite 高性能存储引擎、表达式索引与安全加固
 
-> 状态：以下变更发生在 npm `3.0.0` 发布之后，不属于该已发布版本。
+> 存储引擎全面升级：正式引入生产级 SQLite 高性能底层存储引擎，坚守 0 配置原则（`expo-sqlite` 为可选依赖、动态加载），默认引擎保持零额外依赖的 `'file-system'`。
+> SQL 与分页下推：新增 `SqlQueryBuilder`，将 NoSQL 过滤条件（`$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$like`, `$and`, `$or`）、排序（`ORDER BY ... NULLS LAST`）和分页（`LIMIT ? OFFSET ?`）直接编译为原生 SQLite JSON1 `json_extract(payload, '$.field')` 语句并在引擎层执行，消除了全表读取与内存反序列化瓶颈，查询提速 11x。
+> 原生 JSON 表达式索引：在 `createTable` 以及新增的 `createIndex`/`dropIndex` API 中支持字段索引，自动在底层建立 `CREATE [UNIQUE] INDEX IF NOT EXISTS idx_<clean_table>__<clean_field> ON __elds_records (table_name, json_extract(payload, '$.<field>'))`，使 JSON 字段查询直接享受 B-tree 二分加速并在引擎层拦截唯一约束冲突。
+> 字段级按需分页解密：在字段级加密表中，当查询过滤与排序命中明文字段时，查询和分页完整下推到底层 SQLite，解密层仅对切片后的分页结果（如 20 条）调用 `decryptFieldsBulk`，大幅降低 CPU 开销与内存峰值。
+> 双向在线迁移服务：导出 `migrateEngine` 与 `EngineMigrationService`，支持在 `'file-system'` 与 `'sqlite'` 之间进行零数据丢失的双向全库迁移，自动迁移表定义、记录与索引，严格校验行数后原子切换活动运行时代理；支持 `cleanSource: true` 清理源数据。
+> 安全与边界加固：重构 `CryptoError` 消除错误日志与堆栈中的敏感明文泄露隐患；在 `deleteTable` 中引入 DDL 索引前缀转义隔离（`idx_${escaped}__%`）；修复 `assertTableAccessPolicy` 跨引擎元数据解析；加固 `EncryptedStorageAdapter` 嵌套加密字段祖先/子孙判定；加固 `SQLiteStorageAdapter.enqueue` 事务内异常返回；升级 CI 与发布工作流至 `node-version: 22`。
+
+### 📅 2026-09-06 `v3.1.0` 事务行为对齐、排序比较器与分块写入加固
+
 > 存储协调：同路径文件操作和 DataWriter 表写入使用共享的进程内 FIFO，锁等待上限为 30 秒。元数据管理器另行共享按路径键控的 FIFO，重读最新快照、应用受 `createdAt` 保护的 mutation、推进跨 adapter epoch，并保留失败 mutation 供重试；超时等待者不会破坏后续队列交接。
 > 恢复与删除：绑定表名的 v2 单文件 marker 记录前后代 token、hash 与物理计数；临时证据必须与持久化 metadata 和已提交主文件完全匹配。metadata backup 仅在主文件缺失时恢复，主文件损坏时绝不回退，且必须成功移除旧 backup。chunked overwrite 日志和 single-to-chunked mode 提交均有明确边界；删除后的 metadata 缺失是权威状态，同名建表会清除孤立工件。
 > 完整性与安全：增量索引暂存受影响 bucket delta，重建暂存完整映射；两者都在存储前校验 `UNIQUE`，成功后才发布。动态全字段加密使用显式 metadata marker；整表逻辑计数与物理代际同次提交，解密缓存绑定精确 ciphertext。混合 legacy CTR / 当前 GCM bulk payload 会分组解密并保持顺序。加密表策略持久化，事务绑定 owner，直接提交/恢复写需要模块私有 symbol capability。
@@ -14,7 +22,6 @@
 > 发布治理：删除本地发布便利包装命令；受支持的发布路径是 tag-only GitHub workflow，并执行 tag、`main` 祖先关系、发布门禁和 provenance 校验。
 > 根目录迁移安全：不可读或格式损坏的当前 `meta.ldb` 会被视为已占用；legacy 迁移前会删除空 bootstrap 根目录，避免正确性依赖 move 覆盖既有目录。
 > 运行时卫生：删除未使用的存储抽象，把权限探测移出写入热路径，并让日志按级别输出、测试默认静默。
-> SQLite 储备引擎：新增 `IStorageEngine` 契约与 `SQLiteStorageAdapter`（逻辑表共享单一物理表、WAL、语句全链串行化、`TransactionService` 映射到物理事务）；`StorageAdapterFactory` 支持 `SQLITE` / `SQLITE_ENCRYPTED`，暂未从包根入口导出，默认引擎仍是文件系统。
 > 大文档可读性：`DataReader`/`DataWriter` 表读取安全阀从 10s 提升到 30s，50MB 级 chunked 文档在 Expo Go JS fallback 下不再被内部超时打断。
 > QA 校准：Expo Go 性能阈值首次以真实模拟器实测校准（25MB≈45s、50MB≈90s、plain-5000≈2 万 ops/s），business 大文档 case 收窄到 25MB；50MB 矩阵样本改用写入计数断言替代全表读。
 > 文档收敛：移除 CHANGELOG 中无测量环境的绝对性能数字宣称，统一改为"基准测试中可观测的提升"表述。
