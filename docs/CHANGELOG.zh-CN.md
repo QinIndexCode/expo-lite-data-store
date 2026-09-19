@@ -4,7 +4,7 @@
 
 [README 入口](../README.md) | [English](./CHANGELOG.en.md) | [API 参考](./API.zh-CN.md)
 
-## [3.2.0] - 2026-09-16
+## [3.1.1] - 2026-09-19
 
 ### 新增
 
@@ -15,9 +15,14 @@
 - **双向引擎在线迁移服务（`migrateEngine`）**：支持在 `'file-system'` 与 `'sqlite'` 之间进行零数据丢失的双向全库迁移，自动复制表定义、数据记录与表达式索引，并在行数严格校验一致后自动切换活动引擎配置；支持 `cleanSource: true` 自动清理源数据。
 - **公开索引管理 API**：导出 `createIndex(tableName, field, options?)` 和 `dropIndex(tableName, field, options?)`。
 
-### 优化与兼容
+### 修复与安全加固
 
-- **坚守 0 配置原则**：`expo-sqlite` 标记为可选 peer 依赖并采用动态加载机制，默认引擎维持 `'file-system'`。仅安装 `expo-file-system` 的纯净 Expo Go 应用导入此库时绝无任何打包或原生模块缺失错误；仅当显式配置 `sqlite` 但未安装时抛出清晰友好的指引异常。
+- **敏感信息日志防泄露**：重构 `CryptoError` 构造器，仅在 `cause` 中保留原始异常对象，`message` 中仅输出 `error.name`，彻底避免明文数据和解密异常堆栈泄露。
+- **DDL 索引前缀隔离**：在 `deleteTable` 中对索引前缀匹配执行字符转义（`idx_${escaped}__%`），杜绝同前缀表名（如 `users` 与 `users_backup`）之间的索引误删。
+- **跨引擎安全访问策略穿透**：修复 `assertTableAccessPolicy` 与 `listTables` 的检查器解析，确保 SQLite 引擎加密表完全执行权限校验与隔离策略。
+- **加密深层字段查询安全路由**：在 `EncryptedStorageAdapter` 中增加祖先/子孙字段双向判定，杜绝加密嵌套字段在 SQL 层的误下推。
+- **并发任务队列安全保护**：加固 `SQLiteStorageAdapter.enqueue`，在事务深度大于 0 时统一返回 Promise 避免同步异常悬挂。
+- **坚守 0 配置原则**：`expo-sqlite` 标记为可选 peer 依赖并采用动态加载机制，默认引擎维持 `'file-system'`。纯净 Expo Go 零配置打包 100% 兼容。
 
 ## [3.1.0] - 2026-09-06
 

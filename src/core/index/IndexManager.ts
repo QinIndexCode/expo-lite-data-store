@@ -99,7 +99,7 @@ export class IndexManager {
     }
 
     for (const field of indexFields) {
-      if (!field?.trim()) {
+      if (typeof field !== 'string' || !field.trim()) {
         throw new StorageError('Field name cannot be empty', 'TABLE_INDEX_INVALID', {
           details: 'All field names must be non-empty strings',
           suggestion: 'Please provide valid field names',

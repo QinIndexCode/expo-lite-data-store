@@ -147,8 +147,16 @@ type TableMetadataInspector = {
   listTables?: () => Promise<string[]>;
 };
 
+const getMetadataInspector = (): TableMetadataInspector => {
+  const defaultInst = dbManager.getDefaultInstance() as unknown as TableMetadataInspector;
+  if (typeof defaultInst?.getTableMeta === 'function') {
+    return defaultInst;
+  }
+  return plainStorage as typeof plainStorage & TableMetadataInspector;
+};
+
 const assertTableAccessPolicy = async (tableName: string, security: TransactionSecurity): Promise<void> => {
-  const inspector = plainStorage as typeof plainStorage & TableMetadataInspector;
+  const inspector = getMetadataInspector();
   await inspector.ensureInitialized?.();
   const tableMeta = inspector.getTableMeta?.(tableName);
 
@@ -214,7 +222,7 @@ const resolveListStorageAdapter = async (options?: CommonOptions) => {
     return resolved;
   }
 
-  const inspector = plainStorage as typeof plainStorage & TableMetadataInspector;
+  const inspector = getMetadataInspector();
   await inspector.ensureInitialized?.();
   const tableNames = (await inspector.listTables?.()) ?? [];
   assertListAccessPolicy(tableNames, resolved, inspector);
@@ -223,7 +231,9 @@ const resolveListStorageAdapter = async (options?: CommonOptions) => {
 };
 
 const clearTransactionSecurityIfSettled = (operationCompleted: boolean): void => {
-  if (operationCompleted || !plainStorage.isInTransaction()) {
+  const defaultAdapter = dbManager.getDefaultInstance() as unknown as { isInTransaction?: () => boolean };
+  const inTx = typeof defaultAdapter.isInTransaction === 'function' ? defaultAdapter.isInTransaction() : false;
+  if (operationCompleted || !inTx) {
     activeTransactionSecurity = null;
   }
 };
@@ -275,7 +285,7 @@ export const listTables = async (options: TableOptions = {}): Promise<string[]> 
   const resolved = await resolveListStorageAdapter(options);
   const tableNames = await resolved.adapter.listTables(options);
   if (!resolved.requireAuthOnAccess) {
-    const inspector = plainStorage as typeof plainStorage & TableMetadataInspector;
+    const inspector = getMetadataInspector();
     await inspector.ensureInitialized?.();
     assertListAccessPolicy(tableNames, resolved, inspector);
   }
@@ -494,7 +504,16 @@ export type {
   StorageInput,
   StorageRecord,
   UpdatePayload,
+  ColumnDefinition,
+  SortOrder,
+  SortAlgorithm,
+  SortField,
+  TableMeta,
+  Catalog,
 } from './types/storageTypes';
+
+export type { IStorageAdapter } from './types/storageAdapterInfc';
+export type { IStorageEngine } from './types/storageEngineInfc';
 
 export { StorageError } from './types/storageErrorInfc';
 export { StorageErrorCode } from './types/storageErrorCode';

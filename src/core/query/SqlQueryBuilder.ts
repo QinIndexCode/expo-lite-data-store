@@ -51,7 +51,8 @@ export class SqlQueryBuilder {
     if (!this.isSafeField(field)) {
       return null;
     }
-    return `$.${field}`;
+    const formatted = field.replace(/\.(\d+)(?=\.|$)/g, '[$1]');
+    return `$.${formatted}`;
   }
 
   /**

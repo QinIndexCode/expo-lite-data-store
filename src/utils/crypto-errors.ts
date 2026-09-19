@@ -10,6 +10,8 @@ export class CryptoError extends Error {
     | 'HASH_FAILED'
     | 'VERIFY_FAILED';
 
+  public cause?: unknown;
+
   constructor(
     message: string,
     code: 'ENCRYPT_FAILED' | 'DECRYPT_FAILED' | 'KEY_DERIVE_FAILED' | 'HMAC_MISMATCH' | 'HASH_FAILED' | 'VERIFY_FAILED',
@@ -18,8 +20,10 @@ export class CryptoError extends Error {
     super(message);
     this.name = 'CryptoError';
     this.code = code;
-    if (error) {
-      this.message += `:\n${error}`;
+    if (error !== undefined) {
+      this.cause = error;
+      const detail = error instanceof Error ? error.name : 'Unknown error';
+      this.message += ` (${detail})`;
     }
   }
 }

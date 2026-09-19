@@ -97,7 +97,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
     // single enqueued task that opened it, so queuing again would chain
     // behind that task and deadlock the statement chain.
     if (this.sqlTxDepth > 0) {
-      return operation();
+      return Promise.resolve().then(operation);
     }
     const next = this.sqlChain.then(operation, operation);
     this.sqlChain = next.catch(() => undefined);
@@ -467,31 +467,57 @@ export class SQLiteStorageAdapter implements IStorageEngine {
   async createIndex(tableName: string, field: string, unique = false): Promise<void> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
+    const tableMeta = this.metadataManager.get(tableName);
+    if (!tableMeta) {
+      throw new StorageError(`Table ${tableName} not found`, 'TABLE_NOT_FOUND', {
+        details: `Cannot create index on non-existent table: ${tableName}`,
+        suggestion: 'Create the table first before creating an index',
+      });
+    }
+
     const stmt = SqlQueryBuilder.buildIndexStatement(tableName, field, unique);
     if (!stmt) {
       throw new StorageError(`Cannot create index on unsafe field: ${field}`, 'TABLE_INDEX_INVALID');
     }
+
+    const oppositeKey = `${field}_${unique ? 'normal' : 'unique'}`;
+    const newIndexes = { ...tableMeta.indexes };
+    if (newIndexes[oppositeKey] !== undefined) {
+      delete newIndexes[oppositeKey];
+      const dropStmt = SqlQueryBuilder.buildDropIndexStatement(tableName, field);
+      if (dropStmt) {
+        await this.enqueue(async () => {
+          const db = this.assertDatabase();
+          await db.execAsync(dropStmt);
+        });
+      }
+    }
+
     await this.enqueue(async () => {
       const db = this.assertDatabase();
       await db.execAsync(stmt);
     });
-    const tableMeta = this.metadataManager.get(tableName);
-    if (tableMeta) {
-      const indexName = `${field}_${unique ? 'unique' : 'normal'}`;
-      this.metadataManager.update(tableName, {
-        indexes: {
-          ...tableMeta.indexes,
-          [indexName]: unique ? 'unique' : 'normal',
-        },
-        updatedAt: Date.now(),
-      });
-      await this.metadataManager.saveImmediately?.();
-    }
+
+    const indexName = `${field}_${unique ? 'unique' : 'normal'}`;
+    newIndexes[indexName] = unique ? 'unique' : 'normal';
+    this.metadataManager.update(tableName, {
+      indexes: newIndexes,
+      updatedAt: Date.now(),
+    });
+    await this.metadataManager.saveImmediately?.();
   }
 
   async dropIndex(tableName: string, field: string): Promise<void> {
     await this.ensureInitialized();
     this.validateTableName(tableName);
+    const tableMeta = this.metadataManager.get(tableName);
+    if (!tableMeta) {
+      throw new StorageError(`Table ${tableName} not found`, 'TABLE_NOT_FOUND', {
+        details: `Cannot drop index on non-existent table: ${tableName}`,
+        suggestion: 'Create the table first before dropping an index',
+      });
+    }
+
     const stmt = SqlQueryBuilder.buildDropIndexStatement(tableName, field);
     if (!stmt) {
       throw new StorageError(`Cannot drop index on unsafe field: ${field}`, 'TABLE_INDEX_INVALID');
@@ -500,8 +526,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
       const db = this.assertDatabase();
       await db.execAsync(stmt);
     });
-    const tableMeta = this.metadataManager.get(tableName);
-    if (tableMeta?.indexes) {
+    if (tableMeta.indexes) {
       const newIndexes = { ...tableMeta.indexes };
       delete newIndexes[`${field}_normal`];
       delete newIndexes[`${field}_unique`];
@@ -548,10 +573,9 @@ export class SQLiteStorageAdapter implements IStorageEngine {
           await this.sqlDeleteAll(tableName);
           const cleanTable = SqlQueryBuilder.cleanIdentifier(tableName);
           const escapedPrefix = `idx_${cleanTable.replace(/([_%])/g, '\\$1')}__`;
-          const legacyEscapedPrefix = `idx_${cleanTable.replace(/([_%])/g, '\\$1')}_`;
           const indexRows = await db.getAllAsync<{ name: string }>(
-            "SELECT name FROM sqlite_master WHERE type = 'index' AND (name LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\')",
-            [`${escapedPrefix}%`, `${legacyEscapedPrefix}%`]
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE ? ESCAPE '\\'",
+            [`${escapedPrefix}%`]
           );
           for (const idx of indexRows) {
             await db.execAsync(`DROP INDEX IF EXISTS ${idx.name}`);
@@ -1105,6 +1129,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
   }
 
   async cleanup(): Promise<void> {
+    await this.sqlChain.catch(() => undefined);
     if (this.db) {
       const dbToClose = this.db as { closeAsync?: () => Promise<void> };
       if (typeof dbToClose.closeAsync === 'function') {

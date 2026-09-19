@@ -22,6 +22,7 @@ import { meta } from '../../core/meta/MetadataManager';
 describe('SQLite Engine Integration', () => {
   const SQLITE_TABLE = 'sqlite_integration_test_table';
   const ENCRYPTED_TABLE = 'sqlite_encrypted_test_table';
+  const ENCRYPTED_OPTIONS = { encrypted: true } as const;
 
   beforeEach(async () => {
     configManager.resetConfig();
@@ -30,8 +31,8 @@ describe('SQLite Engine Integration', () => {
     if (await hasTable(SQLITE_TABLE)) {
       await deleteTable(SQLITE_TABLE);
     }
-    if (await hasTable(ENCRYPTED_TABLE)) {
-      await deleteTable(ENCRYPTED_TABLE);
+    if (await hasTable(ENCRYPTED_TABLE, ENCRYPTED_OPTIONS)) {
+      await deleteTable(ENCRYPTED_TABLE, ENCRYPTED_OPTIONS);
     }
   });
 
@@ -40,8 +41,8 @@ describe('SQLite Engine Integration', () => {
       if (await hasTable(SQLITE_TABLE)) {
         await deleteTable(SQLITE_TABLE);
       }
-      if (await hasTable(ENCRYPTED_TABLE)) {
-        await deleteTable(ENCRYPTED_TABLE);
+      if (await hasTable(ENCRYPTED_TABLE, ENCRYPTED_OPTIONS)) {
+        await deleteTable(ENCRYPTED_TABLE, ENCRYPTED_OPTIONS);
       }
     } catch {
       // ignore teardown errors
@@ -172,8 +173,8 @@ describe('SQLite Engine Integration', () => {
         ssn: `999-00-${String(i).padStart(4, '0')}`,
       }));
 
-      await insert(ENCRYPTED_TABLE, batch);
-      expect(await countTable(ENCRYPTED_TABLE)).toBe(50);
+      await insert(ENCRYPTED_TABLE, batch, ENCRYPTED_OPTIONS);
+      expect(await countTable(ENCRYPTED_TABLE, ENCRYPTED_OPTIONS)).toBe(50);
 
       // Query on unencrypted fields with pagination (pushdown eligible!)
       const pageResults = await findMany<{
@@ -188,6 +189,7 @@ describe('SQLite Engine Integration', () => {
         order: 'desc',
         skip: 0,
         limit: 5,
+        encrypted: true,
       });
 
       expect(pageResults).toHaveLength(5);
@@ -204,14 +206,15 @@ describe('SQLite Engine Integration', () => {
       // findOne with unencrypted filter condition
       const single = await findOne<{ id: string; secretToken: string }>(ENCRYPTED_TABLE, {
         where: { id: 'user-49' },
+        encrypted: true,
       });
       expect(single).not.toBeNull();
       expect(single?.secretToken).toBe('token-secret-xyz-49');
 
       // Dynamic index creation and dropping on encrypted table
-      await createIndex(ENCRYPTED_TABLE, 'status');
+      await createIndex(ENCRYPTED_TABLE, 'status', ENCRYPTED_OPTIONS);
       expect(meta.get(ENCRYPTED_TABLE)?.indexes?.['status_normal']).toBe('normal');
-      await dropIndex(ENCRYPTED_TABLE, 'status');
+      await dropIndex(ENCRYPTED_TABLE, 'status', ENCRYPTED_OPTIONS);
       expect(meta.get(ENCRYPTED_TABLE)?.indexes?.['status_normal']).toBeUndefined();
     });
   });
@@ -288,21 +291,22 @@ describe('SQLite Engine Integration', () => {
 
     it('persists dynamic encryptAllFields properly on SQLite tables', async () => {
       const ALL_ENC_TABLE = 'sqlite_dynamic_all_enc_table';
-      if (await hasTable(ALL_ENC_TABLE)) await deleteTable(ALL_ENC_TABLE);
+      if (await hasTable(ALL_ENC_TABLE, ENCRYPTED_OPTIONS)) await deleteTable(ALL_ENC_TABLE, ENCRYPTED_OPTIONS);
 
       // Create table with dynamic all-field encryption (encryptedFields: [])
       await createTable(ALL_ENC_TABLE, { encrypted: true, encryptedFields: [] });
       expect(meta.get(ALL_ENC_TABLE)?.encryptAllFields).toBe(true);
 
       // Insert records with custom fields
-      await insert(ALL_ENC_TABLE, [{ id: 'sec-1', customField: 'top-secret', salary: 100000 }]);
+      await insert(ALL_ENC_TABLE, [{ id: 'sec-1', customField: 'top-secret', salary: 100000 }], ENCRYPTED_OPTIONS);
       const fetched = await findOne<{ id: string; customField: string; salary: number }>(ALL_ENC_TABLE, {
         where: { id: 'sec-1' },
+        encrypted: true,
       });
       expect(fetched?.customField).toBe('top-secret');
       expect(fetched?.salary).toBe(100000);
 
-      await deleteTable(ALL_ENC_TABLE);
+      await deleteTable(ALL_ENC_TABLE, ENCRYPTED_OPTIONS);
     });
   });
 });

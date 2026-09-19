@@ -27,6 +27,7 @@ import {
   encrypt,
   encryptFieldsBulk,
   encryptFields,
+  clearKeyCache,
 } from '../utils/crypto';
 import { configManager } from './config/ConfigManager';
 import storage from './adapter/FileSystemStorageAdapter';
@@ -1070,7 +1071,12 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       } else {
         fields.push(key);
         if (key.includes('.')) {
-          fields.push(key.split('.')[0]);
+          const parts = key.split('.');
+          let prefix = '';
+          for (const part of parts) {
+            prefix = prefix ? `${prefix}.${part}` : part;
+            fields.push(prefix);
+          }
         }
       }
     }
@@ -1096,19 +1102,27 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     }
 
     const encryptedSet = new Set(encryptedFields);
+    const isEncryptedFieldOrChild = (fieldName: string): boolean => {
+      if (encryptedSet.has(fieldName)) return true;
+      for (const enc of encryptedFields) {
+        if (fieldName === enc || fieldName.startsWith(`${enc}.`) || enc.startsWith(`${fieldName}.`)) {
+          return true;
+        }
+      }
+      return false;
+    };
 
     if (readOptions?.filter) {
       const filterFields = this.extractReferencedFields(readOptions.filter);
       if (filterFields === null) return false;
-      if (filterFields.some(f => encryptedSet.has(f))) return false;
+      if (filterFields.some(f => isEncryptedFieldOrChild(f))) return false;
     }
 
     if (readOptions?.sortBy) {
       const sortFields = Array.isArray(readOptions.sortBy) ? readOptions.sortBy : [readOptions.sortBy];
       for (const field of sortFields) {
         if (typeof field !== 'string') continue;
-        const rootField = field.includes('.') ? field.split('.')[0] : field;
-        if (encryptedSet.has(field) || (rootField && encryptedSet.has(rootField))) {
+        if (isEncryptedFieldOrChild(field)) {
           return false;
         }
       }
@@ -1467,6 +1481,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   async cleanup(): Promise<void> {
     this.clearAllCache();
     this.keyPromise = null;
+    clearKeyCache();
     if (typeof this.engine.cleanup === 'function') {
       await this.engine.cleanup();
     }

@@ -4,6 +4,7 @@ import { SQLiteStorageAdapter } from '../adapter/SQLiteStorageAdapter';
 import { configManager } from '../config/ConfigManager';
 import { dbManager } from '../db';
 import { StorageError } from '../../types/storageErrorInfc';
+import { withDynamicFieldEncryption } from './TransactionService';
 import logger from '../../utils/logger';
 
 export interface MigrateEngineOptions {
@@ -65,63 +66,90 @@ export class EngineMigrationService {
 
     const tableNames = await sourceEngine.listTables();
     const migratedTables: string[] = [];
+    const newlyCreatedTables: string[] = [];
     let totalRecords = 0;
 
-    for (const tableName of tableNames) {
-      const metaInspector = sourceEngine as { getTableMeta?: (name: string) => TableSchema | undefined };
-      const tableMeta =
-        typeof metaInspector.getTableMeta === 'function' ? metaInspector.getTableMeta(tableName) : meta.get(tableName);
-      const records = await sourceEngine.read(tableName, { bypassCache: true });
+    try {
+      for (const tableName of tableNames) {
+        const metaInspector = sourceEngine as { getTableMeta?: (name: string) => TableSchema | undefined };
+        const tableMeta =
+          typeof metaInspector.getTableMeta === 'function'
+            ? metaInspector.getTableMeta(tableName)
+            : meta.get(tableName);
+        const records = await sourceEngine.read(tableName, { bypassCache: true });
 
-      const targetHasTable = await destEngine.hasTable(tableName);
-      if (!targetHasTable) {
-        await destEngine.createTable(tableName, {
-          columns: tableMeta?.columns,
-          encrypted: tableMeta?.encrypted,
-          requireAuthOnAccess: tableMeta?.requireAuthOnAccess,
-          encryptedFields: tableMeta?.encryptedFields,
-          encryptFullTable: tableMeta?.encryptFullTable,
-          initialData: records,
-        });
-      } else {
-        await destEngine.overwrite(tableName, records);
-      }
+        const targetHasTable = await destEngine.hasTable(tableName);
+        if (!targetHasTable) {
+          newlyCreatedTables.push(tableName);
+          const isDynamicAllFields = tableMeta?.encryptAllFields === true;
+          const createOptions = {
+            mode: tableMeta?.mode,
+            columns: tableMeta?.columns,
+            encrypted: tableMeta?.encrypted,
+            requireAuthOnAccess: tableMeta?.requireAuthOnAccess,
+            encryptedFields: tableMeta?.encryptedFields,
+            encryptFullTable: tableMeta?.encryptFullTable,
+            isHighRisk: tableMeta?.isHighRisk,
+            highRiskFields: tableMeta?.highRiskFields,
+            initialData: records,
+          };
+          await destEngine.createTable(
+            tableName,
+            isDynamicAllFields ? withDynamicFieldEncryption(createOptions, true) : createOptions
+          );
+        } else {
+          await destEngine.overwrite(tableName, records);
+        }
 
-      // If table had index definitions, recreate them on the destination engine
-      const indexes = tableMeta?.indexes;
-      if (indexes && typeof destEngine.createIndex === 'function') {
-        for (const [indexKey, indexType] of Object.entries(indexes)) {
-          const field = indexKey.endsWith(`_${indexType}`) ? indexKey.slice(0, -(indexType.length + 1)) : indexKey;
-          try {
-            await destEngine.createIndex(tableName, field, indexType === 'unique');
-          } catch (indexError) {
-            logger.warn(
-              `[EngineMigrationService] Could not recreate index for table '${tableName}' on field '${field}'`,
-              indexError
-            );
+        // If table had index definitions, recreate them on the destination engine
+        const indexes = tableMeta?.indexes;
+        if (indexes && typeof destEngine.createIndex === 'function') {
+          for (const [indexKey, indexType] of Object.entries(indexes)) {
+            const field = indexKey.endsWith(`_${indexType}`) ? indexKey.slice(0, -(indexType.length + 1)) : indexKey;
+            try {
+              await destEngine.createIndex(tableName, field, indexType === 'unique');
+            } catch (indexError) {
+              logger.warn(
+                `[EngineMigrationService] Could not recreate index for table '${tableName}' on field '${field}'`,
+                indexError
+              );
+            }
           }
         }
-      }
 
-      // Verify row counts match
-      const destCount = await destEngine.count(tableName);
-      if (destCount !== records.length) {
-        throw new StorageError(
-          `Migration verification failed for table '${tableName}': expected ${records.length} records, got ${destCount}`,
-          'WRITTEN_COUNT_MISMATCH'
-        );
-      }
+        // Verify row counts match
+        const destCount = await destEngine.count(tableName);
+        if (destCount !== records.length) {
+          throw new StorageError(
+            `Migration verification failed for table '${tableName}': expected ${records.length} records, got ${destCount}`,
+            'WRITTEN_COUNT_MISMATCH'
+          );
+        }
 
-      totalRecords += records.length;
-      migratedTables.push(tableName);
+        totalRecords += records.length;
+        migratedTables.push(tableName);
 
-      if (options?.progressCallback) {
-        options.progressCallback({
-          table: tableName,
-          copied: records.length,
-          total: totalRecords,
-        });
+        if (options?.progressCallback) {
+          options.progressCallback({
+            table: tableName,
+            copied: records.length,
+            total: totalRecords,
+          });
+        }
       }
+    } catch (migrationError) {
+      logger.error(
+        '[EngineMigrationService] Migration failed. Rolling back created destination tables...',
+        migrationError
+      );
+      for (const tableToClean of newlyCreatedTables) {
+        try {
+          await destEngine.deleteTable(tableToClean);
+        } catch (cleanupErr) {
+          logger.warn(`[EngineMigrationService] Rollback cleanup failed for table '${tableToClean}'`, cleanupErr);
+        }
+      }
+      throw migrationError;
     }
 
     // If source cleanup was requested, clear data from source engine
