@@ -710,7 +710,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
           const db = this.assertDatabase();
           await this.sqlDeleteAll(tableName);
           const cleanTable = SqlQueryBuilder.cleanIdentifier(tableName);
-          const escapedPrefix = `idx_${cleanTable.replace(/([_%])/g, '\\$1')}__`;
+          const escapedPrefix = `idx_${cleanTable.replace(/([\\_%])/g, '\\$1')}__`;
           const indexRows = await db.getAllAsync<{ name: string }>(
             "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE ? ESCAPE '\\'",
             [`${escapedPrefix}%`]
