@@ -1,4 +1,4 @@
-import { FileSystemStorageAdapter } from '../adapter/FileSystemStorageAdapter';
+import type { FileSystemStorageAdapter } from '../adapter/FileSystemStorageAdapter';
 import { isStorageRecord, type StorageRecord } from '../../types/storageTypes';
 
 import { CacheService } from './CacheService';
@@ -179,7 +179,7 @@ export class AutoSyncService {
     const globalConfig = configManager.getConfig();
     this.config = {
       enabled: globalConfig.autoSync?.enabled ?? false,
-      interval: globalConfig.autoSync?.interval ?? 5000,
+      interval: globalConfig.autoSync?.interval ?? 30000,
       minItems: globalConfig.autoSync?.minItems ?? 1,
       batchSize: globalConfig.autoSync?.batchSize ?? 100,
     };

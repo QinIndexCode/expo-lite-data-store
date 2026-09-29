@@ -1,4 +1,4 @@
-import { FileSystemStorageAdapter } from '../core/adapter/FileSystemStorageAdapter';
+import type { FileSystemStorageAdapter } from '../core/adapter/FileSystemStorageAdapter';
 import {
   isStorageRecord,
   type BulkOperation,

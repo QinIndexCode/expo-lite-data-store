@@ -308,6 +308,8 @@ const warnExpoAesFallbackOnce = (error: unknown): void => {
   );
 };
 
+let legacyIterationsFallbackWarned = false;
+
 const importExpoAesKey = (keyBytes: Uint8Array): Promise<ExpoAesEncryptionKey> | null => {
   const importFn = getExpoAesModule()?.AESEncryptionKey?.import;
   if (!importFn) {
@@ -461,6 +463,15 @@ export const decryptGCM = async (encryptedBase64: string, masterKey: string): Pr
       typeof payload.iterations === 'number'
         ? normalizePbkdf2Iterations(payload.iterations, MIN_PAYLOAD_ITERATIONS)
         : getGCMIterations();
+    if (typeof payload.iterations !== 'number') {
+      // Same legacy-configuration-drift diagnostic as the CTR path.
+      if (!legacyIterationsFallbackWarned) {
+        legacyIterationsFallbackWarned = true;
+        logger.warn(
+          '[crypto] Decrypting a legacy GCM payload without an embedded iterations field; deriving the key from the current encryption.keyIterations config. If that config changed since the payload was written, decryption will fail until the original iteration count is restored.'
+        );
+      }
+    }
     const kdf: GCMKdfMode = payload.kdf === 'root-hkdf' ? 'root-hkdf' : 'pbkdf2';
     const aesKey = await deriveGCMKey(masterKey, saltBytes, iterations, kdf);
 

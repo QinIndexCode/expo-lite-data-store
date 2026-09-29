@@ -6,6 +6,7 @@ import logger from '../../utils/logger';
 import withTimeout from '../../utils/withTimeout';
 
 const CURRENT_VERSION = '1.0.0';
+// Fixed 30s lock wait: a correctness bound, deliberately not driven by config.timeout.
 const METADATA_PATH_LOCK_TIMEOUT_MS = 30000;
 
 export interface ColumnSchema {

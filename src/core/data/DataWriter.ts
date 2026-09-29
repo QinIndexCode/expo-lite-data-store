@@ -73,6 +73,7 @@ export class DataWriter {
   private countValidationInFlight = new Map<string, Promise<void>>();
   private readonly VALIDATION_INTERVAL = 5 * 60 * 1000;
   private readonly MAX_VALIDATION_CACHE_SIZE = 100;
+  // Fixed 30s lock wait: a correctness bound, deliberately not driven by config.timeout.
   private readonly LOCK_TIMEOUT = 30 * 1000;
   private activeOperations = 0;
   private readonly maxConcurrentOperations: number;
@@ -189,7 +190,7 @@ export class DataWriter {
     try {
       await withTimeout(
         getFileSystem().deleteAsync(path, { idempotent: true }),
-        10000,
+        configManager.getConfig().timeout,
         `delete table artifact ${path}`
       );
     } finally {
@@ -478,7 +479,7 @@ export class DataWriter {
       isHighRisk?: boolean;
       highRiskFields?: string[];
     } = {}
-  ): Promise<void> {
+  ): Promise<boolean> {
     return StorageErrorHandler.handleAsyncError(
       async () => {
         assertValidTableName(tableName);
@@ -487,7 +488,7 @@ export class DataWriter {
 
         try {
           if (await this.getLatestTableMetadata(tableName)) {
-            return;
+            return false;
           }
 
           await this.purgeTableArtifacts(tableName);
@@ -554,6 +555,7 @@ export class DataWriter {
           }
 
           await singleFileHandler?.commitPendingWrite();
+          return true;
         } finally {
           releaseLock();
         }
@@ -818,6 +820,7 @@ export class DataWriter {
   ): Promise<{ finalCount: number; handler: SingleFileHandler; storageCommitToken: string }> {
     const handler = this.getSingleFile(tableName);
 
+    // The 30s read guard is fixed by design: a correctness bound, not the user-configurable I/O timeout.
     const existing =
       options?.mode === 'overwrite'
         ? []
@@ -841,6 +844,7 @@ export class DataWriter {
     options?: InternalWriteOptions
   ): Promise<number> {
     const singleFile = this.getSingleFile(tableName);
+    // The 30s read guard is fixed by design: a correctness bound, not the user-configurable I/O timeout.
     const existing =
       options?.mode === 'overwrite'
         ? []
@@ -1071,6 +1075,7 @@ export class DataWriter {
     const tableMeta = await this.getLatestTableMetadata(tableName);
     if (!tableMeta) return 0;
 
+    // The 30s read guards below are fixed by design: correctness bounds, not the user-configurable I/O timeout.
     let data: StorageRecord[];
     if (tableMeta.mode === 'chunked') {
       const handler = this.getChunkedHandler(tableName);
@@ -1127,6 +1132,7 @@ export class DataWriter {
             return 0;
           }
 
+          // The 30s read guards below are fixed by design: correctness bounds, not the user-configurable I/O timeout.
           let data: StorageRecord[];
           if (tableMeta.mode === 'chunked') {
             const handler = this.getChunkedHandler(tableName);

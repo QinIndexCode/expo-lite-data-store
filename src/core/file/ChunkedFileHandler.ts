@@ -307,12 +307,12 @@ export class ChunkedFileHandler extends FileHandlerBase {
     try {
       await withMutationTimeout(
         getFileSystem().writeAsStringAsync(tempJournalPath, content, { encoding: getEncodingType().UTF8 }),
-        10000,
+        configManager.getConfig().timeout,
         `write overwrite journal ${journalPath}`
       );
       await withMutationTimeout(
         getFileSystem().moveAsync({ from: tempJournalPath, to: journalPath }),
-        10000,
+        configManager.getConfig().timeout,
         `publish overwrite journal ${journalPath}`
       );
     } catch (error) {
@@ -332,7 +332,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     try {
       const text = await withTimeout(
         getFileSystem().readAsStringAsync(journalPath, { encoding: getEncodingType().UTF8 }),
-        10000,
+        configManager.getConfig().timeout,
         `read overwrite journal ${journalPath}`
       );
       const parsed: unknown = JSON.parse(text) as unknown;
@@ -366,7 +366,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     try {
       await withMutationTimeout(
         getFileSystem().deleteAsync(journalPath, { idempotent: true }),
-        10000,
+        configManager.getConfig().timeout,
         `delete overwrite journal ${journalPath}`
       );
       this.clearFileInfoCache(journalPath);
@@ -387,7 +387,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
     await withMutationTimeout(
       getFileSystem().makeDirectoryAsync(backupPath, { intermediates: true }),
-      10000,
+      configManager.getConfig().timeout,
       `create overwrite backup ${backupPath}`
     );
     this.clearFileInfoCache(backupPath);
@@ -397,7 +397,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
       const backupFilePath = `${backupPath}${fileName}`;
       await withMutationTimeout(
         getFileSystem().moveAsync({ from: sourcePath, to: backupFilePath }),
-        10000,
+        configManager.getConfig().timeout,
         `move chunk ${fileName} to overwrite backup`
       );
       this.markChunksMutated();
@@ -418,18 +418,18 @@ export class ChunkedFileHandler extends FileHandlerBase {
     try {
       await withMutationTimeout(
         getFileSystem().writeAsStringAsync(tempMarkerPath, content, { encoding: getEncodingType().UTF8 }),
-        10000,
+        configManager.getConfig().timeout,
         `write overwrite backup marker ${markerPath}`
       );
       await withMutationTimeout(
         getFileSystem().moveAsync({ from: tempMarkerPath, to: markerPath }),
-        10000,
+        configManager.getConfig().timeout,
         `publish overwrite backup marker ${markerPath}`
       );
       this.clearFileInfoCache(markerPath);
       const published = await withTimeout(
         getFileSystem().readAsStringAsync(markerPath, { encoding: getEncodingType().UTF8 }),
-        10000,
+        configManager.getConfig().timeout,
         `verify overwrite backup marker ${markerPath}`
       );
       if (published !== content) {
@@ -451,7 +451,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
     const text = await withTimeout(
       getFileSystem().readAsStringAsync(markerPath, { encoding: getEncodingType().UTF8 }),
-      10000,
+      configManager.getConfig().timeout,
       `read overwrite backup marker ${markerPath}`
     );
     let parsed: unknown;
@@ -476,7 +476,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     try {
       await withMutationTimeout(
         getFileSystem().deleteAsync(backupPath, { idempotent: true }),
-        10000,
+        configManager.getConfig().timeout,
         `delete overwrite backup ${backupPath}`
       );
       this.clearFileInfoCacheTree(backupPath);
@@ -491,7 +491,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
   private async copyBackupChunk(sourcePath: string, targetPath: string): Promise<void> {
     const sourceText = await withTimeout(
       getFileSystem().readAsStringAsync(sourcePath, { encoding: getEncodingType().UTF8 }),
-      10000,
+      configManager.getConfig().timeout,
       `read overwrite backup chunk ${sourcePath}`
     );
     this.clearFileInfoCache(targetPath);
@@ -499,7 +499,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     if (targetInfo.exists) {
       const targetText = await withTimeout(
         getFileSystem().readAsStringAsync(targetPath, { encoding: getEncodingType().UTF8 }),
-        10000,
+        configManager.getConfig().timeout,
         `read existing overwrite chunk ${targetPath}`
       );
       if (targetText !== sourceText) {
@@ -514,12 +514,12 @@ export class ChunkedFileHandler extends FileHandlerBase {
     try {
       await withMutationTimeout(
         getFileSystem().writeAsStringAsync(tempPath, sourceText, { encoding: getEncodingType().UTF8 }),
-        10000,
+        configManager.getConfig().timeout,
         `write recovered chunk ${targetPath}`
       );
       await withMutationTimeout(
         getFileSystem().moveAsync({ from: tempPath, to: targetPath }),
-        10000,
+        configManager.getConfig().timeout,
         `publish recovered chunk ${targetPath}`
       );
       this.markChunksMutated();
@@ -555,12 +555,12 @@ export class ChunkedFileHandler extends FileHandlerBase {
     try {
       await withMutationTimeout(
         getFileSystem().writeAsStringAsync(tempJournalPath, content, { encoding: getEncodingType().UTF8 }),
-        10000,
+        configManager.getConfig().timeout,
         `write append journal ${journalPath}`
       );
       await withMutationTimeout(
         getFileSystem().moveAsync({ from: tempJournalPath, to: journalPath }),
-        10000,
+        configManager.getConfig().timeout,
         `publish append journal ${journalPath}`
       );
     } catch (error) {
@@ -580,7 +580,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     try {
       const text = await withTimeout(
         getFileSystem().readAsStringAsync(journalPath, { encoding: getEncodingType().UTF8 }),
-        10000,
+        configManager.getConfig().timeout,
         `read append journal ${journalPath}`
       );
       const parsed: unknown = JSON.parse(text) as unknown;
@@ -614,7 +614,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     try {
       await withMutationTimeout(
         getFileSystem().deleteAsync(journalPath, { idempotent: true }),
-        10000,
+        configManager.getConfig().timeout,
         `delete append journal ${journalPath}`
       );
       this.clearFileInfoCache(journalPath);
@@ -632,7 +632,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
         const filePath = this.getChunkFilePath(index);
         await withMutationTimeout(
           getFileSystem().deleteAsync(filePath, { idempotent: true }),
-          10000,
+          configManager.getConfig().timeout,
           `delete appended chunk ${index}`
         );
         this.markChunksMutated();
@@ -675,7 +675,11 @@ export class ChunkedFileHandler extends FileHandlerBase {
   /** Removes a failed staging artifact before the shared path lock is released. */
   private async cleanupTemporaryArtifact(path: string, operation: string): Promise<void> {
     try {
-      await withMutationTimeout(getFileSystem().deleteAsync(path, { idempotent: true }), 10000, `${operation} ${path}`);
+      await withMutationTimeout(
+        getFileSystem().deleteAsync(path, { idempotent: true }),
+        configManager.getConfig().timeout,
+        `${operation} ${path}`
+      );
       this.clearFileInfoCache(path);
     } catch (cleanupError) {
       logger.warn(`CLEANUP TEMPORARY ARTIFACT ${path} FAILED`, cleanupError);
@@ -740,7 +744,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     if (journal.previousDirectoryExisted || journal.previousChunks > 0) {
       await withMutationTimeout(
         getFileSystem().makeDirectoryAsync(this.tableDirPath, { intermediates: true }),
-        10000,
+        configManager.getConfig().timeout,
         `create overwrite recovery directory ${this.tableDirPath}`
       );
       this.clearFileInfoCache(this.tableDirPath);
@@ -899,7 +903,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
 
       await withMutationTimeout(
         getFileSystem().makeDirectoryAsync(this.tableDirPath, { intermediates: true }),
-        10000,
+        configManager.getConfig().timeout,
         `create table directory ${this.tableName}`
       );
 
@@ -1065,13 +1069,13 @@ export class ChunkedFileHandler extends FileHandlerBase {
         try {
           await withMutationTimeout(
             getFileSystem().writeAsStringAsync(tempFilePath, content, { encoding: getEncodingType().UTF8 }),
-            10000,
+            configManager.getConfig().timeout,
             `write temp chunk ${index} failed`
           );
 
           await withMutationTimeout(
             getFileSystem().moveAsync({ from: tempFilePath, to: filePath }),
-            10000,
+            configManager.getConfig().timeout,
             `rename temp chunk ${index} to ${filePath}`
           );
           this.markChunksMutated();
@@ -1158,7 +1162,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     try {
       const text = await withTimeout(
         getFileSystem().readAsStringAsync(filePath, { encoding: getEncodingType().UTF8 }),
-        10000,
+        configManager.getConfig().timeout,
         `READ CHUNK ${filePath} CONTENT`
       );
 
@@ -1335,7 +1339,7 @@ export class ChunkedFileHandler extends FileHandlerBase {
     try {
       const entries = await withTimeout(
         getFileSystem().readDirectoryAsync(directoryPath),
-        10000,
+        configManager.getConfig().timeout,
         `LIST TABLE DIR ${directoryPath}`
       );
 
@@ -1406,14 +1410,14 @@ export class ChunkedFileHandler extends FileHandlerBase {
   private async resetTableDirectoryUnlocked(recreate: boolean): Promise<void> {
     await withMutationTimeout(
       getFileSystem().deleteAsync(this.tableDirPath, { idempotent: true }),
-      10000,
+      configManager.getConfig().timeout,
       `delete chunked table directory ${this.tableDirPath}`
     );
     this.markChunksMutated();
     if (recreate) {
       await withMutationTimeout(
         getFileSystem().makeDirectoryAsync(this.tableDirPath, { intermediates: true }),
-        10000,
+        configManager.getConfig().timeout,
         `create chunked table directory ${this.tableDirPath}`
       );
     }

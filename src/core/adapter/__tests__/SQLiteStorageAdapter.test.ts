@@ -1,6 +1,8 @@
+import { configManager } from '../../config/ConfigManager';
 import { MetadataManager } from '../../meta/MetadataManager';
 import { transactionOwnerOption } from '../../service/TransactionService';
 import type { InternalWriteOptions, TableOptions } from '../../../types/storageTypes';
+import logger from '../../../utils/logger';
 import { SQLiteStorageAdapter } from '../SQLiteStorageAdapter';
 
 type UserRecord = {
@@ -279,6 +281,17 @@ describe('SQLiteStorageAdapter', () => {
       await adapter.rollback();
     });
 
+    it('rejects migrateToChunked inside a transaction even though it is a no-op for SQLite', async () => {
+      await expect(adapter.migrateToChunked(tableName)).resolves.toBeUndefined();
+
+      await adapter.beginTransaction();
+      await expect(adapter.migrateToChunked(tableName)).rejects.toMatchObject({
+        code: 'TRANSACTION_OPERATION_NOT_SUPPORTED',
+      });
+      await adapter.rollback();
+      expect(adapter.isInTransaction()).toBe(false);
+    });
+
     it('commits batched staged operations and keeps row order', async () => {
       await adapter.beginTransaction();
       await adapter.update(tableName, { name: 'Renamed' }, { id: 1 });
@@ -380,6 +393,37 @@ describe('SQLiteStorageAdapter', () => {
       expect(await adapter.hasTable(tempTable)).toBe(false);
     });
 
+    it('rolls the whole table back when a createTable index declaration is malformed', async () => {
+      const badTable = 'bad_idx_decl_table';
+      await expect(
+        adapter.createTable(badTable, { indexes: [{} as { field: string; unique?: boolean }] })
+      ).rejects.toMatchObject({ code: 'TABLE_INDEX_INVALID' });
+      expect(await adapter.hasTable(badTable)).toBe(false);
+    });
+
+    it('ignores createTable declarations on an existing table without touching its rows', async () => {
+      await adapter.write(tableName, [
+        { id: 1, name: 'Alice' },
+        { id: 2, name: 'Alice' },
+      ]);
+
+      // Existing table: declarations (even unique-violating or malformed ones)
+      // and initialData are all ignored — the creation statement returns early,
+      // so stored rows can never be rewritten or deleted by a redeclaration.
+      await expect(
+        adapter.createTable(tableName, {
+          indexes: [{ field: 'name', unique: true }],
+          initialData: [{ id: 3, name: 'Seed' }],
+        })
+      ).resolves.toBeUndefined();
+      await expect(
+        adapter.createTable(tableName, { indexes: [{} as { field: string; unique?: boolean }] })
+      ).resolves.toBeUndefined();
+
+      expect(await adapter.count(tableName)).toBe(2);
+      expect(metadataManager.get(tableName)?.indexes?.name_unique).toBeUndefined();
+    });
+
     it('pushes down complex queries, sorting, and pagination to SQLite', async () => {
       const records = [
         { id: 1, name: 'Alice', age: 25, active: true },
@@ -432,5 +476,278 @@ describe('SQLiteStorageAdapter', () => {
       expect(deleted).toBe(1);
       expect(await adapter.count(tableName)).toBe(2);
     });
+  });
+});
+
+describe('SQLiteStorageAdapter ignored cross-cutting configuration warnings', () => {
+  let adapter: SQLiteStorageAdapter;
+  let metadataManager: MetadataManager;
+
+  beforeEach(() => {
+    configManager.resetConfig();
+    metadataManager = new MetadataManager();
+    adapter = createAdapter(metadataManager);
+  });
+
+  afterEach(() => {
+    metadataManager.cleanup();
+    configManager.resetConfig();
+    delete getGlobalSqliteMockState().databases[DATABASE_NAME];
+    jest.restoreAllMocks();
+  });
+
+  const collectIgnoredConfigWarnings = (calls: ReadonlyArray<ReadonlyArray<unknown>>): string[] =>
+    calls
+      .map(call => String(call[0]))
+      .filter(
+        message =>
+          message.includes('[SQLiteStorageAdapter]') &&
+          message.includes('file-system') &&
+          (message.includes('autoSync') || message.includes('monitoring.enablePerformanceTracking'))
+      );
+
+  it('warns on initialization when autoSync.enabled is turned on', async () => {
+    configManager.setConfig({ autoSync: { enabled: true } });
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await adapter.ensureInitialized();
+
+    const messages = collectIgnoredConfigWarnings(warnSpy.mock.calls);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain('SQLiteStorageAdapter');
+    expect(messages[0]).toContain('autoSync');
+    expect(messages[0]).toContain('file-system');
+  });
+
+  it('warns on initialization when monitoring.enablePerformanceTracking is turned on', async () => {
+    configManager.setConfig({ monitoring: { enablePerformanceTracking: true } });
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await adapter.ensureInitialized();
+
+    const messages = collectIgnoredConfigWarnings(warnSpy.mock.calls);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain('SQLiteStorageAdapter');
+    expect(messages[0]).toContain('monitoring.enablePerformanceTracking');
+    expect(messages[0]).toContain('file-system');
+  });
+
+  it('stays silent under the default configuration', async () => {
+    configManager.resetConfig();
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await adapter.ensureInitialized();
+
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('warns at most once across repeated initialization of the same adapter', async () => {
+    configManager.setConfig({ autoSync: { enabled: true } });
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await adapter.ensureInitialized();
+    await adapter.ensureInitialized();
+    expect(await adapter.hasTable('never_created')).toBe(false);
+    await adapter.ensureInitialized();
+
+    expect(collectIgnoredConfigWarnings(warnSpy.mock.calls)).toHaveLength(1);
+  });
+});
+
+describe('SQLiteStorageAdapter initialization failure recovery', () => {
+  let adapter: SQLiteStorageAdapter;
+  let metadataManager: MetadataManager;
+  const tableName = 'recovery_users';
+
+  type SqliteHandleMock = {
+    execAsync: (sql: string) => Promise<void>;
+    closeAsync?: () => Promise<void>;
+  };
+
+  type SqliteModuleMock = {
+    openDatabaseAsync: (name: string, options?: unknown, directory?: unknown) => Promise<SqliteHandleMock>;
+  };
+
+  type InitializationHooks = {
+    openedHandles: SqliteHandleMock[];
+    closedHandles: SqliteHandleMock[];
+    failNextOpen: () => void;
+    failNextExecSql: (fragment: string) => void;
+  };
+
+  const loadSqliteModuleMock = (): SqliteModuleMock => {
+    const loaded = require('expo-sqlite') as SqliteModuleMock & { default?: SqliteModuleMock };
+    return loaded.default ?? loaded;
+  };
+
+  /**
+   * Instruments the expo-sqlite mock for a single test: every handle the
+   * adapter opens is recorded, closes are recorded against the handle they
+   * belong to, and one `openDatabaseAsync` / `execAsync` failure can be
+   * injected. The instrumentation dies with the spy, so shared mock state and
+   * unrelated suites are untouched.
+   */
+  const installInitializationHooks = (): InitializationHooks => {
+    const sqliteModuleMock = loadSqliteModuleMock();
+    const openDatabaseAsync = sqliteModuleMock.openDatabaseAsync.bind(sqliteModuleMock);
+    let failOpen = false;
+    let failExecSql: string | null = null;
+
+    const hooks: InitializationHooks = {
+      openedHandles: [],
+      closedHandles: [],
+      failNextOpen: () => {
+        failOpen = true;
+      },
+      failNextExecSql: fragment => {
+        failExecSql = fragment;
+      },
+    };
+
+    jest.spyOn(sqliteModuleMock, 'openDatabaseAsync').mockImplementation(async (name, options, directory) => {
+      if (failOpen) {
+        failOpen = false;
+        throw new Error('expo-sqlite open failed (injected)');
+      }
+      const handle = await openDatabaseAsync(name, options, directory);
+      const execAsync = handle.execAsync.bind(handle);
+      handle.execAsync = async (sql: string) => {
+        if (failExecSql !== null && sql.includes(failExecSql)) {
+          failExecSql = null;
+          throw new Error('SQLite DDL failed (injected)');
+        }
+        return execAsync(sql);
+      };
+      const closeAsync = handle.closeAsync?.bind(handle);
+      handle.closeAsync = async () => {
+        hooks.closedHandles.push(handle);
+        await closeAsync?.();
+      };
+      hooks.openedHandles.push(handle);
+      return handle;
+    });
+
+    return hooks;
+  };
+
+  const collectInitializationWarnings = (calls: ReadonlyArray<ReadonlyArray<unknown>>): string[] =>
+    calls
+      .map(call => String(call[0]))
+      .filter(message => message.includes('[SQLiteStorageAdapter]') && message.includes('autoSync'));
+
+  const rejectionMessage = (result: PromiseSettledResult<unknown>): string =>
+    result.status === 'rejected' ? String(result.reason) : '';
+
+  beforeEach(() => {
+    configManager.resetConfig();
+    metadataManager = new MetadataManager();
+    adapter = createAdapter(metadataManager);
+  });
+
+  afterEach(async () => {
+    try {
+      if (await adapter.hasTable(tableName)) {
+        await adapter.deleteTable(tableName);
+      }
+    } catch {
+      // Best effort: a failed test may have left the adapter without a usable schema.
+    }
+    delete getGlobalSqliteMockState().databases[DATABASE_NAME];
+    metadataManager.cleanup();
+    configManager.resetConfig();
+    jest.restoreAllMocks();
+  });
+
+  it('recovers from a failed DDL instead of staying half-initialized', async () => {
+    configManager.setConfig({ autoSync: { enabled: true } });
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const hooks = installInitializationHooks();
+    hooks.failNextExecSql('CREATE TABLE IF NOT EXISTS __elds_records');
+
+    await expect(adapter.write(tableName, [{ id: 1, name: 'Alice' }])).rejects.toMatchObject({
+      code: 'FILE_WRITE_FAILED',
+    });
+    // An attempt whose DDL never completed must not emit the config warning.
+    expect(collectInitializationWarnings(warnSpy.mock.calls)).toHaveLength(0);
+
+    // The failed attempt must be retried instead of answered from a handle
+    // whose `__elds_records` schema was never created.
+    await adapter.ensureInitialized();
+    expect(hooks.openedHandles).toHaveLength(2);
+
+    const writeResult = await adapter.write(tableName, [{ id: 1, name: 'Alice' }]);
+    expect(writeResult.totalAfterWrite).toBe(1);
+    const records = await adapter.read<UserRecord>(tableName);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ id: 1, name: 'Alice' });
+
+    // The warning is emitted once, only after initialization finally succeeded,
+    // and repeated calls keep it at exactly one.
+    expect(collectInitializationWarnings(warnSpy.mock.calls)).toHaveLength(1);
+    await adapter.ensureInitialized();
+    expect(collectInitializationWarnings(warnSpy.mock.calls)).toHaveLength(1);
+  });
+
+  it('closes the abandoned handle when initialization fails', async () => {
+    const hooks = installInitializationHooks();
+    hooks.failNextExecSql('CREATE INDEX IF NOT EXISTS idx_elds_records_table');
+
+    await expect(adapter.ensureInitialized()).rejects.toThrow('SQLite DDL failed (injected)');
+
+    expect(hooks.openedHandles).toHaveLength(1);
+    expect(hooks.closedHandles).toHaveLength(1);
+    expect(hooks.closedHandles[0]).toBe(hooks.openedHandles[0]);
+
+    // The rollback closes the abandoned handle, so the retry opens exactly one
+    // fresh handle instead of leaking one per attempt.
+    await adapter.ensureInitialized();
+    expect(hooks.openedHandles).toHaveLength(2);
+    expect(hooks.closedHandles).toHaveLength(1);
+
+    await adapter.write(tableName, [{ id: 1, name: 'Alice' }]);
+    expect(await adapter.count(tableName)).toBe(1);
+  });
+
+  it('retries initialization when openDatabaseAsync fails', async () => {
+    const hooks = installInitializationHooks();
+    hooks.failNextOpen();
+
+    await expect(adapter.ensureInitialized()).rejects.toThrow('expo-sqlite open failed (injected)');
+    // Nothing was handed out, so there is no handle to roll back.
+    expect(hooks.openedHandles).toHaveLength(0);
+    expect(hooks.closedHandles).toHaveLength(0);
+
+    await adapter.ensureInitialized();
+    expect(hooks.openedHandles).toHaveLength(1);
+
+    await adapter.write(tableName, [{ id: 1, name: 'Alice' }]);
+    expect(await adapter.read<UserRecord>(tableName)).toHaveLength(1);
+  });
+
+  it('rejects every concurrent caller on one shared failed attempt and retries once', async () => {
+    configManager.setConfig({ autoSync: { enabled: true } });
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const hooks = installInitializationHooks();
+    hooks.failNextExecSql('CREATE TABLE IF NOT EXISTS __elds_records');
+
+    const firstAttempt = await Promise.allSettled([adapter.ensureInitialized(), adapter.ensureInitialized()]);
+    expect(firstAttempt.map(result => result.status)).toEqual(['rejected', 'rejected']);
+    expect(firstAttempt.map(rejectionMessage)).toEqual([
+      expect.stringContaining('SQLite DDL failed (injected)'),
+      expect.stringContaining('SQLite DDL failed (injected)'),
+    ]);
+    // Both callers shared the same attempt: one open, one rollback close.
+    expect(hooks.openedHandles).toHaveLength(1);
+    expect(hooks.closedHandles).toHaveLength(1);
+    expect(collectInitializationWarnings(warnSpy.mock.calls)).toHaveLength(0);
+
+    const secondAttempt = await Promise.allSettled([adapter.ensureInitialized(), adapter.ensureInitialized()]);
+    expect(secondAttempt.map(result => result.status)).toEqual(['fulfilled', 'fulfilled']);
+    expect(hooks.openedHandles).toHaveLength(2);
+    expect(hooks.closedHandles).toHaveLength(1);
+
+    await adapter.write(tableName, [{ id: 1, name: 'Alice' }]);
+    expect(await adapter.read<UserRecord>(tableName)).toHaveLength(1);
+    expect(collectInitializationWarnings(warnSpy.mock.calls)).toHaveLength(1);
   });
 });

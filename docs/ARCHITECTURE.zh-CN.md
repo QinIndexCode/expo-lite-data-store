@@ -4,22 +4,22 @@
 
 ## 1. 系统概述
 
-Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案，支持单文件和分片存储模式，并提供 CRUD、进程内事务、缓存、索引、API 路由和数据加密能力。
+Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案，支持单文件和分片存储模式，并提供 CRUD、进程内事务、缓存、索引和数据加密能力。
 
 ## 2. 分层架构
 
-| 层级       | 职责                         | 主要组件                                                                                         |
-| ---------- | ---------------------------- | ------------------------------------------------------------------------------------------------ |
-| 接口层     | 对外提供统一 API             | FileSystemStorageAdapter、EncryptedStorageAdapter、SQLiteStorageAdapter、StorageAdapterFactory   |
-| 服务层     | 协调事务、引擎迁移与后台同步 | TransactionService、EngineMigrationService、AutoSyncService、CacheService、ApiRouter、ApiWrapper |
-| 数据访问层 | 处理数据读写与 SQL 构建      | DataReader、DataWriter、QueryEngine、SqlQueryBuilder                                             |
-| 缓存层     | 提供缓存以提高查询性能       | CacheManager                                                                                     |
-| 索引层     | 提供索引以加速查询           | IndexManager（文件系统内存索引）、SQLite 原生 JSON 表达式索引                                    |
-| 加密层     | 提供数据加密和密钥管理       | EncryptedStorageAdapter（支持分页按需解密）、crypto-gcm、cryptoProvider                          |
-| 存储层     | 负责数据的物理存储           | ChunkedFileHandler、SingleFileHandler、SQLiteStorageAdapter                                      |
-| 元数据层   | 管理数据库元数据             | MetadataManager                                                                                  |
-| 监控层     | 监控系统性能和缓存状态       | PerformanceMonitor、CacheMonitor                                                                 |
-| 工具层     | 提供通用基础能力             | PathHelper、withTimeout、logger、expoModuleLoader                                                |
+| 层级       | 职责                               | 主要组件                                                                                       |
+| ---------- | ---------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 接口层     | 对外提供统一 API                   | FileSystemStorageAdapter、EncryptedStorageAdapter、SQLiteStorageAdapter、StorageAdapterFactory |
+| 服务层     | 协调事务、引擎迁移与定期脏缓存同步 | TransactionService、EngineMigrationService、AutoSyncService、CacheService                      |
+| 数据访问层 | 处理数据读写与 SQL 构建            | DataReader、DataWriter、QueryEngine、SqlQueryBuilder                                           |
+| 缓存层     | 提供缓存以提高查询性能             | CacheManager                                                                                   |
+| 索引层     | 提供索引以加速查询                 | IndexManager（文件系统进程内索引数据 + 持久化声明）、SQLite 原生 JSON 表达式索引               |
+| 加密层     | 提供数据加密和密钥管理             | EncryptedStorageAdapter（支持分页按需解密）、crypto-gcm、cryptoProvider                        |
+| 存储层     | 负责数据的物理存储                 | ChunkedFileHandler、SingleFileHandler、SQLiteStorageAdapter                                    |
+| 元数据层   | 管理数据库元数据                   | MetadataManager                                                                                |
+| 监控层     | 监控系统性能和缓存状态             | PerformanceMonitor、CacheMonitor                                                               |
+| 工具层     | 提供通用基础能力                   | PathHelper、withTimeout、logger、expoModuleLoader                                              |
 
 ## 3. 核心模块设计
 
@@ -43,7 +43,7 @@ Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案�
 #### SQLiteStorageAdapter
 
 - 基于 `IStorageEngine` 契约的高性能 SQLite 引擎。逻辑表共享单一物理表 `__elds_records`，以 `table_name` + 自增 id 为复合主键（WITHOUT ROWID）；记录 payload 以 JSON 格式存储，保持统一存储形态。
-- 使用 WAL journal mode，所有 SQL 语句经进程级 FIFO 链串行化，保证事务隔离性与并发安全性。
+- 使用 WAL journal mode，SQL 语句经适配器实例内的 FIFO 链串行化，保证单实例内语句执行有序；SQLite 提供单语句级 ACID 保证，库级多语句事务在内存中暂存写入、提交时在一个 SQL 事务内统一应用，而非在整个会话期间持有打开的事务。
 - **SQL 查询与分页下推（Pushdown）**：集成 `SqlQueryBuilder`，将 NoSQL 过滤条件（`$eq`、`$ne`、`$gt`、`$gte`、`$lt`、`$lte`、`$in`、`$nin`、`$like`、`$and`、`$or`）转换为 SQLite JSON1 `json_extract(payload, '$.field')` 表达式，并在 SQL 层完成 `ORDER BY ... NULLS LAST` 和 `LIMIT ? OFFSET ?`，仅将匹配的少量行反序列化为 JS 对象。
 - **原生表达式索引（Expression Indexes）**：支持在 `createTable` 或 `createIndex` 时声明字段索引，自动在 SQLite 中建立 `CREATE [UNIQUE] INDEX IF NOT EXISTS idx_<table_name>_<field> ON __elds_records (table_name, json_extract(payload, '$.<field>'))`，使 JSON 字段查询直接享受 B-tree 二分加速，并在唯一索引冲突时在底层拦截。
 - **按需删除与更新下推**：`delete()` 与 `update()` 在条件支持下推时直接执行 SQL 删除或按 ID 精确回写，消除全表反序列化与覆写开销。
@@ -154,7 +154,7 @@ Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案�
 #### IndexManager
 
 - 唯一、非唯一和复合字段索引
-- 索引仅是进程内内存加速器；查询只使用已就绪且兼容的索引，否则回退为全表扫描
+- 索引数据保存在进程内存中，但索引声明持久化于表元数据；文件系统 adapter 会在初始化阶段、任何公开 API 调用之前重新登记并重建它们。查询只使用已就绪且兼容的索引，否则回退为全表扫描
 - 稳定标识符优先使用 `id` 并回退到 `_id`；任一行两者都没有时，该索引在覆盖完整前不会参与加速
 - 增量写只暂存受影响 bucket 的 delta，重建则暂存完整替换映射；两者都在触碰物理存储前校验 `UNIQUE` 约束
 - 仅在存储成功后应用暂存 delta 或替换映射，因此实时查询不会看到部分更新的索引
@@ -206,7 +206,9 @@ Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案�
 - 定期同步脏数据
 - 带随机抖动的指数退避重试
 - 按表限制脏缓存条目的批处理，不拆分整表覆盖
-- 活动事务会延迟 AutoSync 存储写，并保留脏条目给后续定时或显式 sync
+- 仅由 `file-system` 引擎启动；`sqlite` 引擎直接落盘，从不运行同步定时器
+- 由进程内 `setInterval` 定时器驱动，只在应用运行期间触发，不是操作系统级别的后台任务
+- 活动事务会延迟 AutoSync 存储写，并保留脏条目给后续定时 sync
 - 支持优雅关闭
 
 #### CacheService
@@ -316,7 +318,7 @@ Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案�
 - 新字段级加密表以 `encryptAllFields: true` 与 `encryptedFields: []` 的精确组合表示动态全字段策略，只有该组合具有此语义；非空配置列表会去重后快照。早期 v3 元数据没有该 marker，空列表或字段缺失仍按 legacy 全局配置回退，避免尝试解密混合记录中的明文字段。
 - 模块私有 Symbol option 会在排队写入中传递已解析的动态策略与整表逻辑计数，而不扩大公开选项。`DataWriter` 将这些值和物理写入的 storage generation 同次发布。整表 envelope 的物理计数为 1，但逻辑计数独立保存；事务快照也保留该逻辑计数，以便单步回滚。
 - 整表解密缓存按表键控，只有在绑定当前精确 ciphertext 时才可命中；timeout 为 0 时禁用。
-- `requireAuthOnAccess: true` 绑定独立严格认证密钥作用域，不能原地升级常规加密表；应用必须迁移并验证数据，绝不静默替换密钥。
+- `requireAuthOnAccess: true` 绑定独立严格认证密钥作用域，也会隐式选择加密表面，调用方通常应显式同时传入两个标志；更弱的访问表面会以 `PERMISSION_DENIED` 拒绝。严格访问不能原地升级常规加密表；应用必须把数据迁移并验证到新建的严格表，绝不静默替换密钥。
 - `encrypted`、`encryptFullTable`、`encryptedFields` 和 `requireAuthOnAccess` 是持久化表策略。既有加密表遇到冲突的建表/写入选项会以 `MIGRATION_FAILED` 拒绝，而不会静默改变保护方式。
 - 为避免泄露严格表元数据，只要存在 `requireAuthOnAccess: true` 的表，`listTables()` 就必须传入严格表面选项，否则以 `PERMISSION_DENIED` fail-closed。
 
@@ -348,6 +350,6 @@ Expo Lite Data Store 是基于 Expo File System 的轻量本地数据库方案�
 - `encryption.keyIterations`：PBKDF2 迭代次数，默认 600,000
 - `cache.maxSize`：最大缓存项数
 - `performance.maxConcurrentOperations`：最大并发操作数，默认 5
-- `autoSync.enabled`：后台脏缓存同步开关，默认 false
+- `autoSync.enabled`：`file-system` 引擎的定期脏缓存同步定时器开关，默认 false
 
 Logger 环境变量独立于配置合并：`EXPO_LITE_DATA_STORE_LOG_LEVEL` 选择 `silent|error|warn|info|debug`（非测试默认 `warn`）；测试默认静默，除非设置 `EXPO_LITE_DATA_STORE_TEST_LOGS=1`。

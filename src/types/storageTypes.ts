@@ -114,8 +114,6 @@ export type ColumnDefinition =
 export type CreateTableOptions<T extends object = StorageRecord> = CommonOptions & {
   /** Column definitions keyed by column name. */
   columns?: Record<string, ColumnDefinition>;
-  /** Whether to create intermediate directories. */
-  intermediates?: boolean;
   /** Chunk size threshold in bytes. */
   chunkSize?: number;
   /** Initial records to persist with the table. */
@@ -137,6 +135,8 @@ export type WriteOptions = CommonOptions & {
   forceChunked?: boolean;
   /** Whether to encrypt the table as one envelope instead of encrypting fields. */
   encryptFullTable?: boolean;
+  /** Fields that require encryption for this write (selects the encrypted surface and validates against the persisted table policy). */
+  encryptedFields?: string[];
 };
 
 /** Internal alias for write paths that can also carry module-private capabilities. */

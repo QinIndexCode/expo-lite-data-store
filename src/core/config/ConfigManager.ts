@@ -26,6 +26,8 @@ type LiteStoreGlobals = {
 export class ConfigManager {
   private static readonly UNSAFE_CONFIG_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
   private static instance: ConfigManager | null = null;
+  // Held on the class instead of the instance so subscriptions survive resetInstance().
+  private static listeners: Set<() => void> = new Set();
   private currentConfig: LiteStoreConfig;
   private customConfig: DeepPartial<LiteStoreConfig> = Object.create(null) as DeepPartial<LiteStoreConfig>;
 
@@ -293,6 +295,15 @@ export class ConfigManager {
     return this.sanitizeConfigValue(this.currentConfig);
   }
 
+  /**
+   * Whether the engine was chosen programmatically at runtime. When false, the
+   * engine value is the untouched default and the persisted engine marker (see
+   * EnginePreference) may promote the SQLite engine after a migration.
+   */
+  public hasExplicitEngineChoice(): boolean {
+    return Object.prototype.hasOwnProperty.call(this.customConfig, 'engine');
+  }
+
   private applyCustomConfig(nextConfig: DeepPartial<LiteStoreConfig>): void {
     const previousConfig = this.customConfig;
     this.customConfig = nextConfig;
@@ -300,9 +311,34 @@ export class ConfigManager {
     try {
       this.loadConfig();
     } catch (error) {
+      // Rejected configurations never reach subscribers: the override is rolled back first.
       this.customConfig = previousConfig;
       throw error;
     }
+
+    this.notifyListeners();
+  }
+
+  private notifyListeners(): void {
+    for (const listener of [...ConfigManager.listeners]) {
+      try {
+        listener();
+      } catch (error) {
+        logger.error(`Configuration listener failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  /**
+   * Subscribes to committed configuration changes and returns an idempotent unsubscribe
+   * function. Listeners are stored on the class so they keep receiving changes after
+   * `resetInstance()` replaces the singleton.
+   */
+  public subscribe(listener: () => void): () => void {
+    ConfigManager.listeners.add(listener);
+    return () => {
+      ConfigManager.listeners.delete(listener);
+    };
   }
 
   public setConfig(customConfig: DeepPartial<LiteStoreConfig>): void {

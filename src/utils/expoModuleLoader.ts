@@ -141,5 +141,3 @@ export const loadRequiredExpoModule = <T>(moduleName: string, installHint?: stri
   }
   return moduleValue;
 };
-
-export const getExpoPeerInstallHint = (moduleName?: string): string => buildExpoPeerInstallHint(moduleName);

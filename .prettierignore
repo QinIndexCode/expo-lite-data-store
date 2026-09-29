@@ -39,3 +39,7 @@ Thumbs.db
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+
+# AI tooling artifacts (local only, gitignored)
+.zcode/
+.mimosa/

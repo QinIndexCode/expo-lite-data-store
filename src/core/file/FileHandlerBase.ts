@@ -5,6 +5,7 @@ import { type FileInfoCompat, getFileSystem } from '../../utils/fileSystemCompat
 import withTimeout from '../../utils/withTimeout';
 
 export abstract class FileHandlerBase {
+  // Fixed 30s lock wait: a correctness bound, deliberately not driven by config.timeout.
   private static readonly PATH_LOCK_TIMEOUT_MS = 30000;
   private static readonly MAX_FILE_INFO_CACHE_SIZE = 1024;
   private static readonly pathOperationTails = new Map<string, Promise<void>>();

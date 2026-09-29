@@ -1,6 +1,5 @@
 import {
   buildExpoPeerInstallHint,
-  getExpoPeerInstallHint,
   getSupportedExpoInstallCommand,
   normalizeExpoRuntimePackageName,
 } from '../../utils/expoModuleLoader';
@@ -25,12 +24,5 @@ describe('expo module loader install guidance', () => {
       '`npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypto expo-secure-store`'
     );
     expect(hint).toContain('`npm install expo-lite-data-store` alone is not a supported installation flow');
-  });
-
-  it('keeps the generic exported install hint aligned with the same guidance', () => {
-    const hint = getExpoPeerInstallHint('expo-secure-store');
-
-    expect(hint).toContain('expo-secure-store');
-    expect(hint).toContain('consumer application');
   });
 });

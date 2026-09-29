@@ -16,7 +16,6 @@ export const CACHE = {
 export const FILE_OPERATION = {
   DEFAULT_CHUNK_SIZE: 5 * 1024 * 1024,
   MAX_TABLE_NAME_LENGTH: 100,
-  OPERATION_TIMEOUT: 10000,
   RETRY_DELAY: 100,
 } as const;
 

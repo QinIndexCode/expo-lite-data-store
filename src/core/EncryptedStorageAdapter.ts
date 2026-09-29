@@ -56,6 +56,16 @@ type ResolvedFieldEncryptionPolicy = {
   encryptAllFields: boolean;
 };
 
+/**
+ * Field names reserved for encrypted envelope payloads. A user record carrying
+ * one of these names would be mistaken for a full-table envelope on read and
+ * permanently break every read of the table (encrypted and plain tables alike).
+ */
+const RESERVED_ENVELOPE_FIELD_NAMES = new Set(['__enc', '__enc_bulk']);
+
+/** Tables already warned about the legacy global encryptedFields fallback. */
+const warnedGlobalFallbackTables = new WeakSet<object>();
+
 export class EncryptedStorageAdapter implements IStorageAdapter {
   private keyPromise: Promise<string> | null = null;
   private keyGeneration = -1;
@@ -75,6 +85,7 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         suggestion: 'Provide a non-null object for every record.',
       });
     }
+    this.assertNoReservedEnvelopeFieldNames(records);
     return records;
   }
 
@@ -84,7 +95,26 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         suggestion: 'Provide one non-null object for the update payload.',
       });
     }
+    this.assertNoReservedEnvelopeFieldNames([record]);
     return record;
+  }
+
+  private assertNoReservedEnvelopeFieldNames(records: StorageRecord[]): void {
+    for (const record of records) {
+      for (const reservedName of RESERVED_ENVELOPE_FIELD_NAMES) {
+        if (Object.prototype.hasOwnProperty.call(record, reservedName)) {
+          throw new StorageError(
+            `Invalid data: '${reservedName}' is a reserved envelope field name`,
+            'FILE_CONTENT_INVALID',
+            {
+              details:
+                'Records are read back through the encrypted-envelope detection path, so this field name would make every read of the table fail.',
+              suggestion: `Rename the '${reservedName}' field before writing.`,
+            }
+          );
+        }
+      }
+    }
   }
 
   private toPublicRecords<T extends object>(records: StorageRecord[]): T[] {
@@ -376,6 +406,30 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
         tableName,
       });
     }
+
+    if (options?.encryptedFields === undefined) {
+      return;
+    }
+
+    // A per-write field list is a policy assertion, not a hint: without this
+    // check a write requesting encryption against an existing plain table would
+    // silently persist plaintext while the caller believes it was encrypted.
+    const requestedWriteFields = new Set(options.encryptedFields);
+    const configuredWriteFields = new Set(tableMeta.encryptedFields ?? []);
+    const writeFieldsMatch =
+      requestedWriteFields.size === 0
+        ? tableMeta.encrypted !== true || tableMeta.encryptFullTable === true || tableMeta.encryptAllFields === true
+        : tableMeta.encryptAllFields !== true &&
+          requestedWriteFields.size === configuredWriteFields.size &&
+          Array.from(requestedWriteFields).every(field => configuredWriteFields.has(field));
+
+    if (!writeFieldsMatch) {
+      throw new StorageError(`Table '${tableName}' has different encrypted field settings`, 'MIGRATION_FAILED', {
+        details: 'Changing encrypted fields on an existing table requires an explicit data migration.',
+        suggestion: 'Omit encryptedFields to use the persisted policy, or migrate the table explicitly.',
+        tableName,
+      });
+    }
   }
 
   private assertExistingCreateTablePolicy<T extends object>(
@@ -415,7 +469,12 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     'encrypted' | 'encryptFullTable' | 'requireAuthOnAccess' | 'encryptedFields'
   > {
     const encryptFullTable = options?.encryptFullTable === true;
-    const encrypted = this.requireAuthOnAccess || options?.encrypted === true || encryptFullTable;
+    // A non-empty per-write field list selects encryption on its own, mirroring
+    // the facade's normalizeSecurity so the implicit table policy and the
+    // adapter surface that requested it can never disagree.
+    const requestedFields = options?.encryptedFields;
+    const encrypted =
+      this.requireAuthOnAccess || options?.encrypted === true || encryptFullTable || (requestedFields?.length ?? 0) > 0;
     const useFieldEncryption = encrypted && !encryptFullTable;
     return withDynamicFieldEncryption(
       {
@@ -612,6 +671,17 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
       if (persistedFields && persistedFields.length > 0) {
         return persistedFields;
       }
+
+      // An encrypted table without persisted fields falls back to the current
+      // global config. If that config drifted since the table was created, the
+      // read/write field sets no longer match the stored ciphertext. Warn once
+      // per table (never logging field names) so the cause is diagnosable.
+      if (tableMeta && !warnedGlobalFallbackTables.has(tableMeta)) {
+        warnedGlobalFallbackTables.add(tableMeta);
+        logger.warn(
+          `[EncryptedStorageAdapter] An encrypted table has no persisted encryptedFields metadata; falling back to the current encryption.encryptedFields config (${(config.encryption.encryptedFields ?? []).length} field(s)). If that config changed since the table was created, migrate the table data explicitly.`
+        );
+      }
     }
 
     // v3 metadata had no all-fields marker. Empty or missing fields therefore
@@ -631,6 +701,16 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     options: Omit<WriteOptions, 'mode'> | WriteOptions | undefined,
     config: LiteStoreConfig
   ): ResolvedFieldEncryptionPolicy {
+    // A field list carried by this call is the caller's explicit policy. It must
+    // win over the global config so an implicit table persists exactly what was
+    // requested instead of silently adopting an unrelated configured list.
+    const requestedFields = options?.encryptedFields;
+    if (Array.isArray(requestedFields)) {
+      return requestedFields.length === 0
+        ? { encryptedFields: [], encryptAllFields: true }
+        : { encryptedFields: [...new Set(requestedFields)], encryptAllFields: false };
+    }
+
     const encrypted = this.requireAuthOnAccess || options?.encrypted === true || options?.encryptFullTable === true;
     if (!encrypted || options?.encryptFullTable === true) {
       return { encryptedFields: [], encryptAllFields: false };

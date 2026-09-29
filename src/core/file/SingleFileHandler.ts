@@ -1,3 +1,4 @@
+import { configManager } from '../config/ConfigManager';
 import { StorageError } from '../../types/storageErrorInfc';
 import { isStorageRecord, type StorageRecord } from '../../types/storageTypes';
 import { bytesToHex } from '../../utils/byteEncoding';
@@ -165,7 +166,7 @@ export class SingleFileHandler extends FileHandlerBase {
   private async readEnvelopeFromPath(path: string): Promise<SingleFileEnvelope> {
     const text = await withTimeout(
       getFileSystem().readAsStringAsync(path, { encoding: getEncodingType().UTF8 }),
-      10000,
+      configManager.getConfig().timeout,
       `read ${path} content`
     );
     const parsed: unknown = JSON.parse(text) as unknown;
@@ -203,7 +204,7 @@ export class SingleFileHandler extends FileHandlerBase {
     try {
       const serialized = await withTimeout(
         getFileSystem().readAsStringAsync(markerPath, { encoding: getEncodingType().UTF8 }),
-        10000,
+        configManager.getConfig().timeout,
         `read commit marker ${markerPath}`
       );
       const envelope: unknown = JSON.parse(serialized) as unknown;
@@ -248,20 +249,20 @@ export class SingleFileHandler extends FileHandlerBase {
 
     await withMutationTimeout(
       fileSystem.writeAsStringAsync(markerTempPath, serialized, { encoding: getEncodingType().UTF8 }),
-      10000,
+      configManager.getConfig().timeout,
       `write commit marker temp file ${markerTempPath}`
     );
     this.clearFileInfoCache(markerTempPath);
     await withMutationTimeout(
       fileSystem.deleteAsync(markerPath, { idempotent: true }),
-      10000,
+      configManager.getConfig().timeout,
       `replace commit marker ${markerPath}`
     );
     this.clearFileInfoCache(markerPath);
     try {
       await withMutationTimeout(
         fileSystem.moveAsync({ from: markerTempPath, to: markerPath }),
-        10000,
+        configManager.getConfig().timeout,
         `publish commit marker ${markerPath}`
       );
     } finally {
@@ -273,7 +274,7 @@ export class SingleFileHandler extends FileHandlerBase {
   private async deleteRecoveryArtifact(path: string): Promise<void> {
     await withMutationTimeout(
       getFileSystem().deleteAsync(path, { idempotent: true }),
-      10000,
+      configManager.getConfig().timeout,
       `delete recovery artifact ${path}`
     );
     this.clearFileInfoCache(path);
@@ -433,14 +434,14 @@ export class SingleFileHandler extends FileHandlerBase {
     const fileSystem = getFileSystem();
     const backupContent = await withTimeout(
       fileSystem.readAsStringAsync(backupFilePath, { encoding: getEncodingType().UTF8 }),
-      10000,
+      configManager.getConfig().timeout,
       `read recovery backup ${backupFilePath}`
     );
     const records = await this.readRecordsFromPath(backupFilePath);
 
     await withMutationTimeout(
       fileSystem.writeAsStringAsync(this.filePath, backupContent, { encoding: getEncodingType().UTF8 }),
-      10000,
+      configManager.getConfig().timeout,
       `restore recovery backup ${backupFilePath}`
     );
     if (!preserveBackup) {
@@ -537,7 +538,7 @@ export class SingleFileHandler extends FileHandlerBase {
 
           await withMutationTimeout(
             fileSystem.writeAsStringAsync(tempFilePath, content, { encoding: getEncodingType().UTF8 }),
-            10000,
+            configManager.getConfig().timeout,
             `write temp file ${tempFilePath}`
           );
 
@@ -548,22 +549,22 @@ export class SingleFileHandler extends FileHandlerBase {
             previousEnvelope = await this.readEnvelopeFromPath(this.filePath);
             const previousContent = await withTimeout(
               fileSystem.readAsStringAsync(this.filePath, { encoding: getEncodingType().UTF8 }),
-              10000,
+              configManager.getConfig().timeout,
               `read current file ${this.filePath} before replacement`
             );
             await withMutationTimeout(
               fileSystem.writeAsStringAsync(backupTempFilePath, previousContent, { encoding: getEncodingType().UTF8 }),
-              10000,
+              configManager.getConfig().timeout,
               `write backup file ${backupTempFilePath}`
             );
             await withMutationTimeout(
               fileSystem.deleteAsync(backupFilePath, { idempotent: true }),
-              10000,
+              configManager.getConfig().timeout,
               `replace stale backup file ${backupFilePath}`
             );
             await withMutationTimeout(
               fileSystem.moveAsync({ from: backupTempFilePath, to: backupFilePath }),
-              10000,
+              configManager.getConfig().timeout,
               `publish backup file ${backupFilePath}`
             );
             this.clearFileInfoCache(backupFilePath);
@@ -587,7 +588,7 @@ export class SingleFileHandler extends FileHandlerBase {
           if (previousInfo.exists) {
             await withMutationTimeout(
               fileSystem.deleteAsync(this.filePath, { idempotent: true }),
-              10000,
+              configManager.getConfig().timeout,
               `replace current file ${this.filePath}`
             );
             this.clearFileInfoCache(this.filePath);
@@ -595,7 +596,7 @@ export class SingleFileHandler extends FileHandlerBase {
 
           await withMutationTimeout(
             fileSystem.moveAsync({ from: tempFilePath, to: this.filePath }),
-            10000,
+            configManager.getConfig().timeout,
             `rename temp file to ${this.filePath}`
           );
 

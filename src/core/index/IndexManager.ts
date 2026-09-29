@@ -81,7 +81,12 @@ export class IndexManager {
     this.metadataManager = metadataManager;
   }
 
-  async createIndex(tableName: string, fields: string | string[], type: IndexType = IndexType.NORMAL): Promise<void> {
+  async createIndex(
+    tableName: string,
+    fields: string | string[],
+    type: IndexType = IndexType.NORMAL,
+    options?: { persistMetadata?: boolean }
+  ): Promise<void> {
     if (!tableName?.trim()) {
       throw new StorageError('Table name cannot be empty', 'TABLE_NAME_INVALID', {
         details: 'Table name is required to create an index',
@@ -141,7 +146,7 @@ export class IndexManager {
     tableIndexes.set(indexName, index);
 
     const tableMeta = this.metadataManager.get(tableName);
-    if (tableMeta) {
+    if (tableMeta && options?.persistMetadata !== false) {
       this.metadataManager.update(tableName, {
         indexes: {
           ...tableMeta.indexes,

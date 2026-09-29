@@ -62,10 +62,12 @@ export class DataReader {
   }
 
   private async readRepresentation(tableName: string, mode: 'single' | 'chunked'): Promise<StorageRecord[]> {
+    // The 30s read guard is fixed by design: a correctness bound, not the user-configurable I/O timeout.
     if (mode === 'chunked') {
       return withTimeout(this.getChunkedHandler(tableName).readAll(), 30000, `read chunked table ${tableName}`);
     }
 
+    // The 30s read guard is fixed by design: a correctness bound, not the user-configurable I/O timeout.
     return withTimeout(this.getSingleFile(tableName).read(), 30000, `read single file table ${tableName}`);
   }
 

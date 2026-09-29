@@ -3,11 +3,13 @@ import { EncryptedStorageAdapter } from './EncryptedStorageAdapter';
 import type { IStorageAdapter } from '../types/storageAdapterInfc';
 import { StorageAdapterFactory } from './adapter/StorageAdapterFactory';
 import { configManager } from './config/ConfigManager';
+import { readPersistedEnginePreference, type PersistedEngine } from './config/EnginePreference';
 import { loadOptionalExpoModule } from '../utils/expoModuleLoader';
 
 export class DbInstanceManager {
   private static instance: DbInstanceManager;
   private adapterInstances: Map<string, IStorageAdapter> = new Map();
+  private persistedEnginePreference: PersistedEngine | null = null;
 
   private constructor() {}
 
@@ -27,7 +29,23 @@ export class DbInstanceManager {
       }
       return 'file-system';
     }
+    // Explicit runtime engine choices always win. Only the untouched default
+    // defers to the persisted migration marker, so a programmatic
+    // setConfig({ engine: 'file-system' }) can always switch back.
+    if (!configManager.hasExplicitEngineChoice() && this.persistedEnginePreference === 'sqlite') {
+      return 'sqlite';
+    }
     return 'file-system';
+  }
+
+  /** Loads the persisted engine marker into the in-memory resolution mirror. */
+  public async loadPersistedEnginePreference(): Promise<void> {
+    this.persistedEnginePreference = await readPersistedEnginePreference();
+  }
+
+  /** Updates the in-memory engine mirror after the marker file was rewritten. */
+  public setPersistedEnginePreference(engine: PersistedEngine | null): void {
+    this.persistedEnginePreference = engine;
   }
 
   public getDbInstance(encrypted: boolean = false, requireAuthOnAccess: boolean = false): IStorageAdapter {

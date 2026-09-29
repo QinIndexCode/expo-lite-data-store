@@ -69,17 +69,23 @@ import { randomBytes } from 'expo-lite-data-store/utils/cryptoProvider';
 
 ### 导出分组
 
-| 导出分组       | 公共项                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Facade 对象    | `db`                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 命名 CRUD 函数 | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked`, `createIndex`, `dropIndex`, `migrateEngine`                                                                                                                                                    |
-| 事务函数       | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                                                                                                                                                                                                                  |
-| 引擎迁移服务   | `migrateEngine`, `EngineMigrationService`                                                                                                                                                                                                                                                                                                                                                                                 |
-| 配置导出       | `configManager`, `ConfigManager`                                                                                                                                                                                                                                                                                                                                                                                          |
-| 监控导出       | `performanceMonitor`                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 加密辅助导出   | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`                                                                                                                                                                                                                                                                                   |
-| 错误导出       | `StorageError`, `StorageErrorCode`, `CryptoError`, `TransactionError`                                                                                                                                                                                                                                                                                                                                                     |
-| 类型导出       | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FindOneOptions`, `FindManyOptions`, `UpdateOptions`, `FilterCondition`, `BulkOperation`, `StorageInput`, `StorageRecord`, `UpdatePayload`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats`, `MigrateEngineOptions`, `MigrationResult` |
+| 导出分组             | 公共项                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Facade 对象          | `db`                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 命名 CRUD 函数       | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked`, `createIndex`, `dropIndex`, `migrateEngine`                                                                                                                                                                                                   |
+| 事务函数             | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 引擎迁移服务         | `migrateEngine`, `EngineMigrationService`                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 配置导出             | `configManager`, `ConfigManager`                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 监控导出             | `performanceMonitor`；type-only `PerformanceStats`, `HealthCheckResult`                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 加密辅助导出         | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`；type-only `KeyCacheStats`                                                                                                                                                                                                                                                                                                       |
+| 错误导出             | `StorageError`, `StorageErrorCode`, `CryptoError`, `TransactionError`                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 类型导出             | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FindOneOptions`, `FindManyOptions`, `UpdateOptions`, `FilterCondition`, `BulkOperation`, `StorageInput`, `StorageRecord`, `UpdatePayload`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats`, `MigrateEngineOptions`, `MigrationResult`, type-only `IStorageAdapter`, `IStorageEngine` |
+| 类型导出（表目录）   | `Catalog`                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 类型导出（列定义）   | `ColumnDefinition`                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 类型导出（排序字段） | `SortField`                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 类型导出（排序方向） | `SortOrder`                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 类型导出（排序算法） | `SortAlgorithm`                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 类型导出（表元数据） | `TableMeta`                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 ### `db` facade 与命名导出
 
@@ -146,7 +152,6 @@ type ColumnDefinition =
 
 type CreateTableOptions<T extends object = StorageRecord> = CommonOptions & {
   columns?: Record<string, ColumnDefinition>;
-  intermediates?: boolean;
   chunkSize?: number;
   initialData?: T[];
   mode?: 'single' | 'chunked';
@@ -190,8 +195,11 @@ type WriteOptions = CommonOptions & {
   mode?: 'append' | 'overwrite';
   forceChunked?: boolean;
   encryptFullTable?: boolean;
+  encryptedFields?: string[];
 };
 ```
+
+`encryptedFields` 是本次写入的字段级加密策略断言：非空列表会选择加密 facade，并在写入隐式建表时被持久化为表策略；与既有表持久化策略不一致时以 `MIGRATION_FAILED` 失败。写路径（`insert`/`overwrite`/`update`/`bulkWrite`）单独传入空数组 `encryptedFields: []`、且没有 `encrypted: true` 等其它加密选项时会被拒绝（错误码 `FILE_CONTENT_INVALID`）：空数组的动态全字段语义属于 `createTable`，写路径请配合 `encrypted: true` 使用。
 
 ### `FilterCondition`
 
@@ -257,7 +265,7 @@ await createTable('users', {
 - 可同时声明字段级或整表级加密选项；
 - 建表完成后会立即持久化表元数据。
 
-即使省略 `encrypted: true`，非空 `encryptedFields` 也会让 `createTable()` 选择加密 facade。加密写入可以隐式创建此前未知的表；在事务中，解析后的字段列表会传入 commit，并持久化所选策略。对既有加密表，`encrypted`、`encryptFullTable`、`encryptedFields` 和 `requireAuthOnAccess` 是策略输入，而不是原地修改命令。冲突请求会以 `MIGRATION_FAILED` 失败，必须由应用控制迁移；未按严格访问创建的适配器请求严格访问时会以 `PERMISSION_DENIED` 失败，而不会替换密钥。
+即使省略 `encrypted: true`，非空 `encryptedFields` 也会让 `createTable()` 选择加密 facade。加密写入可以隐式创建此前未知的表；隐式建表时，写入请求携带的字段列表会被持久化为表策略，在事务中该解析结果也会传入 commit，并持久化所选策略。对既有表，`encrypted`、`encryptFullTable`、`encryptedFields` 和 `requireAuthOnAccess` 是策略输入，而不是原地修改命令：对既有明文表发起携带 `encryptedFields` 的写入同样会以 `MIGRATION_FAILED` 失败，不会静默落盘明文。冲突请求必须由应用控制迁移；未按严格访问创建的适配器请求严格访问时会以 `PERMISSION_DENIED` 失败，而不会替换密钥。
 
 显式创建字段级加密表但省略 `encryptedFields` 时，若建表时配置了非空字段列表，会先去重再快照到表元数据。若当时的配置为空，或调用方显式传入 `encryptedFields: []`，新表会用 `encryptAllFields: true` 与 `encryptedFields: []` 的精确组合持久化动态全字段策略，之后出现的新记录字段也会被加密。早期 v3 元数据没有内部全字段 marker；legacy 空列表或字段缺失仍沿用历史的全局配置回退，避免把混合记录中的明文字符串重新解释为密文。若要改变 legacy 表的行为，必须先显式迁移。
 
@@ -326,7 +334,7 @@ const result = await verifyCountTable('users');
 await migrateToChunked('audit-log');
 ```
 
-把现有表迁移为 chunked 存储模式。适合在单文件表已经增长到不再适合继续维持单文件时使用。迁移会保留列、风险与加密元数据；加密记录按实际存储形态迁移，不经过解密后重写窗口。运行时先发布并校验全部 chunk，再提交元数据 mode 变更。mode 变更是提交点；之后清理旧单文件失败不能回滚已提交的存储表示。
+把现有表迁移为 chunked 存储模式。适合在单文件表已经增长到不再适合继续维持单文件时使用。迁移会保留列、风险与加密元数据；加密记录按实际存储形态迁移，不经过解密后重写窗口。运行时先发布并校验全部 chunk，再提交元数据 mode 变更。mode 变更是提交点；之后清理旧单文件失败不能回滚已提交的存储表示。在 SQLite 引擎下存储布局无需转换，该调用是 no-op——但仍遵循公开 schema 变更契约：无事务时立即返回，活动事务期间会以 `TRANSACTION_OPERATION_NOT_SUPPORTED` 被拒绝。
 
 chunked 覆盖写使用有界 v2 日志，记录旧计数和 chunk 状态，而不保存旧行 payload。已有 chunk 会移入 `<table>.overwrite-backup/`，`.ready` 标记表示备份已完整准备。删除 overwrite 日志是提交点；若之后的备份清理失败，后续访问会先验证已提交 chunk 集合，再删除残留备份。append 使用独立日志；若追加过程中已有新 chunk 写出但后续失败，运行时会移除这些部分 chunk，并保持旧表可读。恢复会先解决待处理 append、再解决待处理 overwrite；返回数据前会校验日志封装和完整 chunk 集合。
 
@@ -353,6 +361,7 @@ await insert('users', [
 
 - 逻辑上始终以追加方式写入；
 - 同时支持单条记录和数组记录；
+- 传入非空 `encryptedFields` 会选择加密 facade：表不存在时按请求字段列表隐式建表，表已存在但策略不同（包括明文表）则以 `MIGRATION_FAILED` 失败；
 - 返回 `WriteResult`。
 
 ### `overwrite(tableName, data, options?)`
@@ -364,7 +373,8 @@ await overwrite('users', [{ id: '1', name: 'Alice v2' }]);
 行为说明：
 
 - 会替换整张表的逻辑内容；
-- 不会保留未出现在新数据中的旧行。
+- 不会保留未出现在新数据中的旧行；
+- 与 `insert()` 一致，非空 `encryptedFields` 会选择加密 facade，并在隐式建表时持久化请求的字段列表；与既有表策略冲突时以 `MIGRATION_FAILED` 失败。
 
 ### `bulkWrite(tableName, operations, options?)`
 
@@ -401,7 +411,7 @@ type BulkOperation<T extends object = StorageRecord> =
 - 保留操作顺序；
 - 内部会对纯插入场景走专门的优化路径；
 - 支持在事务中使用；
-- 接受 `WriteOptions`：`encryptFullTable` 用于选择加密表面，写入隐式建表时同样生效；
+- 接受 `WriteOptions`：`encryptFullTable` 与非空 `encryptedFields` 用于选择加密表面，写入隐式建表时同样生效，并持久化请求的字段列表；与既有表策略冲突时以 `MIGRATION_FAILED` 失败；
 - 更新和删除按传入的 `where` 条件匹配记录，包含没有 `id` 字段的行；
 - 返回的 `WriteResult.written` 在当前运行时中表示受影响的记录数。
 
@@ -476,19 +486,23 @@ findMany<T extends object = StorageRecord>(tableName, {
 
 #### 支持的查询操作符
 
-| 操作符  | 语义             | 示例                                                  |
-| ------- | ---------------- | ----------------------------------------------------- |
-| `$and`  | 多个条件同时成立 | `{ $and: [{ active: true }, { age: { $gte: 18 } }] }` |
-| `$or`   | 任一条件成立即可 | `{ $or: [{ role: 'admin' }, { role: 'moderator' }] }` |
-| `$eq`   | 精确相等         | `{ age: { $eq: 21 } }`                                |
-| `$ne`   | 不等于           | `{ status: { $ne: 'archived' } }`                     |
-| `$gt`   | 大于             | `{ price: { $gt: 100 } }`                             |
-| `$gte`  | 大于等于         | `{ score: { $gte: 90 } }`                             |
-| `$lt`   | 小于             | `{ stock: { $lt: 10 } }`                              |
-| `$lte`  | 小于等于         | `{ retries: { $lte: 3 } }`                            |
-| `$in`   | 在候选集合中     | `{ role: { $in: ['admin', 'editor'] } }`              |
-| `$nin`  | 不在候选集合中   | `{ status: { $nin: ['deleted', 'blocked'] } }`        |
-| `$like` | SQL 风格模糊匹配 | `{ email: { $like: '%@example.com' } }`               |
+| 操作符  | 语义                             | 示例                                                  |
+| ------- | -------------------------------- | ----------------------------------------------------- |
+| `$and`  | 多个条件同时成立                 | `{ $and: [{ active: true }, { age: { $gte: 18 } }] }` |
+| `$or`   | 任一条件成立即可                 | `{ $or: [{ role: 'admin' }, { role: 'moderator' }] }` |
+| `$eq`   | 精确相等（对象值按深度相等比较） | `{ age: { $eq: 21 } }`                                |
+| `$ne`   | 不等于                           | `{ status: { $ne: 'archived' } }`                     |
+| `$gt`   | 大于                             | `{ price: { $gt: 100 } }`                             |
+| `$gte`  | 大于等于                         | `{ score: { $gte: 90 } }`                             |
+| `$lt`   | 小于                             | `{ stock: { $lt: 10 } }`                              |
+| `$lte`  | 小于等于                         | `{ retries: { $lte: 3 } }`                            |
+| `$in`   | 在候选集合中                     | `{ role: { $in: ['admin', 'editor'] } }`              |
+| `$nin`  | 不在候选集合中                   | `{ status: { $nin: ['deleted', 'blocked'] } }`        |
+| `$like` | SQL 风格模糊匹配                 | `{ email: { $like: '%@example.com' } }`               |
+
+以上操作符在 `file-system` 与 `sqlite` 两个引擎下语义一致，同一查询在两个引擎返回相同结果集：`sqlite` 引擎仅把可与内存语义等价表达的条件下推为 SQL（数组字段的 `$in`/`$nin` 经 `json_each` 同时匹配数组元素与标量值，`json_type` 区分字段缺失与 JSON `null`，布尔不会被误判为数字），无法等价表达的条件（如 `$like` 的 Unicode 大小写折叠、绑定参数超过 500 的 `$in`/`$nin`）自动回退到与 `file-system` 引擎相同的内存过滤。
+
+字段路径中含**单个、且不带前导零**的纯数字片段（如 `a.0.c`）时，会同时匹配两种读法：数组下标（`$.a[0].c`）与对象数字键（`$.a.0.c`）——`sqlite` 下推以整条谓词为单位为两种读法各生成一个分支（`ORDER BY` 的排序键取先命中的分支），因此按这两种读法存储的记录在读、删、改的命中集与排序结果上跨引擎一致。含**两个及以上**纯数字片段的路径（如 `a.0.1`、`a.0.b.1`）暂不支持下推：容器混用时（数组→对象键、对象→数组）两种路径会同时落空，这类字段的过滤与排序整体自动回退为内存执行——两个引擎的结果完全一致，只是没有下推加速。数字段带**前导零**的路径（如 `a.01`）同样自动回退内存过滤：SQLite 把改写后的 `[01]` 解析为数组下标、内存按字面键 `'01'` 访问，两者语义不同，回退后两个引擎的结果一致。
 
 #### 排序说明
 
@@ -506,6 +520,8 @@ findMany<T extends object = StorageRecord>(tableName, {
 
 数字、bigint 与日期在所有算法中都按大小排序，包括为字符串优化的 `fast` 与 `slow` 路径。
 
+字符串排序是大小写敏感的确定性码点序（Unicode code point order），与 SQLite 的 `BINARY` 排序规则一致（UTF-8 字节序 ≡ 码点序），不随 locale 或运行环境变化——同一数据集在 `file-system` 与 `sqlite` 两个引擎、任一 `sortAlgorithm` 下返回完全相同的字符串顺序。
+
 ## 更新与删除 API
 
 ### `update(tableName, data, options)`
@@ -522,16 +538,18 @@ const updatedCount = await update('accounts', { $inc: { balance: -200 } }, { whe
 
 返回命中的并已更新的记录数。
 
+`options` 除 `where` 外还接受安全选项：非空 `encryptedFields` 会选择加密 facade，并在隐式建表时持久化请求的字段列表；与既有表（包括明文表）持久化策略冲突时以 `MIGRATION_FAILED` 失败。
+
 #### 支持的更新操作符
 
-| 操作符      | 语义             | 示例                               |
-| ----------- | ---------------- | ---------------------------------- |
-| `$inc`      | 数值递增或递减   | `{ $inc: { balance: -200 } }`      |
-| `$set`      | 显式赋值         | `{ $set: { status: 'active' } }`   |
-| `$unset`    | 删除字段         | `{ $unset: ['temporaryField'] }`   |
-| `$push`     | 向数组追加单个值 | `{ $push: { tags: 'new' } }`       |
-| `$pull`     | 从数组移除匹配值 | `{ $pull: { tags: 'obsolete' } }`  |
-| `$addToSet` | 仅在不存在时追加 | `{ $addToSet: { tags: 'admin' } }` |
+| 操作符      | 语义                                                     | 示例                               |
+| ----------- | -------------------------------------------------------- | ---------------------------------- |
+| `$inc`      | 数值递增或递减                                           | `{ $inc: { balance: -200 } }`      |
+| `$set`      | 显式赋值                                                 | `{ $set: { status: 'active' } }`   |
+| `$unset`    | 删除字段                                                 | `{ $unset: ['temporaryField'] }`   |
+| `$push`     | 向数组追加单个值                                         | `{ $push: { tags: 'new' } }`       |
+| `$pull`     | 移除与给定值相等的数组元素，或匹配全部列出字段的对象元素 | `{ $pull: { tags: 'obsolete' } }`  |
+| `$addToSet` | 仅在不存在时追加                                         | `{ $addToSet: { tags: 'admin' } }` |
 
 不使用操作符、直接传普通字段对象同样有效，运行时会将其视为字段覆盖更新。
 
@@ -590,7 +608,7 @@ await rollback();
 - 在活动事务 owner 的匹配存储表面上，公开的 `createTable()`、`deleteTable()` 和 `migrateToChunked()` 不属于事务操作；会以 `TRANSACTION_OPERATION_NOT_SUPPORTED` 失败，因为 schema 元数据或文件会立即持久化。其他 adapter 或安全表面会先由常规事务 guard 拒绝；
 - 显式回滚只丢弃排队操作，不重写表文件；提交部分失败时会恢复已有表快照，并移除事务中新建的表；
 - commit 执行和 commit 失败后的快照恢复使用模块私有 symbol capability 进行直接写；在公开 options 中加入 `directWrite` 属性不能绕过事务暂存；
-- 活动事务期间 AutoSync 会保留脏数据且不执行存储写；事务结束后的后续定时或显式 sync 才可能刷出这些数据；
+- 活动事务期间 AutoSync 会保留脏数据且不执行存储写；事务结束后的后续定时 sync 才可能刷出这些数据；
 - 事务仅在进程内协调，不提供崩溃持久化或跨进程 ACID 语义。
 
 ## 存储引擎与索引 API
@@ -617,7 +635,7 @@ await init({ engine: 'sqlite' });
 
 #### `createIndex(tableName, field, options?)`
 
-为指定表的字段建立索引。在 SQLite 引擎下，会自动生成 `json_extract(payload, '$.<field>')` 的原生 B-tree 索引；在文件系统引擎下，会自动在内存索引管理器中维护。
+为指定表的字段建立索引。在 SQLite 引擎下，会自动生成 `json_extract(payload, '$.<field>')` 的原生 B-tree 索引。在文件系统引擎下，声明会登记到表元数据，并在持有表写锁期间立即基于现有数据构建索引——唯一约束从下一次写入即生效，查询也立即获得加速。索引声明会跨重启保留：文件系统 adapter 会在初始化阶段、任何公开 API 调用之前重新登记并重建它们。在文件系统引擎下，若现有数据违反 `unique` 索引，`createIndex` 会以 `TABLE_INDEX_NOT_UNIQUE` 失败并再次移除该索引，不留残留；SQLite 引擎则直接抛出数据库原生唯一约束错误。`unique` 约束比较的是实际存储的值，因此不要在加密表面上被加密的字段上声明唯一索引——每次加密都会产生不同的密文（随机盐与 IV），约束永远不会触发。索引表达式按数组括号形式生成（字段 `a.0.c` 生成 `json_extract(payload, '$.a[0].c')`）：把该数字片段存成对象数字键的记录不会命中这个索引——这只影响查询性能，不影响结果正确性（查询本身仍会命中这类记录）。
 
 ```ts
 import { db, createIndex } from 'expo-lite-data-store';
@@ -649,11 +667,13 @@ await db.createTable('products', {
 });
 ```
 
+声明会在建表提交前校验：字段名为空会以 `TABLE_INDEX_INVALID` 失败；`initialData` 违反 `unique` 约束会导致建表失败——SQLite 下事务整体原子回滚，文件系统引擎下会删除刚创建的表，因此失败的建表不会留下半成品表。文件系统引擎下，声明会持久化到表元数据，并在下次启动时自动重建。索引声明仅在本次调用真正创建表时生效——对已存在的表再次调用 `createTable` 会忽略这些声明（SQLite 下建表语句同样提前返回），因此失败或重复的声明绝不会触发回滚、危及表中已有数据。
+
 ### 双向引擎迁移 API
 
 #### `migrateEngine(targetEngine, options?)`
 
-支持在 `'file-system'` 与 `'sqlite'` 之间进行在线、零数据丢失的双向全库迁移。迁移服务会自动读取源引擎的全部表元数据、列定义与数据记录，在目标引擎中重建表与表达式索引，并在行数严格校验一致后自动更新运行时活动引擎配置。
+支持在 `'file-system'` 与 `'sqlite'` 之间进行在线、零数据丢失的双向全库迁移。迁移服务会自动读取源引擎的全部表元数据、列定义与数据记录，在目标引擎中重建表与表达式索引，并在行数严格校验一致后自动更新运行时活动引擎配置。若目标表已有数据，迁移会以 `MIGRATION_DEST_NOT_EMPTY` 失败而不是静默覆盖；传入 `overwriteExisting: true` 可有意替换目标数据。迁移成功后，引擎选择会跨应用启动持久化；`init()` 或 `configManager` 中显式传入的 `engine` 仍会覆盖持久化标记。
 
 ```ts
 import { db, migrateEngine } from 'expo-lite-data-store';
@@ -736,6 +756,10 @@ const iterations = configManager.get<number>('encryption.keyIterations');
 configManager.set('monitoring.enablePerformanceTracking', true);
 ```
 
+`set()` 成功返回后立即生效：配置落地时会通知已订阅的组件（如 `performanceMonitor`）就地刷新受影响的运行时字段，无需重建实例。配置变更只接管未被显式覆盖的字段：`performanceMonitor.configure()` 与 `setEnabled()` 的显式设置优先于配置变更，`resetRuntimeOptions()` 会清除显式覆盖、恢复配置权威。
+
+> `cache.*` 仅在 `file-system` 引擎下生效。`monitoring.enablePerformanceTracking` 的存储侧读写样本也仅由 `file-system` 引擎记录（encrypt/decrypt 等加密耗时样本两引擎均记录）。在 `sqlite` 引擎下开启 `monitoring.enablePerformanceTracking`，初始化时会输出一条带 `[SQLiteStorageAdapter]` 前缀的一次性告警后忽略；`cache.*` 被静默忽略、不告警。`monitoring.enableHealthChecks`（默认 `true`）是 `performanceMonitor` 的运行开关，与存储引擎无关，也不会告警。
+
 ### 运行时配置来源
 
 当前优先级从低到高如下：
@@ -753,7 +777,7 @@ configManager.set('monitoring.enablePerformanceTracking', true);
 
 ### `app.json` 示例
 
-`autoSync.enabled` 默认是 `false`。下面的示例表示显式开启后台脏缓存同步。`autoSync.batchSize` 限制一次同步中每张表处理的脏缓存条目数；它不会把一次整表覆盖拆成记录级写入。活动事务期间触发的 sync 会保留脏数据，留给后续定时或显式 sync 处理。
+`autoSync.enabled` 默认是 `false`。下面的示例表示显式开启定期脏缓存刷出。`autoSync.batchSize` 限制一次同步中每张表处理的脏缓存条目数；它不会把一次整表覆盖拆成记录级写入。活动事务期间触发的 sync 会保留脏数据，留给后续定时 sync 处理。这些配置项驱动的是一个进程内定时器，只存在于 `file-system` 引擎的写后缓存链路中——`sqlite` 引擎直接落盘、不运行该定时器——且定时器只在应用运行期间触发，不是操作系统级别的后台任务。在 `sqlite` 引擎下开启 `autoSync.enabled` 会在初始化时输出一条带 `[SQLiteStorageAdapter]` 前缀的一次性告警，而不是静默忽略。
 
 ```json
 {
@@ -839,7 +863,7 @@ performanceMonitor.configure({
 - `resetRuntimeOptions()`
 - `destroy()`
 
-运行时默认值：`maxRecords: 1000`、`sampleRate: 0.1`、阈值 `{ minSuccessRate: 90, maxAverageDuration: 1000, maxP95Duration: 3000 }`，性能采样默认关闭（`monitoring.enablePerformanceTracking: false`）；需要采样时请显式开启。
+运行时默认值：`maxRecords: 1000`、`sampleRate: 0.1`、阈值 `{ minSuccessRate: 90, maxAverageDuration: 1000, maxP95Duration: 3000 }`，性能采样默认关闭（`monitoring.enablePerformanceTracking: false`）；需要采样时请显式开启。该键可在运行时随时用 `configManager.set('monitoring.enablePerformanceTracking', ...)` 开关：`performanceMonitor` 会立即随之启停采样，无需重建实例。配置变更不会覆盖 `configure()` / `setEnabled()` 的显式设置；`resetRuntimeOptions()` 清除这些显式覆盖，让配置重新生效。性能采样的存储侧操作样本只由 `file-system` 引擎记录，encrypt/decrypt 等加密耗时样本两引擎均记录；在 `sqlite` 引擎下开启该键，初始化时会输出一条带 `[SQLiteStorageAdapter]` 前缀的一次性告警。
 
 ## 加密辅助函数
 
@@ -911,24 +935,30 @@ try {
 
 ### 常见 `StorageErrorCode`
 
-| 错误码                                | 含义                                                                    |
-| ------------------------------------- | ----------------------------------------------------------------------- |
-| `EXPO_MODULE_MISSING`                 | 缺少必需的 Expo 运行时包                                                |
-| `AUTH_ON_ACCESS_UNSUPPORTED`          | 当前运行时无法兑现严格逐次访问认证                                      |
-| `PERMISSION_DENIED`                   | 通过明文表面访问加密表，或未用严格认证表面访问严格表/列出严格表时被拒绝 |
-| `TABLE_NOT_FOUND`                     | 请求的表不存在                                                          |
-| `TABLE_NAME_INVALID`                  | 表名为空或不合法                                                        |
-| `TABLE_COLUMN_INVALID`                | 列定义使用了不支持的类型                                                |
-| `QUERY_FAILED`                        | 查询引擎执行条件失败                                                    |
-| `MIGRATION_FAILED`                    | 表迁移失败，或既有加密/严格认证策略需要显式迁移密钥与数据               |
-| `TRANSACTION_IN_PROGRESS`             | 当前表面已经存在一个活动事务                                            |
-| `NO_TRANSACTION_IN_PROGRESS`          | 没有活动事务却调用了 `commit()` 或 `rollback()`                         |
-| `TRANSACTION_OPERATION_NOT_SUPPORTED` | 活动事务不能执行会立即持久化的公开 schema 操作                          |
-| `TRANSACTION_ROLLBACK_FAILED`         | 提交或回滚失败后未能把所有表恢复到快照                                  |
-| `SNAPSHOT_FAILED`                     | 事务记录数据无法隔离或生成快照                                          |
-| `LOCK_TIMEOUT`                        | 并发写锁获取超时                                                        |
-| `TIMEOUT`                             | 操作超过了配置的超时预算                                                |
-| `CORRUPTED_DATA`                      | 磁盘数据无法安全解析                                                    |
+| 错误码                                | 含义                                                                                            |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `EXPO_MODULE_MISSING`                 | 缺少必需的 Expo 运行时包                                                                        |
+| `AUTH_ON_ACCESS_UNSUPPORTED`          | 当前运行时无法兑现严格逐次访问认证                                                              |
+| `PERMISSION_DENIED`                   | 通过明文表面访问加密表，或未用严格认证表面访问严格表/列出严格表时被拒绝                         |
+| `TABLE_NOT_FOUND`                     | 请求的表不存在                                                                                  |
+| `TABLE_NAME_INVALID`                  | 表名为空或不合法                                                                                |
+| `TABLE_COLUMN_INVALID`                | 列定义使用了不支持的类型                                                                        |
+| `TABLE_INDEX_INVALID`                 | 索引声明不合法（字段名为空，或字段不适合构建 SQL 表达式索引）                                   |
+| `TABLE_INDEX_ALREADY_EXISTS`          | 同名索引已登记在该表上（文件系统引擎）；SQLite 仅在该索引名已被不同字段表达式占用时报错         |
+| `TABLE_INDEX_NOT_FOUND`               | 指定索引在该表上不存在                                                                          |
+| `TABLE_INDEX_NOT_UNIQUE`              | 写入或索引构建违反了已声明的唯一索引约束（文件系统引擎；SQLite 引擎改为抛出数据库原生约束错误） |
+| `FILE_CONTENT_INVALID`                | 记录或更新载荷校验失败（如记录不是对象，或记录携带保留信封字段名 `__enc` / `__enc_bulk`）       |
+| `QUERY_FAILED`                        | 查询引擎执行条件失败                                                                            |
+| `MIGRATION_FAILED`                    | 表迁移失败，或既有加密/严格认证策略需要显式迁移密钥与数据                                       |
+| `MIGRATION_DEST_NOT_EMPTY`            | 引擎迁移发现目标表已有数据并拒绝覆盖；传入 `overwriteExisting: true` 可有意替换目标数据         |
+| `TRANSACTION_IN_PROGRESS`             | 当前表面已经存在一个活动事务                                                                    |
+| `NO_TRANSACTION_IN_PROGRESS`          | 没有活动事务却调用了 `commit()` 或 `rollback()`                                                 |
+| `TRANSACTION_OPERATION_NOT_SUPPORTED` | 活动事务不能执行会立即持久化的公开 schema 操作                                                  |
+| `TRANSACTION_ROLLBACK_FAILED`         | 提交或回滚失败后未能把所有表恢复到快照                                                          |
+| `SNAPSHOT_FAILED`                     | 事务记录数据无法隔离或生成快照                                                                  |
+| `LOCK_TIMEOUT`                        | 并发写锁获取超时                                                                                |
+| `TIMEOUT`                             | 操作超过了配置的超时预算                                                                        |
+| `CORRUPTED_DATA`                      | 磁盘数据无法安全解析                                                                            |
 
 ### `CryptoError`
 

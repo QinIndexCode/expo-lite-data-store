@@ -69,17 +69,23 @@ import { randomBytes } from 'expo-lite-data-store/utils/cryptoProvider';
 
 ### Export groups
 
-| Export group          | Public items                                                                                                                                                                                                                                                                                                                                                                                                              |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Facade object         | `db`                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| Named CRUD functions  | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked`, `createIndex`, `dropIndex`, `migrateEngine`                                                                                                                                                    |
-| Transaction functions | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                                                                                                                                                                                                                  |
-| Engine Migration      | `migrateEngine`, `EngineMigrationService`                                                                                                                                                                                                                                                                                                                                                                                 |
-| Config exports        | `configManager`, `ConfigManager`                                                                                                                                                                                                                                                                                                                                                                                          |
-| Monitoring exports    | `performanceMonitor`; type-only `PerformanceStats`, `HealthCheckResult`                                                                                                                                                                                                                                                                                                                                                   |
-| Crypto helpers        | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`; type-only `KeyCacheStats`                                                                                                                                                                                                                                                        |
-| Error exports         | `StorageError`, `StorageErrorCode`, `CryptoError`, `TransactionError`                                                                                                                                                                                                                                                                                                                                                     |
-| Type exports          | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FindOneOptions`, `FindManyOptions`, `UpdateOptions`, `FilterCondition`, `BulkOperation`, `StorageInput`, `StorageRecord`, `UpdatePayload`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats`, `MigrateEngineOptions`, `MigrationResult` |
+| Export group                     | Public items                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Facade object                    | `db`                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Named CRUD functions             | `init`, `createTable`, `deleteTable`, `hasTable`, `listTables`, `insert`, `overwrite`, `read`, `findOne`, `findMany`, `update`, `remove`, `clearTable`, `countTable`, `verifyCountTable`, `bulkWrite`, `migrateToChunked`, `createIndex`, `dropIndex`, `migrateEngine`                                                                                                                                                                                                   |
+| Transaction functions            | `beginTransaction`, `commit`, `rollback`                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Engine Migration                 | `migrateEngine`, `EngineMigrationService`                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Config exports                   | `configManager`, `ConfigManager`                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Monitoring exports               | `performanceMonitor`; type-only `PerformanceStats`, `HealthCheckResult`                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Crypto helpers                   | `encrypt`, `decrypt`, `encryptBulk`, `decryptBulk`, `hash`, `resetMasterKey`, `getKeyCacheStats`, `getKeyCacheHitRate`, `CryptoService`; type-only `KeyCacheStats`                                                                                                                                                                                                                                                                                                       |
+| Error exports                    | `StorageError`, `StorageErrorCode`, `CryptoError`, `TransactionError`                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Type exports                     | `CreateTableOptions`, `ReadOptions`, `WriteOptions`, `WriteResult`, `CommonOptions`, `TableOptions`, `FindOptions`, `FindOneOptions`, `FindManyOptions`, `UpdateOptions`, `FilterCondition`, `BulkOperation`, `StorageInput`, `StorageRecord`, `UpdatePayload`, `LiteStoreConfig`, `DeepPartial`, `StorageErrorCode`, `PerformanceStats`, `HealthCheckResult`, `KeyCacheStats`, `MigrateEngineOptions`, `MigrationResult`, type-only `IStorageAdapter`, `IStorageEngine` |
+| Type exports (table catalog)     | `Catalog`                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Type exports (column definition) | `ColumnDefinition`                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Type exports (sort field)        | `SortField`                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Type exports (sort order)        | `SortOrder`                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Type exports (sort algorithm)    | `SortAlgorithm`                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Type exports (table metadata)    | `TableMeta`                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 ### `db` facade vs named exports
 
@@ -146,7 +152,6 @@ type ColumnDefinition =
 
 type CreateTableOptions<T extends object = StorageRecord> = CommonOptions & {
   columns?: Record<string, ColumnDefinition>;
-  intermediates?: boolean;
   chunkSize?: number;
   initialData?: T[];
   mode?: 'single' | 'chunked';
@@ -190,8 +195,11 @@ type WriteOptions = CommonOptions & {
   mode?: 'append' | 'overwrite';
   forceChunked?: boolean;
   encryptFullTable?: boolean;
+  encryptedFields?: string[];
 };
 ```
+
+`encryptedFields` is this write's field-level encryption policy assertion: a non-empty list selects the encrypted facade and is persisted as the table policy when the write implicitly creates the table; a list that disagrees with an existing table's persisted policy fails with `MIGRATION_FAILED`. A write-path call (`insert`/`overwrite`/`update`/`bulkWrite`) that passes an empty `encryptedFields: []` list with no other encryption option such as `encrypted: true` is rejected with `FILE_CONTENT_INVALID`: the empty-list dynamic all-fields semantics belong to `createTable`, so write paths must pair them with `encrypted: true`.
 
 ### `FilterCondition`
 
@@ -257,7 +265,7 @@ Behavior:
 - can apply field-level or full-table encryption options;
 - persists table metadata immediately after creation.
 
-A non-empty `encryptedFields` list makes `createTable()` select the encrypted facade even when `encrypted: true` is omitted. An encrypted write can implicitly create a previously unknown table; inside a transaction, its resolved field list is carried into commit, and the selected policy is persisted. For an existing encrypted table, `encrypted`, `encryptFullTable`, `encryptedFields`, and `requireAuthOnAccess` are policy inputs, not in-place mutation commands. A conflicting request fails with `MIGRATION_FAILED` and must be handled by an application-controlled migration; a non-strict adapter that requests strict access fails with `PERMISSION_DENIED` rather than substituting a key.
+A non-empty `encryptedFields` list makes `createTable()` select the encrypted facade even when `encrypted: true` is omitted. An encrypted write can implicitly create a previously unknown table; on implicit creation the write request's field list is persisted as the table policy, and inside a transaction that resolved list is carried into commit together with the selected policy. For an existing table, `encrypted`, `encryptFullTable`, `encryptedFields`, and `requireAuthOnAccess` are policy inputs, not in-place mutation commands: a write carrying `encryptedFields` against an existing plaintext table likewise fails with `MIGRATION_FAILED` instead of silently persisting plaintext. A conflicting request must be handled by an application-controlled migration; a non-strict adapter that requests strict access fails with `PERMISSION_DENIED` rather than substituting a key.
 
 When explicit field-level table creation omits `encryptedFields`, a non-empty creation-time configured list is deduplicated and snapshotted into table metadata. If that configured list is empty, or the caller explicitly passes `encryptedFields: []`, a newly created table persists the exact pair `encryptAllFields: true` and `encryptedFields: []` as its dynamic all-fields policy, so fields introduced by later record shapes are also encrypted. Metadata written by earlier v3 releases has no internal all-fields marker; an empty or missing legacy list keeps the historical global-configuration fallback so mixed ciphertext/plaintext records are not reinterpreted. Migrate a legacy table explicitly before changing that behavior.
 
@@ -326,7 +334,7 @@ Use this only for diagnosis or maintenance:
 await migrateToChunked('audit-log');
 ```
 
-Moves an existing table into chunked storage mode. Use this when a table has outgrown practical single-file behavior. The migration keeps column, risk, and encryption metadata; encrypted rows are moved in their stored form instead of passing through a decrypted rewrite window. It publishes and verifies all chunks before committing the metadata mode change. That mode change is the commit point; obsolete single-file cleanup after it cannot roll the committed representation back.
+Moves an existing table into chunked storage mode. Use this when a table has outgrown practical single-file behavior. The migration keeps column, risk, and encryption metadata; encrypted rows are moved in their stored form instead of passing through a decrypted rewrite window. It publishes and verifies all chunks before committing the metadata mode change. That mode change is the commit point; obsolete single-file cleanup after it cannot roll the committed representation back. On the SQLite engine the storage layout needs no conversion, so the call is a no-op — but it still follows the public schema-change contract: it resolves immediately outside a transaction and is rejected with `TRANSACTION_OPERATION_NOT_SUPPORTED` while one is active.
 
 Chunked overwrites use a bounded v2 journal containing previous count/chunk state rather than old row payloads. Existing chunks move to `<table>.overwrite-backup/`; a `.ready` marker identifies a fully prepared backup. Removing the overwrite journal is the commit point. If backup cleanup then fails, a later access verifies the committed chunk set before deleting the leftover backup. Appends use a separate journal; if an append fails after new chunks were written, the runtime removes those partial chunks and leaves the previous table readable. Recovery resolves a pending append before a pending overwrite, and validates journal envelopes and complete chunk sets before returning data.
 
@@ -353,6 +361,7 @@ Behavior:
 
 - always appends logically;
 - accepts one record or an array of records;
+- a non-empty `encryptedFields` selects the encrypted facade: a missing table is created implicitly with the requested field list, while an existing table with a different policy (including a plaintext table) fails with `MIGRATION_FAILED`;
 - returns `WriteResult`.
 
 ### `overwrite(tableName, data, options?)`
@@ -364,7 +373,8 @@ await overwrite('users', [{ id: '1', name: 'Alice v2' }]);
 Behavior:
 
 - replaces the logical table contents;
-- does not preserve rows that are not present in the new payload.
+- does not preserve rows that are not present in the new payload;
+- like `insert()`, a non-empty `encryptedFields` selects the encrypted facade and persists the requested field list on implicit table creation; a policy conflict with an existing table fails with `MIGRATION_FAILED`.
 
 ### `bulkWrite(tableName, operations, options?)`
 
@@ -401,7 +411,7 @@ Behavior:
 - preserves operation order;
 - supports pure insert fast-path optimization internally;
 - can run inside a transaction;
-- accepts `WriteOptions`: `encryptFullTable` selects the encrypted surface and is honored when the write implicitly creates the table;
+- accepts `WriteOptions`: `encryptFullTable` and a non-empty `encryptedFields` select the encrypted surface and are honored when the write implicitly creates the table, persisting the requested field list; a policy conflict with an existing table fails with `MIGRATION_FAILED`;
 - matches update and delete operations by the supplied `where` condition, including rows without `id` fields;
 - returns a `WriteResult` whose `written` count reflects affected records under current runtime behavior.
 
@@ -476,19 +486,23 @@ findMany<T extends object = StorageRecord>(tableName, {
 
 #### Supported query operators
 
-| Operator | Semantics                        | Example                                               |
-| -------- | -------------------------------- | ----------------------------------------------------- |
-| `$and`   | All nested conditions must match | `{ $and: [{ active: true }, { age: { $gte: 18 } }] }` |
-| `$or`    | Any nested condition may match   | `{ $or: [{ role: 'admin' }, { role: 'moderator' }] }` |
-| `$eq`    | Exact equality                   | `{ age: { $eq: 21 } }`                                |
-| `$ne`    | Not equal                        | `{ status: { $ne: 'archived' } }`                     |
-| `$gt`    | Greater than                     | `{ price: { $gt: 100 } }`                             |
-| `$gte`   | Greater than or equal            | `{ score: { $gte: 90 } }`                             |
-| `$lt`    | Less than                        | `{ stock: { $lt: 10 } }`                              |
-| `$lte`   | Less than or equal               | `{ retries: { $lte: 3 } }`                            |
-| `$in`    | Included in a set                | `{ role: { $in: ['admin', 'editor'] } }`              |
-| `$nin`   | Excluded from a set              | `{ status: { $nin: ['deleted', 'blocked'] } }`        |
-| `$like`  | SQL-style pattern matching       | `{ email: { $like: '%@example.com' } }`               |
+| Operator | Semantics                                        | Example                                               |
+| -------- | ------------------------------------------------ | ----------------------------------------------------- |
+| `$and`   | All nested conditions must match                 | `{ $and: [{ active: true }, { age: { $gte: 18 } }] }` |
+| `$or`    | Any nested condition may match                   | `{ $or: [{ role: 'admin' }, { role: 'moderator' }] }` |
+| `$eq`    | Exact equality (deep equality for object values) | `{ age: { $eq: 21 } }`                                |
+| `$ne`    | Not equal                                        | `{ status: { $ne: 'archived' } }`                     |
+| `$gt`    | Greater than                                     | `{ price: { $gt: 100 } }`                             |
+| `$gte`   | Greater than or equal                            | `{ score: { $gte: 90 } }`                             |
+| `$lt`    | Less than                                        | `{ stock: { $lt: 10 } }`                              |
+| `$lte`   | Less than or equal                               | `{ retries: { $lte: 3 } }`                            |
+| `$in`    | Included in a set                                | `{ role: { $in: ['admin', 'editor'] } }`              |
+| `$nin`   | Excluded from a set                              | `{ status: { $nin: ['deleted', 'blocked'] } }`        |
+| `$like`  | SQL-style pattern matching                       | `{ email: { $like: '%@example.com' } }`               |
+
+These operators behave identically on the `file-system` and `sqlite` engines, so the same query returns the same result set on both: the `sqlite` engine pushes a condition down to SQL only when it is equivalent to the in-memory semantics (array `$in`/`$nin` match both array elements and scalar values through `json_each`, `json_type` distinguishes a missing field from an explicit JSON `null`, and booleans are never mistaken for numbers), while conditions that cannot be expressed equivalently (such as `$like`'s Unicode case folding, or `$in`/`$nin` lists needing more than 500 bound parameters) automatically fall back to the same in-memory filtering the `file-system` engine uses.
+
+A field path containing exactly one all-numeric segment without a leading zero (such as `a.0.c`) matches both readings at once: the array index (`$.a[0].c`) and the object numeric key (`$.a.0.c`) — the `sqlite` pushdown generates one branch per reading for the whole predicate (the `ORDER BY` key takes the first resolving branch through `COALESCE`), so records stored through either of those two readings agree across engines in their read, delete and update hit sets and in sort order. A path with two or more all-numeric segments (such as `a.0.1` or `a.0.b.1`) is not pushed down yet: with mixed containers (array then object key, or object then array) both path forms miss at once, so for such fields both filtering and sorting fall back to in-memory execution as a whole — both engines return exactly the same results, just without the pushdown speed-up. A path whose numeric segment carries a leading zero (such as `a.01`) falls back to in-memory filtering the same way: SQLite reads the rewritten `[01]` as an array index while memory reads the literal key `'01'`, the two semantics differ, and after the fallback both engines agree.
 
 #### Sorting notes
 
@@ -506,6 +520,8 @@ Every supported algorithm keeps `null` and `undefined` values stable at the end 
 
 Numbers, bigints, and dates sort by magnitude in every algorithm, including the string-tuned `fast` and `slow` paths.
 
+String ordering is case-sensitive deterministic code point order (Unicode code point order), matching SQLite's `BINARY` collation (UTF-8 byte order ≡ code point order) and independent of the locale or runtime — the same dataset returns exactly the same string sequence on the `file-system` and `sqlite` engines under any `sortAlgorithm`.
+
 ## Update and Delete API
 
 ### `update(tableName, data, options)`
@@ -522,16 +538,18 @@ const updatedCount = await update('accounts', { $inc: { balance: -200 } }, { whe
 
 Returns the number of matched records updated.
 
+Besides `where`, `options` accepts the security options: a non-empty `encryptedFields` selects the encrypted facade and persists the requested field list on implicit table creation; a conflict with an existing table's persisted policy (including a plaintext table) fails with `MIGRATION_FAILED`.
+
 #### Supported update operators
 
-| Operator    | Semantics                             | Example                            |
-| ----------- | ------------------------------------- | ---------------------------------- |
-| `$inc`      | Increment or decrement numeric values | `{ $inc: { balance: -200 } }`      |
-| `$set`      | Assign explicit values                | `{ $set: { status: 'active' } }`   |
-| `$unset`    | Remove fields                         | `{ $unset: ['temporaryField'] }`   |
-| `$push`     | Push a single value into an array     | `{ $push: { tags: 'new' } }`       |
-| `$pull`     | Remove a matching value from an array | `{ $pull: { tags: 'obsolete' } }`  |
-| `$addToSet` | Push only if absent                   | `{ $addToSet: { tags: 'admin' } }` |
+| Operator    | Semantics                                                                                | Example                            |
+| ----------- | ---------------------------------------------------------------------------------------- | ---------------------------------- |
+| `$inc`      | Increment or decrement numeric values                                                    | `{ $inc: { balance: -200 } }`      |
+| `$set`      | Assign explicit values                                                                   | `{ $set: { status: 'active' } }`   |
+| `$unset`    | Remove fields                                                                            | `{ $unset: ['temporaryField'] }`   |
+| `$push`     | Push a single value into an array                                                        | `{ $push: { tags: 'new' } }`       |
+| `$pull`     | Remove array elements equal to the value, or object elements matching every listed field | `{ $pull: { tags: 'obsolete' } }`  |
+| `$addToSet` | Push only if absent                                                                      | `{ $addToSet: { tags: 'admin' } }` |
 
 Direct field assignment without an operator is also valid and is treated as a replace-on-field update.
 
@@ -590,7 +608,7 @@ Discards the active transaction.
 - On the active transaction owner's matching storage surface, public `createTable()`, `deleteTable()`, and `migrateToChunked()` calls are not transactional and raise `TRANSACTION_OPERATION_NOT_SUPPORTED`, because their schema metadata or file changes persist immediately. A different adapter or security surface is rejected by the normal transaction guard first.
 - Explicit rollback discards queued operations without rewriting table files. A partially failed commit restores existing table snapshots and removes tables created by that transaction.
 - Commit execution and failed-commit snapshot restoration use a module-private symbol capability for direct writes. Adding a public `directWrite` property to options cannot bypass transaction staging.
-- AutoSync retains dirty entries and performs no storage write while a transaction is active. A later scheduled or explicit sync may flush them after the transaction settles.
+- AutoSync retains dirty entries and performs no storage write while a transaction is active. A later scheduled sync may flush them after the transaction settles.
 - Transactions are in-process and are not crash-durable or cross-process ACID transactions.
 
 ## Storage Engine and Index APIs
@@ -617,7 +635,7 @@ await init({ engine: 'sqlite' });
 
 #### `createIndex(tableName, field, options?)`
 
-Creates an index for the specified table field. Under the SQLite engine, automatically creates a native B-tree index on `json_extract(payload, '$.<field>')`; under the FileSystem engine, maintains it in the in-memory index manager.
+Creates an index for the specified table field. Under the SQLite engine, automatically creates a native B-tree index on `json_extract(payload, '$.<field>')`. Under the FileSystem engine, the declaration is registered in table metadata and the index is built over existing rows immediately while the table write lock is held, so unique constraints apply from the next write and queries gain acceleration right away. Index declarations persist across restarts: the FileSystem adapter re-registers and rebuilds them during initialization, before any public API call. If existing rows violate a `unique` index, `createIndex` fails with `TABLE_INDEX_NOT_UNIQUE` and drops the index again, leaving nothing behind; the SQLite engine instead surfaces the database's native unique-constraint error. A `unique` constraint compares stored values, so never declare one on a field encrypted by the encrypted surface: every encryption yields different ciphertext (random salt and IV) and the constraint can never fire. The index expression is generated in the array bracket form (the field `a.0.c` becomes `json_extract(payload, '$.a[0].c')`), so records that store that numeric segment as an object numeric key never use the index — this affects query performance only, never results (such records are still matched by the query itself).
 
 ```ts
 import { db, createIndex } from 'expo-lite-data-store';
@@ -649,11 +667,13 @@ await db.createTable('products', {
 });
 ```
 
+Declarations are validated before the table is committed: an empty field name fails with `TABLE_INDEX_INVALID`, and a `unique` violation in `initialData` fails the creation — SQLite rolls the transaction back atomically, while the FileSystem engine deletes the freshly created table, so a failed creation never leaves a partial table behind. Under the FileSystem engine the declarations persist in table metadata and are rebuilt automatically on the next startup. Declarations apply only when the call actually creates the table: calling `createTable` again on an existing table ignores them (the SQLite creation statement returns early there too), so a failing or duplicate declaration can never trigger the rollback against rows the table already holds.
+
 ### Bidirectional Engine Migration API
 
 #### `migrateEngine(targetEngine, options?)`
 
-Performs an online, zero-data-loss migration of all tables and data between `'file-system'` and `'sqlite'`. The migration service reads table metadata, column definitions, and records from the source engine, recreates tables and expression indexes in the target engine, verifies row count equality, and updates the active runtime engine configuration.
+Performs an online, zero-data-loss migration of all tables and data between `'file-system'` and `'sqlite'`. The migration service reads table metadata, column definitions, and records from the source engine, recreates tables and expression indexes in the target engine, verifies row count equality, and updates the active runtime engine configuration. If a destination table already holds rows, the migration fails with `MIGRATION_DEST_NOT_EMPTY` instead of silently overwriting them; pass `overwriteExisting: true` to replace destination data deliberately. Once a migration succeeds, the engine choice persists across app launches; an explicit runtime `engine` option in `init()` or `configManager` still overrides the persisted marker.
 
 ```ts
 import { db, migrateEngine } from 'expo-lite-data-store';
@@ -736,6 +756,10 @@ Sets a nested override by dot path.
 configManager.set('monitoring.enablePerformanceTracking', true);
 ```
 
+The value takes effect as soon as `set()` returns: committed changes notify subscribed components (such as `performanceMonitor`) to refresh the affected runtime fields in place, with no instance rebuild required. Changes only take over fields that have not been explicitly overridden: explicit `performanceMonitor.configure()` and `setEnabled()` settings win over configuration changes, and `resetRuntimeOptions()` drops those overrides to restore configuration authority.
+
+> `cache.*` takes effect only on the `file-system` engine. `monitoring.enablePerformanceTracking` likewise records storage-side samples only through the `file-system` engine (encrypt/decrypt timing samples record on both engines). Enabling `monitoring.enablePerformanceTracking` under `sqlite` produces a one-time warning prefixed `[SQLiteStorageAdapter]` at initialization and is then ignored; `cache.*` is ignored silently without a warning. `monitoring.enableHealthChecks` (default `true`) is a `performanceMonitor` runtime switch, independent of the storage engine, and is never warned about.
+
 ### Runtime config sources
 
 Current precedence from lowest to highest:
@@ -753,7 +777,7 @@ The runtime configuration layer is not a merge of every host source. In an Expo,
 
 ### `app.json` example
 
-`autoSync.enabled` is `false` by default. The following example opts into background dirty-cache syncing explicitly. `autoSync.batchSize` limits the number of dirty cache entries processed for each table in one sync run; it does not split a single table overwrite into record-level writes. Sync attempts made during an active transaction retain their dirty entries for a later scheduled or explicit sync.
+`autoSync.enabled` is `false` by default. The following example opts into periodic dirty-cache flushing explicitly. `autoSync.batchSize` limits the number of dirty cache entries processed for each table in one sync run; it does not split a single table overwrite into record-level writes. Sync attempts made during an active transaction retain their dirty entries for a later scheduled sync. These keys configure an in-process timer that exists only in the `file-system` engine's write-behind cache — the `sqlite` engine persists writes immediately and does not run the timer — and the timer fires only while the app is running, not as an OS-level background task. Enabling `autoSync.enabled` under `sqlite` produces a one-time warning prefixed `[SQLiteStorageAdapter]` at initialization instead of a silent no-op.
 
 ```json
 {
@@ -839,7 +863,7 @@ Other available control methods:
 - `resetRuntimeOptions()`
 - `destroy()`
 
-Runtime defaults are `maxRecords: 1000`, `sampleRate: 0.1`, thresholds `{ minSuccessRate: 90, maxAverageDuration: 1000, maxP95Duration: 3000 }`, and performance tracking off (`monitoring.enablePerformanceTracking: false`); opt in explicitly when sampling is wanted.
+Runtime defaults are `maxRecords: 1000`, `sampleRate: 0.1`, thresholds `{ minSuccessRate: 90, maxAverageDuration: 1000, maxP95Duration: 3000 }`, and performance tracking off (`monitoring.enablePerformanceTracking: false`); opt in explicitly when sampling is wanted. The key can also be flipped at any time with `configManager.set('monitoring.enablePerformanceTracking', ...)`: `performanceMonitor` starts or stops sampling immediately, with no instance rebuild required. Configuration changes never overwrite explicit `configure()` / `setEnabled()` settings; `resetRuntimeOptions()` drops those explicit overrides so configuration applies again. Performance sampling records storage-side operations only through the `file-system` engine, while encrypt/decrypt timing samples are recorded on both engines; enabling this key under `sqlite` produces a one-time warning prefixed `[SQLiteStorageAdapter]` at initialization.
 
 ## Crypto Helpers
 
@@ -911,24 +935,30 @@ try {
 
 ### Common `StorageErrorCode` values
 
-| Code                                  | Meaning                                                                                                                |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `EXPO_MODULE_MISSING`                 | Required Expo runtime package is missing                                                                               |
-| `AUTH_ON_ACCESS_UNSUPPORTED`          | Strict per-access authentication cannot be enforced in the current runtime                                             |
-| `PERMISSION_DENIED`                   | A request selected a weaker storage surface than the table's encryption or strict-authentication policy                |
-| `TABLE_NOT_FOUND`                     | The requested table does not exist                                                                                     |
-| `TABLE_NAME_INVALID`                  | The table name is empty or invalid                                                                                     |
-| `TABLE_COLUMN_INVALID`                | A declared column uses an unsupported type                                                                             |
-| `QUERY_FAILED`                        | The query engine failed to execute the condition                                                                       |
-| `MIGRATION_FAILED`                    | Table migration failed, or an existing encryption/strict-authentication policy requires an explicit key/data migration |
-| `TRANSACTION_IN_PROGRESS`             | A transaction already exists on the current surface                                                                    |
-| `NO_TRANSACTION_IN_PROGRESS`          | `commit()` or `rollback()` was called with no active transaction                                                       |
-| `TRANSACTION_OPERATION_NOT_SUPPORTED` | An active transaction cannot perform a public schema operation that persists immediately                               |
-| `TRANSACTION_ROLLBACK_FAILED`         | A failed commit or rollback could not restore every table to its snapshot                                              |
-| `SNAPSHOT_FAILED`                     | Transaction record data could not be isolated or snapshotted                                                           |
-| `LOCK_TIMEOUT`                        | Concurrent write lock acquisition exceeded the timeout budget                                                          |
-| `TIMEOUT`                             | An operation exceeded a configured timeout                                                                             |
-| `CORRUPTED_DATA`                      | On-disk data could not be parsed safely                                                                                |
+| Code                                  | Meaning                                                                                                                                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EXPO_MODULE_MISSING`                 | Required Expo runtime package is missing                                                                                                                      |
+| `AUTH_ON_ACCESS_UNSUPPORTED`          | Strict per-access authentication cannot be enforced in the current runtime                                                                                    |
+| `PERMISSION_DENIED`                   | A request selected a weaker storage surface than the table's encryption or strict-authentication policy                                                       |
+| `TABLE_NOT_FOUND`                     | The requested table does not exist                                                                                                                            |
+| `TABLE_NAME_INVALID`                  | The table name is empty or invalid                                                                                                                            |
+| `TABLE_COLUMN_INVALID`                | A declared column uses an unsupported type                                                                                                                    |
+| `TABLE_INDEX_INVALID`                 | An index declaration is invalid (empty field name, or a field unsafe for SQL expression indexing)                                                             |
+| `TABLE_INDEX_ALREADY_EXISTS`          | An index with this name is already registered on the table (FileSystem engine); SQLite raises it only when the name is taken by a different field expression  |
+| `TABLE_INDEX_NOT_FOUND`               | The requested index does not exist on the table                                                                                                               |
+| `TABLE_INDEX_NOT_UNIQUE`              | A write or index build would violate a declared unique index (FileSystem engine; SQLite surfaces the database's native constraint error instead)              |
+| `FILE_CONTENT_INVALID`                | A record or update payload failed validation (for example a non-object record, or a record carrying the reserved envelope field names `__enc` / `__enc_bulk`) |
+| `QUERY_FAILED`                        | The query engine failed to execute the condition                                                                                                              |
+| `MIGRATION_FAILED`                    | Table migration failed, or an existing encryption/strict-authentication policy requires an explicit key/data migration                                        |
+| `MIGRATION_DEST_NOT_EMPTY`            | An engine migration found existing rows in a destination table and refused to overwrite them; pass `overwriteExisting: true` to replace them deliberately     |
+| `TRANSACTION_IN_PROGRESS`             | A transaction already exists on the current surface                                                                                                           |
+| `NO_TRANSACTION_IN_PROGRESS`          | `commit()` or `rollback()` was called with no active transaction                                                                                              |
+| `TRANSACTION_OPERATION_NOT_SUPPORTED` | An active transaction cannot perform a public schema operation that persists immediately                                                                      |
+| `TRANSACTION_ROLLBACK_FAILED`         | A failed commit or rollback could not restore every table to its snapshot                                                                                     |
+| `SNAPSHOT_FAILED`                     | Transaction record data could not be isolated or snapshotted                                                                                                  |
+| `LOCK_TIMEOUT`                        | Concurrent write lock acquisition exceeded the timeout budget                                                                                                 |
+| `TIMEOUT`                             | An operation exceeded a configured timeout                                                                                                                    |
+| `CORRUPTED_DATA`                      | On-disk data could not be parsed safely                                                                                                                       |
 
 ### `CryptoError`
 
