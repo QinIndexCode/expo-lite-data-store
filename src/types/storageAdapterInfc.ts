@@ -91,6 +91,13 @@ export interface IStorageAdapter {
 
   clearTable(tableName: string): Promise<void>;
 
+  /**
+   * Counts physical storage rows for a table without consulting metadata.
+   * Optional: used by engine migration to detect real destination occupancy
+   * because shared metadata makes hasTable unreliable across engines.
+   */
+  getPhysicalRecordCount?(tableName: string): Promise<number>;
+
   delete<T extends object = StorageRecord>(
     tableName: string,
     where: FilterCondition<T>,

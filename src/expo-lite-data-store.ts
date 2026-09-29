@@ -1,5 +1,6 @@
 /** Public Expo Lite Data Store API. */
 import { plainStorage, dbManager } from './core/db';
+import type { IStorageAdapter } from './types/storageAdapterInfc';
 import { configManager, ConfigManager } from './core/config/ConfigManager';
 import { performanceMonitor } from './core/monitor/PerformanceMonitor';
 import {
@@ -52,6 +53,41 @@ const normalizeSecurity = (opts?: {
   return { encrypted, requireAuthOnAccess };
 };
 
+/**
+ * An empty `encryptedFields` list is createTable's "dynamic all-fields" input,
+ * not a write-path field policy. On the write paths the empty list resolves to
+ * the plain surface (normalizeSecurity treats it as no request) while still
+ * carrying `encryptedFields: []` into implicit table metadata, which would
+ * persist an encrypted-looking policy for a plaintext payload. Reject it up
+ * front unless another option already selects an encrypted surface.
+ */
+const assertWriteEncryptedFields = (
+  tableName: string,
+  options?: CommonOptions & { encryptFullTable?: boolean; encryptedFields?: string[] }
+): void => {
+  if (
+    options?.encryptedFields === undefined ||
+    options.encryptedFields.length > 0 ||
+    options.encrypted === true ||
+    options.encryptFullTable === true ||
+    options.requireAuthOnAccess === true
+  ) {
+    return;
+  }
+
+  throw new StorageError(
+    `Invalid encryptedFields for table '${tableName}': an empty list is a createTable option, not a write option`,
+    'FILE_CONTENT_INVALID',
+    {
+      details:
+        'A write with encryptedFields: [] and no other encryption option selects the plaintext surface, so it would persist plaintext while recording an empty encrypted field policy.',
+      suggestion:
+        'Create the dynamic all-fields table first with createTable(table, { encrypted: true, encryptedFields: [] }), then write with encrypted: true; or pass a non-empty encryptedFields list.',
+      tableName,
+    }
+  );
+};
+
 type TransactionSecurity = ReturnType<typeof normalizeSecurity>;
 type ResolvedStorageAdapter = ReturnType<typeof resolveStorageAdapter>;
 
@@ -65,9 +101,12 @@ export type FindManyOptions<T extends object = StorageRecord> = FindOptions<NonI
 
 export type UpdateOptions<T extends object = StorageRecord> = CommonOptions & {
   where: FilterCondition<NonInfer<T>>;
+  /** Fields that require encryption for this write (selects the encrypted surface and validates against the persisted table policy). */
+  encryptedFields?: string[];
 };
 
 let activeTransactionSecurity: TransactionSecurity | null = null;
+let activeTransactionAdapter: IStorageAdapter | null = null;
 const tablePolicyLocks = new Map<string, Promise<void>>();
 
 const hasExplicitSecurityOptions = (
@@ -189,6 +228,48 @@ const resolveTableStorageAdapter = async (tableName: string, options?: CommonOpt
   return resolved;
 };
 
+const RESERVED_ENVELOPE_FIELD_NAMES = ['__enc', '__enc_bulk'] as const;
+
+const findReservedEnvelopeField = (value: object): string | undefined =>
+  RESERVED_ENVELOPE_FIELD_NAMES.find(name => Object.prototype.hasOwnProperty.call(value, name));
+
+const rejectReservedEnvelopeField = (name: string): never => {
+  throw new StorageError(`Invalid data: '${name}' is a reserved envelope field name`, 'FILE_CONTENT_INVALID', {
+    details:
+      'Records are read back through the encrypted-envelope detection path, so this field name would make every read of the table fail.',
+    suggestion: `Rename the '${name}' field before writing.`,
+  });
+};
+
+/**
+ * Rejects reserved envelope field names at the public write entries, before any
+ * storage surface resolves. The encrypted adapter repeats this check, but without
+ * it a plain-surface write could store an envelope-looking record that later
+ * breaks every encrypted-surface read of the table. Update-operator payloads are
+ * covered because operators such as `$set` carry their field names as keys.
+ */
+const assertNoReservedEnvelopeFields = (data: unknown): void => {
+  const candidates: unknown[] = Array.isArray(data) ? data : [data];
+  for (const candidate of candidates) {
+    if (candidate === null || typeof candidate !== 'object') {
+      continue;
+    }
+    const reserved = findReservedEnvelopeField(candidate);
+    if (reserved) {
+      rejectReservedEnvelopeField(reserved);
+    }
+    for (const [key, value] of Object.entries(candidate) as [string, unknown][]) {
+      if (!key.startsWith('$') || value === null || typeof value !== 'object' || Array.isArray(value)) {
+        continue;
+      }
+      const nestedReserved = findReservedEnvelopeField(value);
+      if (nestedReserved) {
+        rejectReservedEnvelopeField(nestedReserved);
+      }
+    }
+  }
+};
+
 const runTableOperation = async <T>(
   tableName: string,
   options: CommonOptions | undefined,
@@ -230,11 +311,19 @@ const resolveListStorageAdapter = async (options?: CommonOptions) => {
   return resolved;
 };
 
+const isAdapterInTransaction = (adapter: IStorageAdapter | null): boolean => {
+  const candidate = adapter as unknown as { isInTransaction?: () => boolean } | null;
+  return typeof candidate?.isInTransaction === 'function' ? candidate.isInTransaction() : false;
+};
+
 const clearTransactionSecurityIfSettled = (operationCompleted: boolean): void => {
-  const defaultAdapter = dbManager.getDefaultInstance() as unknown as { isInTransaction?: () => boolean };
-  const inTx = typeof defaultAdapter.isInTransaction === 'function' ? defaultAdapter.isInTransaction() : false;
+  // The transaction may live on a different adapter instance than the default
+  // one (the SQLite engine creates separate plain/encrypted instances), so the
+  // activity check must target the adapter that opened the transaction.
+  const inTx = isAdapterInTransaction(activeTransactionAdapter);
   if (operationCompleted || !inTx) {
     activeTransactionSecurity = null;
+    activeTransactionAdapter = null;
   }
 };
 
@@ -249,6 +338,9 @@ export const init = async (options: TableOptions = {}): Promise<void> => {
   if (options.engine) {
     configManager.updateConfig({ engine: options.engine });
   }
+  // Hydrate the persisted engine marker before any adapter resolution so a
+  // migration from a previous launch keeps the SQLite engine active.
+  await dbManager.loadPersistedEnginePreference();
   const { adapter: baseAdapter } = resolveStorageAdapter(options);
   const adapter = baseAdapter as typeof baseAdapter & { ensureInitialized?: () => Promise<void> };
 
@@ -264,6 +356,9 @@ export const createTable = async <T extends object = StorageRecord>(
   tableName: string,
   options: CreateTableOptions<NonInfer<T>> = {}
 ): Promise<void> => {
+  if (options.initialData) {
+    assertNoReservedEnvelopeFields(options.initialData);
+  }
   return runTableOperation(tableName, options, async ({ encrypted, requireAuthOnAccess, adapter }) => {
     return adapter.createTable<T>(tableName, {
       ...options,
@@ -298,8 +393,10 @@ export const insert = async <T extends object = StorageRecord>(
   data: StorageInput<NonInfer<T>>,
   options: WriteOptions = {}
 ): Promise<WriteResult> => {
-  return runTableOperation(tableName, options, async ({ adapter }) => {
-    return adapter.insert<T>(tableName, data, options);
+  assertNoReservedEnvelopeFields(data);
+  assertWriteEncryptedFields(tableName, options);
+  return runTableOperation(tableName, options, async ({ encrypted, requireAuthOnAccess, adapter }) => {
+    return adapter.insert<T>(tableName, data, { ...options, encrypted, requireAuthOnAccess });
   });
 };
 
@@ -309,8 +406,10 @@ export const overwrite = async <T extends object = StorageRecord>(
   data: StorageInput<NonInfer<T>>,
   options: Omit<WriteOptions, 'mode'> = {}
 ): Promise<WriteResult> => {
-  return runTableOperation(tableName, options, async ({ adapter }) => {
-    return adapter.overwrite<T>(tableName, data, options);
+  assertNoReservedEnvelopeFields(data);
+  assertWriteEncryptedFields(tableName, options);
+  return runTableOperation(tableName, options, async ({ encrypted, requireAuthOnAccess, adapter }) => {
+    return adapter.overwrite<T>(tableName, data, { ...options, encrypted, requireAuthOnAccess });
   });
 };
 
@@ -392,14 +491,41 @@ export const bulkWrite = async <T extends object = StorageRecord>(
   operations: BulkOperation<NonInfer<T>>[],
   options: WriteOptions = {}
 ): Promise<WriteResult> => {
-  return runTableOperation(tableName, options, ({ adapter }) => adapter.bulkWrite<T>(tableName, operations, options));
+  for (const operation of operations) {
+    if (operation.type === 'insert' || operation.type === 'update') {
+      assertNoReservedEnvelopeFields(operation.data);
+    }
+  }
+  assertWriteEncryptedFields(tableName, options);
+  return runTableOperation(tableName, options, ({ encrypted, requireAuthOnAccess, adapter }) =>
+    adapter.bulkWrite<T>(tableName, operations, { ...options, encrypted, requireAuthOnAccess })
+  );
 };
 
 export const beginTransaction = async (options: TableOptions = {}): Promise<void> => {
+  // The SQLite engine instantiates separate plain/encrypted adapters, each
+  // with its own TransactionService, so per-adapter guards cannot see each
+  // other. Enforce single-transaction semantics at the facade level.
+  if (activeTransactionSecurity !== null || isAdapterInTransaction(activeTransactionAdapter)) {
+    throw new StorageError('Transaction already in progress', 'TRANSACTION_IN_PROGRESS', {
+      details: 'Only one active transaction is supported at a time across all storage surfaces.',
+      suggestion: 'Commit or roll back the active transaction before starting a new one.',
+    });
+  }
+
   const { encrypted, requireAuthOnAccess } = normalizeSecurity(options);
   const adapter = dbManager.getDbInstance(encrypted, requireAuthOnAccess);
-  await adapter.beginTransaction(options);
+  // Mark the transaction surface before awaiting begin so concurrent callers
+  // observe the pending transaction instead of opening a second one.
   activeTransactionSecurity = { encrypted, requireAuthOnAccess };
+  activeTransactionAdapter = adapter;
+  try {
+    await adapter.beginTransaction(options);
+  } catch (error) {
+    activeTransactionSecurity = null;
+    activeTransactionAdapter = null;
+    throw error;
+  }
 };
 
 export const commit = async (options: TableOptions = {}): Promise<void> => {
@@ -436,8 +562,10 @@ export const update = async <T extends object = StorageRecord>(
   data: UpdatePayload<NonInfer<T>>,
   options: UpdateOptions<T>
 ): Promise<number> => {
-  return runTableOperation(tableName, options, async ({ adapter }) => {
-    return adapter.update<T>(tableName, data, options.where, options);
+  assertNoReservedEnvelopeFields(data);
+  assertWriteEncryptedFields(tableName, options);
+  return runTableOperation(tableName, options, async ({ encrypted, requireAuthOnAccess, adapter }) => {
+    return adapter.update<T>(tableName, data, options.where, { ...options, encrypted, requireAuthOnAccess });
   });
 };
 

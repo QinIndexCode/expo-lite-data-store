@@ -1,4 +1,5 @@
-import { PerformanceMonitor, type PerformanceMetrics } from '../PerformanceMonitor';
+import { ConfigManager } from '../../config/ConfigManager';
+import { PerformanceMonitor, performanceMonitor, type PerformanceMetrics } from '../PerformanceMonitor';
 
 describe('PerformanceMonitor', () => {
   let monitor: PerformanceMonitor;
@@ -20,6 +21,9 @@ describe('PerformanceMonitor', () => {
 
   afterEach(() => {
     monitor.destroy();
+    // Restore configuration-derived defaults so runtime-toggle tests never leak state.
+    // getInstance() (not the module export) keeps this correct after resetInstance().
+    ConfigManager.getInstance().resetConfig();
   });
 
   const createMetric = (overrides: Partial<PerformanceMetrics> = {}): PerformanceMetrics => ({
@@ -133,5 +137,103 @@ describe('PerformanceMonitor', () => {
     expect(typeof monitor.isEnabled()).toBe('boolean');
     expect(monitor.getSampleRate()).toBe(0.1);
     expect(monitor.getThresholds().minSuccessRate).toBe(90);
+  });
+
+  it('follows runtime toggles of monitoring.enablePerformanceTracking', () => {
+    ConfigManager.getInstance().set('monitoring.enablePerformanceTracking', false);
+
+    const runtimeMonitor = new PerformanceMonitor();
+    expect(runtimeMonitor.isEnabled()).toBe(false);
+
+    // No explicit enabled override here, so configuration stays authoritative.
+    runtimeMonitor.configure({ sampleRate: 1, maxRecords: 10 });
+    runtimeMonitor.record(createMetric());
+    expect(runtimeMonitor.getMetrics()).toHaveLength(0);
+
+    ConfigManager.getInstance().set('monitoring.enablePerformanceTracking', true);
+    expect(runtimeMonitor.isEnabled()).toBe(true);
+    // Deterministic: a callback falling back to resetRuntimeOptions() would restore 0.1.
+    expect(runtimeMonitor.getSampleRate()).toBe(1);
+    runtimeMonitor.record(createMetric());
+    expect(runtimeMonitor.getMetrics()).toHaveLength(1);
+
+    ConfigManager.getInstance().set('monitoring.enablePerformanceTracking', false);
+    expect(runtimeMonitor.isEnabled()).toBe(false);
+    runtimeMonitor.record(createMetric());
+    expect(runtimeMonitor.getMetrics()).toHaveLength(1);
+
+    runtimeMonitor.destroy();
+  });
+
+  it('keeps configure() options when a configuration notification arrives', () => {
+    monitor.clear();
+    monitor.configure({ sampleRate: 1, maxRecords: 5 });
+
+    ConfigManager.getInstance().set('monitoring.enablePerformanceTracking', true);
+    expect(monitor.isEnabled()).toBe(true);
+
+    // Narrow refresh regression lock: the notification must not fall back to
+    // resetRuntimeOptions(), which would restore sampleRate 0.1 and default thresholds.
+    expect(monitor.getSampleRate()).toBe(1);
+    expect(monitor.getThresholds()).toEqual({
+      minSuccessRate: 95,
+      maxAverageDuration: 500,
+      maxP95Duration: 1000,
+    });
+
+    for (let index = 1; index <= 7; index += 1) {
+      monitor.record(createMetric({ duration: index * 10 }));
+    }
+
+    // maxRecords stays at the configured 5 instead of the 1000 runtime default.
+    expect(monitor.getMetrics().map(metric => metric.duration)).toEqual([30, 40, 50, 60, 70]);
+  });
+
+  it('keeps an explicit setEnabled(true) when configuration changes land', () => {
+    monitor.setEnabled(true);
+
+    ConfigManager.getInstance().set('monitoring.enablePerformanceTracking', false);
+    expect(monitor.isEnabled()).toBe(true);
+
+    ConfigManager.getInstance().set('chunkSize', 10 * 1024 * 1024);
+    expect(monitor.isEnabled()).toBe(true);
+  });
+
+  it('keeps an explicit configure({enabled:false}) when configuration enables tracking', () => {
+    monitor.configure({ enabled: false });
+
+    ConfigManager.getInstance().set('monitoring.enablePerformanceTracking', true);
+    expect(monitor.isEnabled()).toBe(false);
+
+    ConfigManager.getInstance().set('chunkSize', 10 * 1024 * 1024);
+    expect(monitor.isEnabled()).toBe(false);
+  });
+
+  it('stops following configuration changes after destroy()', () => {
+    ConfigManager.getInstance().set('monitoring.enablePerformanceTracking', false);
+
+    const runtimeMonitor = new PerformanceMonitor();
+    expect(runtimeMonitor.isEnabled()).toBe(false);
+
+    runtimeMonitor.destroy();
+
+    ConfigManager.getInstance().set('monitoring.enablePerformanceTracking', true);
+    expect(runtimeMonitor.isEnabled()).toBe(false);
+
+    ConfigManager.getInstance().set('monitoring.enablePerformanceTracking', false);
+  });
+
+  it('flips performanceMonitor state when a fresh instance set() lands after resetInstance()', () => {
+    ConfigManager.getInstance().set('monitoring.enablePerformanceTracking', false);
+    expect(performanceMonitor.isEnabled()).toBe(false);
+
+    ConfigManager.resetInstance();
+    const freshManager = ConfigManager.getInstance();
+
+    freshManager.set('monitoring.enablePerformanceTracking', true);
+    expect(performanceMonitor.isEnabled()).toBe(true);
+
+    freshManager.set('monitoring.enablePerformanceTracking', false);
+    expect(performanceMonitor.isEnabled()).toBe(false);
   });
 });

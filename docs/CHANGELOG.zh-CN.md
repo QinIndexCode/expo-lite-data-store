@@ -4,6 +4,58 @@
 
 [README 入口](../README.md) | [English](./CHANGELOG.en.md) | [API 参考](./API.zh-CN.md)
 
+## [未发布]
+
+### 新增
+
+- **file-system 引擎的完整索引生命周期**：`createTable({ indexes })` 现在会真正创建并构建声明的索引（此前该选项被接受但被静默忽略）；`createIndex` 在持有表写锁期间立即基于现有数据构建索引，唯一约束与查询加速从下一次操作即生效；持久化的索引声明会在 adapter 初始化阶段、任何公开 API 调用之前重新登记并重建——唯一约束执行与索引加速读取跨重启保留。声明会先校验（字段名为空报 `TABLE_INDEX_INVALID`），带声明的建表失败不会留下半成品表。
+- **`import/no-cycle` 循环依赖门禁**：接入 `eslint-plugin-import` 并在 ESLint 扁平配置中启用 `import/no-cycle: error`（仅此一条规则，不引入其余 import 规则集），同时声明 `import/resolver` 与 `import/extensions` 的 `.ts`/`.tsx` 扩展名，使规则能解析并遍历 TypeScript 模块（缺省只认 `.js`/`.mjs`/`.cjs`，对 TS 模块会静默失效）。存量的两处值导入环——`AutoSyncService` 与 `StorageTaskProcessor` 对 `FileSystemStorageAdapter` 的反向引用——改用 `import type` 断开，二者均为纯类型引用，运行时语义不变。
+- **导出面锁定测试与 API 类型补录**：新增 `src/__tests__/unit/export-surface.test.ts`，用显式键名清单对 `Object.keys(...).sort()` 做全等断言，正向锁定三套公开导出面——主入口 41 个 named 运行时导出加 `default`（共 42 个可枚举键）、`db` facade 的 23 个键、`default` 导出对象的 30 个键——并同时锁定 `package.json` `exports` 的子路径键集合（`.`、`./js`、`./cjs`、`./utils/*`）与 `src/index.ts` 的 `export *` 转出口，任何意外的导出增删都会让该套件变红（有意变更需同步更新清单与 CHANGELOG）；API 参考（中英文）的导出分组表补录此前未记载的 6 个 type-only 类型：`Catalog`、`ColumnDefinition`、`SortAlgorithm`、`SortField`、`SortOrder`、`TableMeta`。
+
+### 修复
+
+- **数字键字段路径的 SQLite 下推双分支对齐（读/删/改/排序）**：字段路径含**单个**纯数字片段（如 `a.0.c`，数字段无前导零）时，`sqlite` 下推此前只按数组括号形式（`$.a[0].c`）生成 WHERE 与 ORDER BY，把「对象数字键」记录（`{a: {'0': ...}}`）静默漏掉——跨引擎读/删/改命中集与排序结果分歧，最危险的是漏删/漏改。现在 `SqlQueryBuilder` 派生点形（`$.a.0.c`）与括号形（`$.a[0].c`）两种路径变体：WHERE 以整条谓词为单位、按各自路径是否解析加守卫做 OR 双分支（守卫保证 `$ne`/`$nin`/缺失路径语义不从落空分支泄漏），参数按分支顺序合并、翻倍后仍受 500 绑定参数全局上限约束（超出回退内存过滤）；`ORDER BY` 用 `COALESCE(括号, 点形)` 取先命中的分支，`NULLS LAST` 与末尾 `id ASC` 决胜键不变。含**两个及以上**纯数字片段的路径（如 `a.0.1`、`a.0.b.1`）在容器混用（数组→对象键、对象→数组）时两种路径会同时落空，双分支同样对不齐，因此这类字段整体拒绝下推、自动回退内存过滤（WHERE 与排序皆是）：结果仍与内存引擎完全一致，仅失去下推加速。含**前导零**数字段的路径（如 `a.01`）也整体回退内存：`getJsonPath` 会把 `.01` 改写成下标 `[01]`，SQLite 按数组下标 1 求值、内存按字面键 `'01'` 访问，两者语义不同（回退前会造成读、删分歧），回退后两引擎结果一致。无前导零的单个数字段下推判定不变（仅 `isSafeField` 等既有否决条件才回退），索引 DDL 仍按数组括号形式生成（对象数字键记录不走索引——仅性能、结果不受影响），`SQLiteStorageAdapter` 读下推消费侧与 `customSortAlgorithm` 路径不动。`engine-parity` 新增数组/对象数字键双数据集用例（k=1）与多数字片段回退用例（k≥2 复查反例 + 删除），覆盖 eq、ne（含缺失/null 交互）、range、`$in`/`$nin`、删除与更新命中行数、含 desc 与 null 的排序序一致，并有断言证明对象数字键记录在 sqlite 引擎下确实被读到。
+- **`file-system` 与 `sqlite` 引擎的字符串排序序一致**：字符串比较从 locale 敏感的 `localeCompare` 改为确定性的 Unicode 码点序，与 SQLite `BINARY` 排序规则（UTF-8 字节序 ≡ 码点序）对齐——大小写混排、中文/全角、私用区与星平面字符（如 `😀` U+1F600 与 U+E000）在两个引擎、全部五种 `sortAlgorithm` 下返回完全相同的顺序，且不随 locale 或运行环境变化；`QueryEngine.max`/`min` 的字符串比较同步对齐。`sortingTools` 的五个排序实现与 `QueryEngine` 各自持有模块内私有的码点序比较函数，未扩大公共导出面。
+- **`timeout` 配置接通 file-system 引擎 I/O 路径**：单文件/分片 I/O 与 `DataWriter.deleteTableArtifact`（表制品删除）等操作现在在每次调用时读取 `timeout` 配置（此前这些路径硬编码为 10000ms，`setConfig({ timeout })` 对其无效）；30 秒读守卫与文件锁等待按设计保持固定，不随该配置变化。
+- **按表写入串行化（file-system 引擎）**：所有物理写入路径（`write`、`overwrite`、`delete`、`bulkWrite`、`update` 以及事务 commit/rollback 写入）现在都在按表 FIFO write lock 下执行。并发的读-改-写操作会排队而不是交错执行，update 进行中到达的插入或删除不会再被其替换步骤静默抹掉。持有锁的内部调用方携带模块私有标记，避免自我死锁。
+- **SQLite 写入不再与活动事务交错**：SQL 事务打开期间到达的外部写入与 DDL 会排到该事务之后，而不是插入其语句之间执行。此前并发插入可能在事务中途执行并被事务的替换覆盖，或报错 "cannot start a transaction within a transaction"。commit/rollback 的重放嵌套操作仍通过不可伪造的内部标记内联执行。
+- **SQLite 读-改-写一致性**：`update`、`delete` 与混合 `bulkWrite` 的回退路径现在在与写入相同的 SQL 事务内读取，读取快照与替换对其他排队操作原子可见。
+- **保留的加密信封字段名**：携带 `__enc` 或 `__enc_bulk` 的记录会在每个公开写入入口（`insert`、`overwrite`、`update`、`bulkWrite` 与 `createTable` 的 `initialData`）被以 `FILE_CONTENT_INVALID` 拒绝、先于任何存储触达；此前这类记录会被误判为整表信封并永久破坏该表的读取。
+- **引擎迁移目标保护**：`migrateEngine` 遇到目标表已有数据时，会以新的 `MIGRATION_DEST_NOT_EMPTY` 错误码失败而不是静默覆盖；传入 `overwriteExisting: true` 可有意替换目标数据。目标占用量通过新增的可选 `getPhysicalRecordCount()` 适配器方法按物理行数衡量，因为共享元数据会让 `hasTable` 在跨引擎场景下不可靠。
+- **持久化引擎偏好**：引擎迁移成功后，所选引擎会跨应用启动持久化；`init()` 或 `configManager` 中显式传入的 `engine` 仍会覆盖持久化标记。
+- **跨适配器实例的事务门面保护**：SQLite 引擎会创建相互独立的明文/加密适配器实例，各自持有独立的事务服务。`beginTransaction()` 现在在门面层强制单事务语义，事务安全状态也会对照真正开启事务的适配器（而非默认实例）清理。
+- **对齐 Mongo 的 `$pull` 语义**：只有同时匹配全部列出键值对的数组元素才会被移除，对象值按深度相等比较而非引用相等。
+- **查询的深度文档相等**：`$eq`、`$ne` 与普通对象值条件现在按深度相等比较。空对象条件只匹配空的存储对象（此前会匹配所有记录），数组比较也不再依赖键顺序。
+- **AutoSync 间隔默认值**：`AutoSyncService` 的回退间隔现在与文档化的 `30000` 毫秒默认值一致，不再回退到 `5000` 毫秒。
+- **历史载荷解密诊断**：解密未内嵌 PBKDF2 `iterations` 字段的历史载荷时，会一次性告警当前使用的是 `encryption.keyIterations` 配置，使配置漂移导致的解密失败可诊断（CTR 与 GCM、单条与批量路径）。没有持久化 `encryptedFields` 元数据的加密表在回退到全局配置时同样按表告警一次。
+- **SQLite `migrateToChunked` 事务守卫**：SQLite 引擎下 `migrateToChunked` 对存储布局是 no-op，但现在遵循公开 schema 变更契约——无事务时立即返回，活动事务期间会以 `TRANSACTION_OPERATION_NOT_SUPPORTED` 被拒绝，与 file-system 引擎一致。
+- **既有表的 `createTable({ indexes })` 安全性（file-system 引擎）**：索引声明现在仅在本次调用真正创建表时执行（与 SQLite 一致）。此前对已存在的表，失败或重复的声明会触发新建表回滚、删掉表中已有的数据行。
+- **索引声明持久化加固（file-system 引擎）**：`createIndex`/`dropIndex` 现在以 `saveImmediately` 立即刷写声明元数据，而不是留在 200 毫秒防抖窗口内——唯一约束不会因崩溃悄然丢失、已删除的索引也不会复活，与 SQLite 引擎一致。
+- **索引构建读取绕过读缓存**：启动重建与 `createIndex` 构建改用 `bypassCache` 读取磁盘快照，不再可能基于陈旧的缓存克隆构建，也不会在缓存中留下整表副本。
+- **启动索引重建告警不再泄露存储值**：告警只记录错误码与错误消息；`StorageError` 的 `details`（可能内嵌唯一索引的冲突值）不再透传到控制台。
+- **写入路径现在遵循 `encryptedFields`**：携带 `encryptedFields` 而未传 `encrypted: true` 的写入会选择加密表面，在隐式建表时持久化请求的字段列表，并在既有表策略不同时以 `MIGRATION_FAILED` 失败（不再静默落盘明文）。
+- **SQLite 引擎不再静默忽略横切配置**：在 `sqlite` 引擎下初始化时，若 `autoSync.enabled` 或 `monitoring.enablePerformanceTracking` 被开启，会输出一条带 `[SQLiteStorageAdapter]` 前缀的一次性告警，注明 `autoSync` 是 `file-system` 引擎专属能力、`monitoring.enablePerformanceTracking` 的存储侧样本也仅由 `file-system` 引擎记录（加密耗时样本两引擎均记录），建议改用 `file-system` 引擎或移除该配置。默认配置零告警；`cache.*` 与默认开启的 `monitoring.enableHealthChecks` 不告警，仅在文档中说明。
+- **同一查询在两个存储引擎下返回一致结果（`sqlite` 条件下推语义对齐 `QueryEngine`）**：数组字段的 `$in`/`$nin` 现在同时匹配数组元素与标量字段值（复合条件经 `json_each` 展开，参数绑定保持占位符数组风格）；`json_type` 用于区分字段缺失、JSON `null`、布尔与数字（`active: 1` 或 `$in: [1]` 不再误命中 `true`），`$ne` 对缺失字段命中、直接 `null` 相等不命中缺失字段，`$in`/`$nin` 中的 `null`/`undefined` 成员按基准语义对齐；`$nin`/`$in` 增加单条查询 500 绑定参数上限（超出自动回退内存过滤并输出告警，`$in` 与 `$nin` 各含一份数组分支与标量分支副本）；`$like` 因 SQLite 缺少 Unicode 大小写折叠不再下推、始终由与 `file-system` 引擎相同的内存过滤执行；`$exists`/`$regex`/`$elemMatch`/`$size`/`$notLike` 等非白名单操作符与无 SQL 等价形态的操作数（对象、BigInt）保持回退内存。新增 `engine-parity` 双引擎集成测试，用同一数据集在两个引擎上断言读、删、改结果集一致。
+- **`performanceMonitor` 运行时开关接通**：`configManager.set('monitoring.enablePerformanceTracking', ...)` 现在运行时立即生效——`ConfigManager` 在配置成功落地后通知订阅方，`performanceMonitor` 就地刷新 `enabled` 与 `metricsRetention`（此前该值仅在构造时读取一次，之后任何 `set` 都不生效）；通知回调只刷新配置派生字段且不覆盖任何显式设置：`configure()` / `setEnabled()` 的显式设置（含 `enabled` 与 `metricsRetention`）优先于配置变更，`sampleRate`、`maxRecords` 与阈值同样不被配置触及，`resetRuntimeOptions()` 清除显式覆盖、恢复配置权威。
+- **SQLite 引擎初始化失败后可正常重试**：打开数据库或建表 DDL（`PRAGMA` / `CREATE TABLE` / `CREATE INDEX`）任一步失败时，SQLite 引擎不再永久停留在半初始化状态——下一次调用会重新执行初始化并补建缺失的 `__elds_records` 表，随后的读写恢复正常（此前初始化一旦失败，所有后续操作都会报 "no such table"，横切配置告警也永不发出）；失败时被放弃的数据库句柄会被关闭，而不是每次重试泄漏一个。
+
+### 移除
+
+- 从 `CreateTableOptions` 中移除死选项 `intermediates`；它出现在文档中但从未被任何代码路径消费。
+- 从 `expo-lite-data-store/utils/crypto` 子路径移除 `precomputeCommonKeys()` 导出：它用随机盐派生密钥（没有任何复用效果），且无任何调用方。
+- 删除经复证零生产引用的死代码：内部死模块 `src/core/api/` 全簇（`ApiWrapper`、`RateLimiter`、`RateLimitWrapper`、`ValidationWrapper`、`ApiErrorHandler`、`ApiRouter`）、`src/types/apiResponse.ts`、`src/core/monitor/index.ts` barrel 与 `expo-lite-data-store/utils/configValidator` 子路径（`ConfigValidator`/`ConfigValidationResult`/`configValidationResult`/`fixedConfig`），连同它们各自的测试文件；并从仍然存活的模块中摘除零调用方的导出——`expo-lite-data-store/utils/crypto` 的 `hashPassword()`/`verifyPassword()`/`generateSalt()`（连同仅为它们服务的 `import bcrypt from 'bcryptjs'`）、`expo-lite-data-store/utils/specialOperators` 的 `isSpecialOperator()`、`expo-lite-data-store/utils/expoModuleLoader` 的 `getExpoPeerInstallHint()`，以及 `FILE_OPERATION.OPERATION_TIMEOUT` 常量键。历史 CHANGELOG/updatelog 中对这些符号的记载是发布记录，原样保留。
+
+### 文档
+
+- README/API/ARCHITECTURE（中英文）中的 AutoSync 描述诚实化：同步定时器只属于 `file-system` 引擎、只在应用运行期间触发，且不存在公开的"显式 sync" API；`$eq`/`$pull` 语义已精确说明。
+- 在常见错误码表中补充 `FILE_CONTENT_INVALID` 与 `MIGRATION_DEST_NOT_EMPTY`，说明 `migrateEngine` 的目标占用保护与引擎持久化行为，并在 README 中说明按表写入串行化保证。
+- 索引章节按实现后的生命周期重写：声明校验与回滚、基于现有数据的即时构建、启动时对持久化声明的重建（API/README/ARCHITECTURE，中英文）；`migrateToChunked` 补充 SQLite no-op 行为说明。
+- README 配置表新增 `engine`（`'file-system' | 'sqlite' | 'auto'`）行，错误码表补充 `TABLE_INDEX_*`，导出表补充 type-only `IStorageAdapter`/`IStorageEngine`；API 参考移除死选项 `intermediates`。
+- ARCHITECTURE（中英文）：移除不存在的 `ApiRouter`/`ApiWrapper` 组件与"API 路由"表述，弱化 SQLite 引擎夸大的"ACID transaction isolation"措辞，中文版补上缺失的 `requireAuthOnAccess` 隐式选择加密表面一句。
+- 中文 ARCHITECTURE 与英文版的 SQLite ACID 弱化措辞对齐；两文均更正语句串行化范围——FIFO 链按适配器实例而非进程级。
+- 移除中文 README 中"页面隐藏期间也不会执行同步"的说法——项目并无可见性监听器，仅保证进程挂起期间不同步，与英文 README 一致。
+- API 错误码表：将 `TABLE_INDEX_NOT_UNIQUE` 与 `TABLE_INDEX_ALREADY_EXISTS` 限定到文件系统引擎（SQLite 抛出数据库原生约束错误，且同字段表达式的重复声明是幂等 no-op）；文档说明 `createTable` 对已存在的表会忽略索引声明，并补充唯一约束不要声明在加密字段上的警示（每次加密产生不同密文）。
+
 ## [3.1.1] - 2026-09-19
 
 ### 新增

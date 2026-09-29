@@ -149,10 +149,14 @@ describe('QueryEngine sorting', () => {
     });
 
     it('sorts mixed data types consistently', () => {
-      const mixedData = [{ value: 'text' }, { value: 100 }, { value: null }, { value: 'abc' }];
+      const dateValue = new Date(2026, 8, 29, 10, 30, 0);
+      const mixedData = [{ value: 'text' }, { value: 100 }, { value: null }, { value: 'abc' }, { value: dateValue }];
 
       const result = QueryEngine.sort(mixedData, 'value', 'asc');
-      expect(result).toHaveLength(4);
+
+      expect(result).toHaveLength(5);
+      expect(result.slice(0, 4).map(row => String(row.value))).toEqual(['100', String(dateValue), 'abc', 'text']);
+      expect(result[4].value).toBeNull();
     });
   });
 

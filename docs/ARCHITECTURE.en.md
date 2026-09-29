@@ -4,22 +4,22 @@
 
 ## 1. System Overview
 
-Expo Lite Data Store is a lightweight local database solution based on Expo File System. It supports single-file and chunked storage modes, CRUD operations, in-process transaction coordination, caching, indexes, API routing, and data encryption.
+Expo Lite Data Store is a lightweight local database solution based on Expo File System. It supports single-file and chunked storage modes, CRUD operations, in-process transaction coordination, caching, indexes, and data encryption.
 
 ## 2. Layered Architecture
 
-| Layer             | Responsibility                                                     | Main Components                                                                                  |
-| ----------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| Interface Layer   | Provides unified API interface externally                          | FileSystemStorageAdapter, EncryptedStorageAdapter, SQLiteStorageAdapter, StorageAdapterFactory   |
-| Service Layer     | Coordinates transactions, engine migration, and background sync    | TransactionService, EngineMigrationService, AutoSyncService, CacheService, ApiRouter, ApiWrapper |
-| Data Access Layer | Handles data read/write operations and SQL pushdown translation    | DataReader, DataWriter, QueryEngine, SqlQueryBuilder                                             |
-| Cache Layer       | Provides caching mechanism to improve query performance            | CacheManager                                                                                     |
-| Index Layer       | Provides indexing functionality to accelerate data queries         | IndexManager (in-memory index for FileSystem), Native SQLite JSON Expression Indexes             |
-| Encryption Layer  | Provides data encryption, key management, and on-demand decryption | EncryptedStorageAdapter (with on-demand pagination decryption), crypto-gcm, cryptoProvider       |
-| Storage Layer     | Handles physical storage of data                                   | ChunkedFileHandler, SingleFileHandler, SQLiteStorageAdapter                                      |
-| Metadata Layer    | Manages database metadata                                          | MetadataManager                                                                                  |
-| Monitor Layer     | Monitors system performance and cache status                       | PerformanceMonitor, CacheMonitor                                                                 |
-| Utility Layer     | Provides common utility functions                                  | PathHelper, withTimeout, logger, expoModuleLoader                                                |
+| Layer             | Responsibility                                                            | Main Components                                                                                                            |
+| ----------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Interface Layer   | Provides unified API interface externally                                 | FileSystemStorageAdapter, EncryptedStorageAdapter, SQLiteStorageAdapter, StorageAdapterFactory                             |
+| Service Layer     | Coordinates transactions, engine migration, and periodic dirty-cache sync | TransactionService, EngineMigrationService, AutoSyncService, CacheService                                                  |
+| Data Access Layer | Handles data read/write operations and SQL pushdown translation           | DataReader, DataWriter, QueryEngine, SqlQueryBuilder                                                                       |
+| Cache Layer       | Provides caching mechanism to improve query performance                   | CacheManager                                                                                                               |
+| Index Layer       | Provides indexing functionality to accelerate data queries                | IndexManager (process-memory index data with persisted declarations for FileSystem), Native SQLite JSON Expression Indexes |
+| Encryption Layer  | Provides data encryption, key management, and on-demand decryption        | EncryptedStorageAdapter (with on-demand pagination decryption), crypto-gcm, cryptoProvider                                 |
+| Storage Layer     | Handles physical storage of data                                          | ChunkedFileHandler, SingleFileHandler, SQLiteStorageAdapter                                                                |
+| Metadata Layer    | Manages database metadata                                                 | MetadataManager                                                                                                            |
+| Monitor Layer     | Monitors system performance and cache status                              | PerformanceMonitor, CacheMonitor                                                                                           |
+| Utility Layer     | Provides common utility functions                                         | PathHelper, withTimeout, logger, expoModuleLoader                                                                          |
 
 ## 3. Core Module Design
 
@@ -43,7 +43,7 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 #### SQLiteStorageAdapter
 
 - Production-grade, high-performance SQLite engine built on the `IStorageEngine` contract. Logical tables share a single physical table `__elds_records` keyed by `(table_name, id)` as composite primary key (`WITHOUT ROWID`); record payloads are stored as JSON.
-- Uses WAL journal mode with statements serialized through a process-wide FIFO queue to preserve ACID transaction isolation and concurrency safety.
+- Uses WAL journal mode with statements serialized through a per-adapter-instance FIFO chain, keeping statement execution ordered within an instance; SQLite provides ACID guarantees per statement; library-level multi-statement transactions stage writes in memory and apply them inside one SQL transaction at commit instead of holding an open transaction for the whole session.
 - **SQL Query Pushdown**: Integrates `SqlQueryBuilder` to translate MongoDB/NoSQL-style conditions (`$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$like`, `$and`, `$or`) into SQLite JSON1 `json_extract(payload, '$.field')` expressions. Evaluates `ORDER BY ... NULLS LAST` and `LIMIT ? OFFSET ?` directly in native SQLite, returning and parsing only the matching page rows.
 - **Native Expression Indexes**: Supports declaring indexes during `createTable` or via `createIndex`. Automatically creates `CREATE [UNIQUE] INDEX IF NOT EXISTS idx_<clean_table>_<clean_field> ON __elds_records (table_name, json_extract(payload, '$.<field>'))`, enabling B-tree index acceleration on JSON properties and enforcing unique constraints at the database engine level.
 - **Pushdown Update and Delete**: `delete()` and `update()` execute pushdown SQL queries directly without full-table deserialization and rewrite cycles.
@@ -154,7 +154,7 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 #### IndexManager
 
 - Unique, non-unique, and composite field indexes
-- Indexes are process-memory accelerators only; a query uses a ready compatible index and otherwise falls back to a full scan
+- Index data lives in process memory, but index declarations persist in table metadata; the FileSystem adapter re-registers and rebuilds them during initialization, before any public API call. A query uses a ready compatible index and otherwise falls back to a full scan
 - Stable identifiers prefer `id` and fall back to `_id`; a row with neither disables acceleration for that index until coverage is complete
 - Incremental writes stage deltas only for touched buckets, while rebuilds stage a complete replacement map; both validate `UNIQUE` constraints before touching physical storage
 - Staged deltas or replacement maps are applied only after storage succeeds, so live queries never observe a partially updated index
@@ -206,7 +206,9 @@ Expo Lite Data Store is a lightweight local database solution based on Expo File
 - Periodic dirty data synchronization
 - Exponential backoff retry with jitter
 - Per-table dirty-cache entry batching without splitting a table overwrite
-- Active transactions defer AutoSync storage writes and retain dirty entries for a later scheduled or explicit sync
+- Started only by the `file-system` engine; the `sqlite` engine writes through immediately and never runs the sync timer
+- Driven by an in-process `setInterval` timer that fires only while the app is running, not as an OS-level background task
+- Active transactions defer AutoSync storage writes and retain dirty entries for a later scheduled sync
 - Graceful shutdown support
 
 #### CacheService
@@ -349,6 +351,6 @@ Key configuration options:
 - `encryption.keyIterations`: PBKDF2 iterations (default: 600,000)
 - `cache.maxSize`: Maximum cache entries
 - `performance.maxConcurrentOperations`: Max concurrent operations (default: 5)
-- `autoSync.enabled`: Background dirty-cache sync toggle (default: false)
+- `autoSync.enabled`: Periodic dirty-cache sync timer toggle for the `file-system` engine (default: false)
 
 Logger environment controls are independent of the configuration merge: `EXPO_LITE_DATA_STORE_LOG_LEVEL` selects `silent|error|warn|info|debug` (default `warn` outside tests), while tests default to silence unless `EXPO_LITE_DATA_STORE_TEST_LOGS=1` is set.

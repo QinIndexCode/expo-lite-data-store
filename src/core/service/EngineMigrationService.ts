@@ -2,6 +2,7 @@ import { meta, type TableSchema } from '../meta/MetadataManager';
 import storage, { FileSystemStorageAdapter } from '../adapter/FileSystemStorageAdapter';
 import { SQLiteStorageAdapter } from '../adapter/SQLiteStorageAdapter';
 import { configManager } from '../config/ConfigManager';
+import { writePersistedEnginePreference } from '../config/EnginePreference';
 import { dbManager } from '../db';
 import { StorageError } from '../../types/storageErrorInfc';
 import { withDynamicFieldEncryption } from './TransactionService';
@@ -13,6 +14,12 @@ export interface MigrateEngineOptions {
    * Defaults to false.
    */
   cleanSource?: boolean;
+  /**
+   * If true, replaces data in destination tables that already hold records.
+   * Defaults to false: a non-empty destination table fails the migration with
+   * MIGRATION_DEST_NOT_EMPTY instead of being silently overwritten.
+   */
+  overwriteExisting?: boolean;
   /**
    * Optional callback to track migration progress table by table.
    */
@@ -43,6 +50,10 @@ export class EngineMigrationService {
     }
 
     const startTime = Date.now();
+    // Hydrate the persisted engine marker first so this decision matches the
+    // engine a fresh launch would resolve (a previous migration may have
+    // persisted the marker but crashed before the in-memory switch).
+    await dbManager.loadPersistedEnginePreference();
     const fromEngine = dbManager.resolveActiveEngine();
 
     if (fromEngine === targetEngine) {
@@ -69,6 +80,34 @@ export class EngineMigrationService {
     const newlyCreatedTables: string[] = [];
     let totalRecords = 0;
 
+    // Shared metadata makes hasTable() true for every source table on the
+    // destination surface, so occupancy must be measured against the
+    // destination's physical rows, not metadata.
+    const destPhysicalCounts = new Map<string, number>();
+    for (const tableName of tableNames) {
+      destPhysicalCounts.set(tableName, await getDestPhysicalRecordCount(destEngine, tableName));
+    }
+
+    const occupiedTables = tableNames.filter(tableName => (destPhysicalCounts.get(tableName) ?? 0) > 0);
+    if (occupiedTables.length > 0 && options?.overwriteExisting !== true) {
+      throw new StorageError(
+        `Destination engine already holds data for ${occupiedTables.length} table(s): ${occupiedTables.join(', ')}`,
+        'MIGRATION_DEST_NOT_EMPTY',
+        {
+          details:
+            'Engine migration refuses to overwrite non-empty destination tables by default to protect both engines from accidental data loss.',
+          suggestion:
+            'Pass overwriteExisting: true to replace destination data, or clean the destination engine first.',
+        }
+      );
+    }
+
+    for (const tableName of tableNames) {
+      if ((destPhysicalCounts.get(tableName) ?? 0) === 0) {
+        newlyCreatedTables.push(tableName);
+      }
+    }
+
     try {
       for (const tableName of tableNames) {
         const metaInspector = sourceEngine as { getTableMeta?: (name: string) => TableSchema | undefined };
@@ -80,7 +119,6 @@ export class EngineMigrationService {
 
         const targetHasTable = await destEngine.hasTable(tableName);
         if (!targetHasTable) {
-          newlyCreatedTables.push(tableName);
           const isDynamicAllFields = tableMeta?.encryptAllFields === true;
           const createOptions = {
             mode: tableMeta?.mode,
@@ -139,18 +177,29 @@ export class EngineMigrationService {
       }
     } catch (migrationError) {
       logger.error(
-        '[EngineMigrationService] Migration failed. Rolling back created destination tables...',
+        '[EngineMigrationService] Migration failed. Clearing destination rows written during this attempt...',
         migrationError
       );
+      // Both engines share one metadata file, so deleteTable() would also
+      // destroy the source engine's view of the table. Clearing destination
+      // rows restores the pre-migration physical state while the untouched
+      // source data stays readable.
       for (const tableToClean of newlyCreatedTables) {
         try {
-          await destEngine.deleteTable(tableToClean);
+          await destEngine.clearTable(tableToClean);
         } catch (cleanupErr) {
           logger.warn(`[EngineMigrationService] Rollback cleanup failed for table '${tableToClean}'`, cleanupErr);
         }
       }
       throw migrationError;
     }
+
+    // Persist the engine choice BEFORE clearing the source. setConfig alone
+    // is memory-only; without the marker the next launch would silently fall
+    // back to the file-system engine — and with cleanSource that would
+    // present as total data loss.
+    await writePersistedEnginePreference(targetEngine);
+    dbManager.setPersistedEnginePreference(targetEngine);
 
     // If source cleanup was requested, clear data from source engine
     if (options?.cleanSource) {
@@ -181,5 +230,15 @@ export class EngineMigrationService {
     };
   }
 }
+
+const getDestPhysicalRecordCount = async (
+  destEngine: FileSystemStorageAdapter | SQLiteStorageAdapter,
+  tableName: string
+): Promise<number> => {
+  if (typeof destEngine.getPhysicalRecordCount === 'function') {
+    return destEngine.getPhysicalRecordCount(tableName);
+  }
+  return 0;
+};
 
 export const migrateEngine = EngineMigrationService.migrateEngine;

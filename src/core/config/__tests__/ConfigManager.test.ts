@@ -115,4 +115,63 @@ describe('ConfigManager', () => {
       expect(config.encryption.hmacAlgorithm).toBe(defaultConfig.encryption.hmacAlgorithm);
     });
   });
+
+  describe('change subscriptions', () => {
+    it('notifies subscribers when configuration lands via set() and setConfig()', () => {
+      const listener = jest.fn();
+      const unsubscribe = configManager.subscribe(listener);
+
+      configManager.set('chunkSize', 10 * 1024 * 1024);
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      configManager.setConfig({ chunkSize: 20 * 1024 * 1024 });
+      expect(listener).toHaveBeenCalledTimes(2);
+
+      unsubscribe();
+    });
+
+    it('stops notifying once unsubscribed', () => {
+      const listener = jest.fn();
+      const unsubscribe = configManager.subscribe(listener);
+      unsubscribe();
+      unsubscribe();
+
+      configManager.set('chunkSize', 10 * 1024 * 1024);
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('notifies subscribers on resetConfig()', () => {
+      const listener = jest.fn();
+      const unsubscribe = configManager.subscribe(listener);
+
+      configManager.resetConfig();
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      unsubscribe();
+    });
+
+    it('does not notify when the applied configuration is rejected', () => {
+      const listener = jest.fn();
+      const unsubscribe = configManager.subscribe(listener);
+
+      expect(() => configManager.set('storageFolder', 'nested/folder')).toThrow();
+
+      expect(listener).not.toHaveBeenCalled();
+      expect(configManager.get<string>('storageFolder')).toBe(defaultConfig.storageFolder);
+      unsubscribe();
+    });
+
+    it('keeps reaching live subscribers after resetInstance()', () => {
+      const listener = jest.fn();
+      const unsubscribe = configManager.subscribe(listener);
+
+      ConfigManager.resetInstance();
+      const freshManager = ConfigManager.getInstance();
+      freshManager.set('chunkSize', 7 * 1024 * 1024);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      unsubscribe();
+    });
+  });
 });

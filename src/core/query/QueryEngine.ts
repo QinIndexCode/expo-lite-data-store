@@ -14,7 +14,8 @@ import {
   sortByColumnMerge,
   sortByColumnSlow,
 } from '../../utils/sortingTools';
-import { processUpdateOperators } from '../../utils/specialOperators';
+import { isQueryOperator, processUpdateOperators } from '../../utils/specialOperators';
+import { deepEquals } from '../../utils/deepEquality';
 import { QUERY } from '../constants';
 import logger from '../../utils/logger';
 
@@ -41,13 +42,44 @@ const getRecordValue = (value: object, key: string): unknown => {
 const isFilterCondition = <T extends object>(value: unknown): value is FilterCondition<T> =>
   typeof value === 'function' || isStorageRecord(value);
 
+/**
+ * Compares two strings in Unicode code point order — the same total order as
+ * SQLite's BINARY collation over UTF-8, so `max`/`min` agree with the SQL
+ * pushdown `ORDER BY` and with the sorting tools in `utils/sortingTools`.
+ * Locale-sensitive string comparison varies with the host locale, and UTF-16
+ * code-unit order disagrees for astral-plane characters ('😀' U+1F600 vs
+ * U+E000–U+FFFF).
+ */
+const compareCodePointOrder = (left: string, right: string): number => {
+  if (left === right) return 0;
+
+  const leftLength = left.length;
+  const rightLength = right.length;
+  let leftIndex = 0;
+  let rightIndex = 0;
+
+  while (leftIndex < leftLength && rightIndex < rightLength) {
+    const leftCode = left.codePointAt(leftIndex)!;
+    const rightCode = right.codePointAt(rightIndex)!;
+    if (leftCode !== rightCode) return leftCode < rightCode ? -1 : 1;
+    // A matched code point occupies two UTF-16 units only when it is a
+    // surrogate pair, and then on both sides; otherwise one.
+    const step = leftCode > 0xffff ? 2 : 1;
+    leftIndex += step;
+    rightIndex += step;
+  }
+
+  if (leftIndex >= leftLength && rightIndex >= rightLength) return 0;
+  return leftIndex >= leftLength ? -1 : 1;
+};
+
 const compareValues = (left: unknown, right: unknown): number => {
   if (left === right) return 0;
   if (left === undefined || left === null) return -1;
   if (right === undefined || right === null) return 1;
   if (typeof left === 'number' && typeof right === 'number') return left < right ? -1 : 1;
   if (typeof left === 'bigint' && typeof right === 'bigint') return left < right ? -1 : 1;
-  return String(left).localeCompare(String(right));
+  return compareCodePointOrder(String(left), String(right));
 };
 
 const assertPaginationBoundary = (name: 'skip' | 'limit', value: number): void => {
@@ -127,23 +159,30 @@ export class QueryEngine {
           const itemValue = getRecordValue(item, key);
 
           if (isStorageRecord(value)) {
+            const valueKeys = Object.keys(value);
+            const isOperatorObject =
+              valueKeys.length > 0 && valueKeys.every(op => typeof op === 'string' && isQueryOperator(op));
+
+            if (!isOperatorObject) {
+              // Plain and empty object values match by deep document equality.
+              // Reference comparison can never hold for deserialized records,
+              // and an empty operator loop would otherwise match every record.
+              if (!deepEquals(itemValue, value)) {
+                matches = false;
+                break;
+              }
+              continue;
+            }
+
             for (const [op, opValue] of Object.entries(value)) {
               switch (op) {
                 case '$eq':
-                  if (itemValue === null || itemValue === undefined) {
-                    if (itemValue !== opValue) {
-                      matches = false;
-                    }
-                  } else if (itemValue !== opValue) {
+                  if (!deepEquals(itemValue, opValue)) {
                     matches = false;
                   }
                   break;
                 case '$ne':
-                  if (itemValue === null || itemValue === undefined) {
-                    if (itemValue === opValue) {
-                      matches = false;
-                    }
-                  } else if (itemValue === opValue) {
+                  if (deepEquals(itemValue, opValue)) {
                     matches = false;
                   }
                   break;
@@ -221,15 +260,7 @@ export class QueryEngine {
               if (!matches) break;
             }
           } else {
-            if (itemValue === null || itemValue === undefined) {
-              if (itemValue !== value) {
-                matches = false;
-              }
-            } else if (Array.isArray(itemValue) && Array.isArray(value)) {
-              if (JSON.stringify(itemValue) !== JSON.stringify(value)) {
-                matches = false;
-              }
-            } else if (itemValue !== value) {
+            if (!deepEquals(itemValue, value)) {
               matches = false;
             }
           }

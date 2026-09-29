@@ -1,4 +1,5 @@
 import tseslint from 'typescript-eslint';
+import importPlugin from 'eslint-plugin-import';
 
 const sharedTypeScriptRules = {
   'no-case-declarations': 'off',
@@ -48,14 +49,25 @@ export default tseslint.config(
     files: ['src/**/*.ts', 'src/**/*.tsx'],
     plugins: {
       '@typescript-eslint': tseslint.plugin,
+      import: importPlugin,
     },
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: { project: true, tsconfigRootDir: import.meta.dirname },
     },
+    settings: {
+      // `import/resolver` decides what resolves; `import/extensions` decides which
+      // resolved files import/no-cycle is allowed to walk into (defaults to .js/.mjs/.cjs).
+      'import/resolver': {
+        node: { extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'] },
+      },
+      'import/extensions': ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'],
+    },
     rules: {
       ...sharedTypeScriptRules,
       ...typeCheckedSafetyRules,
+      // Cycles are broken at type-only edges; value-import cycles fail the build here.
+      'import/no-cycle': 'error',
     },
   },
   {

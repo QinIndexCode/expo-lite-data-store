@@ -1474,4 +1474,62 @@ describe('EncryptedStorageAdapter', () => {
       });
     });
   });
+
+  describe('reserved envelope field names', () => {
+    it('rejects insert and write records that carry __enc or __enc_bulk', async () => {
+      await expect(adapter.insert(tableName, { id: 1, __enc: 'boom' })).rejects.toMatchObject({
+        code: 'FILE_CONTENT_INVALID',
+      });
+      await expect(adapter.write(tableName, [{ id: 2, __enc_bulk: 'boom' }], { mode: 'append' })).rejects.toMatchObject(
+        {
+          code: 'FILE_CONTENT_INVALID',
+        }
+      );
+
+      expect(await adapter.count(tableName)).toBe(0);
+    });
+
+    it('rejects update payloads that carry a reserved envelope field name', async () => {
+      await adapter.insert(tableName, { id: 1, name: 'alpha' });
+
+      await expect(adapter.update(tableName, { __enc: 'boom' }, { id: 1 })).rejects.toMatchObject({
+        code: 'FILE_CONTENT_INVALID',
+      });
+
+      await expect(adapter.read(tableName, { bypassCache: true })).resolves.toEqual([{ id: 1, name: 'alpha' }]);
+    });
+
+    it('rejects bulkWrite operations that carry reserved envelope field names', async () => {
+      await expect(
+        adapter.bulkWrite(tableName, [{ type: 'insert' as const, data: { id: 1, __enc: 'boom' } }])
+      ).rejects.toMatchObject({
+        code: 'FILE_CONTENT_INVALID',
+      });
+      await expect(
+        adapter.bulkWrite(tableName, [
+          { type: 'insert' as const, data: { id: 2 } },
+          { type: 'update' as const, data: { __enc_bulk: 'boom' }, where: { id: 2 } },
+        ])
+      ).rejects.toMatchObject({
+        code: 'FILE_CONTENT_INVALID',
+      });
+
+      expect(await adapter.count(tableName)).toBe(0);
+    });
+
+    it('rejects createTable initialData that carries a reserved envelope field name', async () => {
+      const reservedTable = 'test_reserved_initial_data';
+
+      try {
+        await expect(
+          adapter.createTable(reservedTable, { initialData: [{ id: 1, __enc: 'boom' }] })
+        ).rejects.toMatchObject({
+          code: 'FILE_CONTENT_INVALID',
+        });
+        expect(await adapter.hasTable(reservedTable)).toBe(false);
+      } finally {
+        await deleteTableIfPresent(reservedTable);
+      }
+    });
+  });
 });

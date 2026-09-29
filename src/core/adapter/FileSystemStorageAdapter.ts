@@ -1,4 +1,5 @@
 import { configManager } from '../config/ConfigManager';
+import logger from '../../utils/logger';
 import { StorageTaskProcessor } from '../../taskQueue/StorageTaskProcessor';
 import { taskQueue } from '../../taskQueue/taskQueue';
 import { IMetadataManager } from '../../types/metadataManagerInfc';
@@ -51,6 +52,36 @@ import { ensureStorageRootReady } from '../../utils/ROOTPath';
 import { pathHelper } from '../../utils/PathHelper';
 import { QueryEngine } from '../query/QueryEngine';
 import { assertValidTableName } from '../../utils/tableName';
+
+/**
+ * Marks a write that already runs under withTableWriteLock. update() and the
+ * commit update replay read-modify-write a table while holding the lock and
+ * finish with an overwrite through write(); without this marker those nested
+ * writes would queue on the lock they already hold and deadlock.
+ */
+const internalTableLockOption: unique symbol = Symbol('internalTableLock');
+
+type InternalTableLockOptions = {
+  readonly [internalTableLockOption]?: true;
+};
+
+const withInternalTableLock = <T extends object>(options: T): T & InternalTableLockOptions => ({
+  ...options,
+  [internalTableLockOption]: true,
+});
+
+const hasInternalTableLock = (options: unknown): boolean =>
+  typeof options === 'object' &&
+  options !== null &&
+  (options as InternalTableLockOptions)[internalTableLockOption] === true;
+
+/**
+ * StorageError `details` can embed stored values (e.g. the violating value of a
+ * unique index); RN logboxes render enumerable error props, so startup warnings
+ * must log only the code and message.
+ */
+const describeLogError = (error: unknown): unknown =>
+  error instanceof StorageError ? `${error.code}: ${error.message}` : error;
 
 export class FileSystemStorageAdapter implements IStorageAdapter {
   private metadataManager: IMetadataManager;
@@ -363,6 +394,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       await metadataManager.waitForLoad();
     }
 
+    // Restore index acceleration before any public API or sync writer can touch a table.
+    await this.rebuildPersistedIndexes();
+
     if (!this.taskQueueInitialized) {
       const storageTaskProcessor = new StorageTaskProcessor(this);
       taskQueue.addProcessor(storageTaskProcessor);
@@ -393,6 +427,61 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     }
 
     await this.initializationPromise;
+  }
+
+  /** Re-registers persisted index declarations and rebuilds their data so acceleration survives restarts. */
+  private async rebuildPersistedIndexes(): Promise<void> {
+    for (const tableName of this.metadataManager.allTables()) {
+      const declaredIndexes = this.metadataManager.get(tableName)?.indexes;
+      if (!declaredIndexes || Object.keys(declaredIndexes).length === 0) {
+        continue;
+      }
+
+      let restored = false;
+      for (const [indexName, type] of Object.entries(declaredIndexes)) {
+        const suffix = `_${type}`;
+        const field = indexName.endsWith(suffix) ? indexName.slice(0, -suffix.length) : '';
+        if (!field) {
+          logger.warn(`cannot restore index ${indexName} on table ${tableName}: unrecognized index name`);
+          continue;
+        }
+        if (this.indexManager.getTableIndexes(tableName).some(index => index.name === indexName)) {
+          continue;
+        }
+
+        try {
+          await this.indexManager.createIndex(
+            tableName,
+            field,
+            type === 'unique' ? IndexType.UNIQUE : IndexType.NORMAL,
+            {
+              persistMetadata: false,
+            }
+          );
+          restored = true;
+        } catch (error) {
+          logger.warn(`failed to restore index ${indexName} on table ${tableName}`, describeLogError(error));
+        }
+      }
+
+      if (!restored) {
+        continue;
+      }
+
+      try {
+        await this.withTableWriteLock(tableName, async () => {
+          // bypassCache: the rebuild needs the on-disk snapshot, not a cached
+          // clone, and must not leave a full-table copy behind in the cache.
+          const records = await this.dataReader.read(tableName, { bypassCache: true });
+          this.indexManager.rebuildIndexes(tableName, records);
+        });
+      } catch (error) {
+        logger.warn(
+          `failed to rebuild indexes on table ${tableName}; they stay inactive until a full-table overwrite rebuilds them`,
+          describeLogError(error)
+        );
+      }
+    }
   }
 
   async cleanup(): Promise<void> {
@@ -444,7 +533,50 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       initialData: options.initialData ? this.normalizeStorageInput(options.initialData) : undefined,
     };
 
-    return this.runPublicSchemaChange(options, () => this.dataWriter.createTable(tableName, normalizedOptions));
+    return this.runPublicSchemaChange(options, async () => {
+      const created = await this.dataWriter.createTable(tableName, normalizedOptions);
+      // Declarations only apply when this call created the table. An existing
+      // table must not run (or roll back) index declarations: a duplicate or
+      // failing declaration would otherwise delete the caller's stored rows,
+      // and the SQLite engine likewise ignores declarations on existing tables.
+      if (created) {
+        await this.createDeclaredIndexes(tableName, normalizedOptions.indexes);
+      }
+    });
+  }
+
+  /** Builds indexes declared through createTable({ indexes }); a failure rolls the new table back. */
+  private async createDeclaredIndexes(
+    tableName: string,
+    indexes: (string | { field: string; unique?: boolean })[] | undefined
+  ): Promise<void> {
+    if (!Array.isArray(indexes) || indexes.length === 0) {
+      return;
+    }
+
+    try {
+      for (const declaration of indexes) {
+        const field = typeof declaration === 'string' ? declaration : declaration?.field;
+        if (typeof field !== 'string' || !field.trim()) {
+          throw new StorageError('Index field name cannot be empty', 'TABLE_INDEX_INVALID', {
+            details:
+              'Every entry of the indexes option must be a field name or { field, unique } with a non-empty field',
+            suggestion: 'Provide valid field names via createTable({ indexes })',
+          });
+        }
+        const unique = typeof declaration === 'object' && declaration !== null && declaration.unique === true;
+        await this.createIndex(tableName, field, unique);
+      }
+    } catch (error) {
+      // Index declaration failures must not leave a half-created table behind.
+      try {
+        await this.dataWriter.deleteTable(tableName);
+      } catch (cleanupError) {
+        logger.error(`failed to roll back table ${tableName} after index creation failed`, cleanupError);
+      }
+      this.cacheService.clearTableCache(tableName);
+      throw error;
+    }
   }
 
   async deleteTable(tableName: string, _options?: TableOptions): Promise<void> {
@@ -509,7 +641,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
           };
         }
 
-        const result = await this.dataWriter.write(tableName, normalizedData, { ...options, mode: 'overwrite' });
+        const result = await this.withTableWriteLock(tableName, () =>
+          this.dataWriter.write(tableName, normalizedData, { ...options, mode: 'overwrite' })
+        );
         this.cacheService.clearTableCache(tableName);
         performanceMonitor.record({
           operation: 'overwrite',
@@ -566,11 +700,18 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
           };
         }
 
-        // Outside a transaction, or with an internal commit capability, DataWriter owns append merging
-        // so concurrent inserts stay behind the same per-table lock instead of racing on
-        // adapter-level stale snapshots.
+        // Outside a transaction, or with an internal commit capability, every
+        // physical write first serializes on the table write lock: a plain
+        // append or overwrite must not interleave between an in-flight
+        // update()'s read and its stale overwrite, which would silently erase
+        // the concurrent write (or resurrect one it deleted). Callers already
+        // holding the lock (update's own overwrite, commit update replay)
+        // pass the internal marker instead of re-acquiring it.
         const writtenCount = normalizedData.length;
-        const result = await this.dataWriter.write(tableName, normalizedData, options);
+        const performWrite = () => this.dataWriter.write(tableName, normalizedData, options);
+        const result = hasInternalTableLock(options)
+          ? await performWrite()
+          : await this.withTableWriteLock(tableName, performWrite);
 
         if (options?.mode === 'append') {
           result.written = writtenCount;
@@ -750,7 +891,10 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       );
       return deletedCount;
     }
-    const result = await this.dataWriter.delete(tableName, storageWhere);
+    // Serialize with in-flight update()/bulkWrite() read-modify-write cycles
+    // so a delete can neither be erased by a stale overwrite nor have its
+    // target row resurrected by one.
+    const result = await this.withTableWriteLock(tableName, () => this.dataWriter.delete(tableName, storageWhere));
     this.cacheService.clearTableCache(tableName);
 
     return result;
@@ -782,37 +926,23 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     const transactionOwner = this.assertTransactionAccess(options);
     this.validateTableName(tableName);
     const directWrite = hasInternalDirectWrite(options);
-    let allData;
-    if (this.transactionService.isInTransaction()) {
-      allData = await this.transactionService.getCurrentTransactionData(
+
+    if (this.transactionService.isInTransaction() && !directWrite) {
+      const allData = await this.transactionService.getCurrentTransactionData(
         tableName,
         (transactionTableName: string) => this.dataReader.read(transactionTableName),
         transactionOwner
       );
-    } else {
-      allData = await this.dataReader.read(tableName);
-    }
 
-    const storageWhere = this.toStorageFilter(where);
-    const storageData = this.normalizeStorageRecord(data);
-    const matchedItems = QueryEngine.filter(allData, storageWhere);
-    const updatedCount = matchedItems.length;
+      const storageWhere = this.toStorageFilter(where);
+      const storageData = this.normalizeStorageRecord(data);
+      const matchedItems = QueryEngine.filter(allData, storageWhere);
+      const updatedCount = matchedItems.length;
 
-    if (updatedCount === 0) {
-      return 0;
-    }
-
-    // Use object identity from QueryEngine.filter instead of id/_id so tables
-    // without an identifier field still update only the matched rows.
-    const matchedItemRefs = new Set(matchedItems);
-    const finalData = allData.map(item => {
-      if (matchedItemRefs.has(item)) {
-        return QueryEngine.update(item, storageData);
+      if (updatedCount === 0) {
+        return 0;
       }
-      return item;
-    });
 
-    if (this.transactionService.isInTransaction() && !directWrite) {
       const currentData = await this.dataReader.read(tableName, { bypassCache: true });
       this.saveTransactionSnapshot(tableName, currentData, transactionOwner);
 
@@ -830,13 +960,72 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       return updatedCount;
     }
 
-    if (updatedCount > 0) {
+    // Non-transaction updates read the full table, compute the new contents,
+    // and write it back with one overwrite. Without this per-table lock the
+    // read runs outside DataWriter's write lock and a concurrent append or
+    // second update can be silently erased by the stale overwrite.
+    return this.withTableWriteLock(tableName, async () => {
+      const storageWhere = this.toStorageFilter(where);
+      const storageData = this.normalizeStorageRecord(data);
+      const allData = await this.dataReader.read(tableName);
+      const matchedItems = QueryEngine.filter(allData, storageWhere);
+      const updatedCount = matchedItems.length;
+
+      if (updatedCount === 0) {
+        return 0;
+      }
+
+      // Use object identity from QueryEngine.filter instead of id/_id so tables
+      // without an identifier field still update only the matched rows.
+      const matchedItemRefs = new Set(matchedItems);
+      const finalData = allData.map(item => {
+        if (matchedItemRefs.has(item)) {
+          return QueryEngine.update(item, storageData);
+        }
+        return item;
+      });
+
       const writeOptions = { ...options, mode: 'overwrite' as const };
-      await this.write(tableName, finalData, directWrite ? withInternalDirectWrite(writeOptions) : writeOptions);
+      await this.write(
+        tableName,
+        finalData,
+        withInternalTableLock(directWrite ? withInternalDirectWrite(writeOptions) : writeOptions)
+      );
+
+      return updatedCount;
+    });
+  }
+
+  /**
+   * Serializes adapter-level read-modify-write cycles (update, mixed bulkWrite,
+   * commit update replay) per table. DataWriter's internal lock only covers the
+   * final write, so without this the read runs outside the lock and a concurrent
+   * write can be erased by a stale overwrite.
+   */
+  private async withTableWriteLock<T>(tableName: string, operation: () => Promise<T>): Promise<T> {
+    const previous = FileSystemStorageAdapter.tableWriteLocks.get(tableName);
+    let releaseCurrent: (() => void) | undefined;
+    const current = new Promise<void>(resolve => {
+      releaseCurrent = resolve;
+    });
+    const queued = previous ? previous.then(() => current) : current;
+    FileSystemStorageAdapter.tableWriteLocks.set(tableName, queued);
+
+    if (previous) {
+      await previous;
     }
 
-    return updatedCount;
+    try {
+      return await operation();
+    } finally {
+      releaseCurrent?.();
+      if (FileSystemStorageAdapter.tableWriteLocks.get(tableName) === queued) {
+        FileSystemStorageAdapter.tableWriteLocks.delete(tableName);
+      }
+    }
   }
+
+  private static readonly tableWriteLocks = new Map<string, Promise<unknown>>();
 
   async clearTable(tableName: string, options?: TableOptions): Promise<void> {
     await this.ensureInitialized();
@@ -844,6 +1033,23 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     this.validateTableName(tableName);
 
     await this.write(tableName, [], { ...options, mode: 'overwrite' });
+  }
+
+  /**
+   * Counts physical records without consulting metadata. EngineMigrationService
+   * uses this to detect real destination occupancy — shared metadata makes
+   * hasTable unreliable across engines. A physically missing or unreadable
+   * table counts as empty; the migration's own overwrite path self-heals it.
+   */
+  async getPhysicalRecordCount(tableName: string): Promise<number> {
+    await this.ensureInitialized();
+    this.validateTableName(tableName);
+    try {
+      const records = await this.dataReader.read(tableName, { bypassCache: true });
+      return records.length;
+    } catch {
+      return 0;
+    }
   }
 
   async bulkWrite<T extends object = StorageRecord>(
@@ -882,7 +1088,11 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     const normalizedOperations = this.normalizeBulkOperations(operations);
     const insertOnlyItems = this.flattenInsertOperations(normalizedOperations);
     if (insertOnlyItems) {
-      const result = await this.dataWriter.write(tableName, insertOnlyItems, { ...options, mode: 'append' });
+      // Same table lock as the mixed path below: a plain batch append must
+      // not interleave with an in-flight update() read-modify-write cycle.
+      const result = await this.withTableWriteLock(tableName, () =>
+        this.dataWriter.write(tableName, insertOnlyItems, { ...options, mode: 'append' })
+      );
 
       this.cacheService.clearTableCache(tableName);
       performanceMonitor.record({
@@ -902,35 +1112,41 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
     // Execute batch operations directly to avoid recursion.
     const BATCH_SIZE = 1000;
-    const currentData = await this.dataReader.read(tableName);
-    let finalData = [...currentData];
-    let writtenCount = 0;
+    // Same stale-overwrite window as update(): the read-modify-write cycle
+    // must be serialized per table against other bulk writes and appends.
+    const { result, writtenCount, finalDataSize } = await this.withTableWriteLock(tableName, async () => {
+      const currentData = await this.dataReader.read(tableName);
+      let finalData = [...currentData];
+      let writtenCount = 0;
 
-    for (let i = 0; i < normalizedOperations.length; i += BATCH_SIZE) {
-      const batchOperations = normalizedOperations.slice(i, i + BATCH_SIZE);
-      for (const op of batchOperations) {
-        switch (op.type) {
-          case 'insert':
-            const insertItems = Array.isArray(op.data) ? op.data : [op.data];
-            finalData = [...finalData, ...insertItems];
-            writtenCount += insertItems.length;
-            break;
-          case 'update':
-            const matchedItems = QueryEngine.filter(finalData, op.where);
-            const matchedItemRefs = new Set(matchedItems);
-            finalData = finalData.map(item => (matchedItemRefs.has(item) ? QueryEngine.update(item, op.data) : item));
-            writtenCount += matchedItems.length;
-            break;
-          case 'delete':
-            const deletedItems = QueryEngine.filter(finalData, op.where);
-            const deletedItemRefs = new Set(deletedItems);
-            finalData = finalData.filter(item => !deletedItemRefs.has(item));
-            writtenCount += deletedItems.length;
-            break;
+      for (let i = 0; i < normalizedOperations.length; i += BATCH_SIZE) {
+        const batchOperations = normalizedOperations.slice(i, i + BATCH_SIZE);
+        for (const op of batchOperations) {
+          switch (op.type) {
+            case 'insert':
+              const insertItems = Array.isArray(op.data) ? op.data : [op.data];
+              finalData = [...finalData, ...insertItems];
+              writtenCount += insertItems.length;
+              break;
+            case 'update':
+              const matchedItems = QueryEngine.filter(finalData, op.where);
+              const matchedItemRefs = new Set(matchedItems);
+              finalData = finalData.map(item => (matchedItemRefs.has(item) ? QueryEngine.update(item, op.data) : item));
+              writtenCount += matchedItems.length;
+              break;
+            case 'delete':
+              const deletedItems = QueryEngine.filter(finalData, op.where);
+              const deletedItemRefs = new Set(deletedItems);
+              finalData = finalData.filter(item => !deletedItemRefs.has(item));
+              writtenCount += deletedItems.length;
+              break;
+          }
         }
       }
-    }
-    const result = await this.dataWriter.write(tableName, finalData, { ...options, mode: 'overwrite' });
+
+      const result = await this.dataWriter.write(tableName, finalData, { ...options, mode: 'overwrite' });
+      return { result, writtenCount, finalDataSize: finalData.length };
+    });
 
     this.cacheService.clearTableCache(tableName);
     performanceMonitor.record({
@@ -938,7 +1154,7 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       duration: Date.now() - startTime,
       timestamp: Date.now(),
       success: true,
-      dataSize: finalData.length,
+      dataSize: finalDataSize,
     });
 
     return {
@@ -986,33 +1202,37 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
         where: FilterCondition<StorageRecord>,
         _updateOptions?: InternalWriteOptions
       ) => {
-        const allData = await this.dataReader.read(tableName);
-        const matchedItems = QueryEngine.filter(allData, where);
-        const updatedCount = matchedItems.length;
+        return this.withTableWriteLock(tableName, async () => {
+          const allData = await this.dataReader.read(tableName);
+          const matchedItems = QueryEngine.filter(allData, where);
+          const updatedCount = matchedItems.length;
 
-        if (updatedCount === 0) {
-          return 0;
-        }
-
-        const matchedItemRefs = new Set(matchedItems);
-        const finalData = allData.map(item => {
-          if (matchedItemRefs.has(item)) {
-            return QueryEngine.update(item, data);
+          if (updatedCount === 0) {
+            return 0;
           }
-          return item;
+
+          const matchedItemRefs = new Set(matchedItems);
+          const finalData = allData.map(item => {
+            if (matchedItemRefs.has(item)) {
+              return QueryEngine.update(item, data);
+            }
+            return item;
+          });
+
+          await this.write(
+            tableName,
+            finalData,
+            withInternalTableLock(
+              withInternalDirectWrite({
+                ...options,
+                ..._updateOptions,
+                mode: 'overwrite' as const,
+              })
+            )
+          );
+
+          return updatedCount;
         });
-
-        await this.write(
-          tableName,
-          finalData,
-          withInternalDirectWrite({
-            ...options,
-            ..._updateOptions,
-            mode: 'overwrite' as const,
-          })
-        );
-
-        return updatedCount;
       },
       (tableName: string) => this.deleteTable(tableName, withInternalDirectWrite({ ...options })),
       finalize,
@@ -1025,7 +1245,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
     const transactionOwner = this.assertTransactionAccess(_options);
     await this.transactionService.rollback(
       (tableName: string, data: StorageInput<StorageRecord>, options?: InternalWriteOptions) =>
-        this.dataWriter.write(tableName, data, withInternalDirectWrite({ ...options })),
+        this.withTableWriteLock(tableName, () =>
+          this.dataWriter.write(tableName, data, withInternalDirectWrite({ ...options }))
+        ),
       (tableName: string) => this.deleteTable(tableName, withInternalDirectWrite({ ..._options })),
       false,
       transactionOwner
@@ -1055,7 +1277,37 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
   async createIndex(tableName: string, field: string, unique = false): Promise<void> {
     await this.ensureInitialized();
     assertValidTableName(tableName);
-    await this.indexManager.createIndex(tableName, field, unique ? IndexType.UNIQUE : IndexType.NORMAL);
+    const indexType = unique ? IndexType.UNIQUE : IndexType.NORMAL;
+    await this.indexManager.createIndex(tableName, field, indexType);
+
+    try {
+      // Hold the table write lock across snapshot read and rebuild so no write can
+      // slip in between and leave the ready index missing entries.
+      await this.withTableWriteLock(tableName, async () => {
+        const records = await this.dataReader.read(tableName, { bypassCache: true });
+        this.indexManager.rebuildIndexes(tableName, records);
+      });
+    } catch (error) {
+      try {
+        await this.indexManager.dropIndex(tableName, field, indexType);
+      } catch {
+        // Keep the original build failure as the reported error.
+      }
+      // A crash between the debounced declaration write and its flush must not
+      // resurrect a dropped index, so persist the final state immediately. The
+      // debounced save still retries this, so a flush failure must never mask
+      // the original build failure.
+      try {
+        await this.metadataManager.saveImmediately?.();
+      } catch (flushError) {
+        logger.warn(`failed to flush index metadata for table ${tableName}`, describeLogError(flushError));
+      }
+      throw error;
+    }
+    // Persist the declaration right away (as the SQLite engine does): a unique
+    // constraint silently lost to a crash inside the debounce window would
+    // change write semantics on the next launch.
+    await this.metadataManager.saveImmediately?.();
   }
 
   async dropIndex(tableName: string, field: string): Promise<void> {
@@ -1065,6 +1317,13 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
       await this.indexManager.dropIndex(tableName, field, IndexType.NORMAL);
     } catch {
       await this.indexManager.dropIndex(tableName, field, IndexType.UNIQUE);
+    }
+    // The drop is already final in memory and in staged metadata; the debounced
+    // save retries a failed flush, so report success rather than a spurious error.
+    try {
+      await this.metadataManager.saveImmediately?.();
+    } catch (error) {
+      logger.warn(`failed to flush index metadata for table ${tableName}`, describeLogError(error));
     }
   }
 }

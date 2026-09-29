@@ -27,6 +27,60 @@ const compareNullishValues = (left: unknown, right: unknown): number | undefined
   return undefined;
 };
 
+/**
+ * Compares two strings in Unicode code point order — the same total order as
+ * SQLite's BINARY collation over UTF-8, so in-memory sorting matches the SQL
+ * pushdown `ORDER BY`. Neither alternative agrees with it: the engine's former
+ * locale-sensitive comparison reordered case, accents and CJK per locale, and
+ * plain UTF-16 code-unit comparison (`<`) puts astral-plane characters such as
+ * '😀' (U+1F600, lead surrogate 0xD83D) before U+E000–U+FFFF, while code
+ * point order puts them after.
+ */
+const compareCodePointOrder = (left: string, right: string): number => {
+  if (left === right) return 0;
+
+  const leftLength = left.length;
+  const rightLength = right.length;
+  const sharedLength = leftLength < rightLength ? leftLength : rightLength;
+
+  let leftIndex = 0;
+  let rightIndex = 0;
+
+  // ASCII fast path: an ASCII code unit is its own code point, so equal units
+  // stay equal and differing units compare identically in code point order.
+  // Anything at or above 0x80 falls through to code point resolution below.
+  while (leftIndex < sharedLength) {
+    const leftUnit = left.charCodeAt(leftIndex);
+    const rightUnit = right.charCodeAt(rightIndex);
+    if (leftUnit !== rightUnit) {
+      if (leftUnit < 0x80 && rightUnit < 0x80) return leftUnit < rightUnit ? -1 : 1;
+      break;
+    }
+    if (leftUnit > 0x7f) break;
+    leftIndex++;
+    rightIndex++;
+  }
+
+  if (leftIndex >= sharedLength) {
+    // The shared prefix is ASCII and identical: the shorter string sorts first.
+    return leftLength === rightLength ? 0 : leftLength < rightLength ? -1 : 1;
+  }
+
+  while (leftIndex < leftLength && rightIndex < rightLength) {
+    const leftCode = left.codePointAt(leftIndex)!;
+    const rightCode = right.codePointAt(rightIndex)!;
+    if (leftCode !== rightCode) return leftCode < rightCode ? -1 : 1;
+    // A matched code point occupies two UTF-16 units only when it is a
+    // surrogate pair, and then on both sides; otherwise one.
+    const step = leftCode > 0xffff ? 2 : 1;
+    leftIndex += step;
+    rightIndex += step;
+  }
+
+  if (leftIndex >= leftLength && rightIndex >= rightLength) return 0;
+  return leftIndex >= leftLength ? -1 : 1;
+};
+
 const compareSortValues = (left: unknown, right: unknown, order: 'asc' | 'desc' = 'asc'): number => {
   const nullishComparison = compareNullishValues(left, right);
   if (nullishComparison !== undefined) return nullishComparison;
@@ -44,9 +98,9 @@ const compareSortValues = (left: unknown, right: unknown, order: 'asc' | 'desc' 
   } else if (left instanceof Date && right instanceof Date) {
     comparison = compareSortValues(left.getTime(), right.getTime());
   } else if (typeof left === 'string' && typeof right === 'string') {
-    comparison = left.localeCompare(right);
+    comparison = compareCodePointOrder(left, right);
   } else {
-    comparison = String(left).localeCompare(String(right));
+    comparison = compareCodePointOrder(String(left), String(right));
   }
 
   return order === 'desc' ? -comparison : comparison;
@@ -73,7 +127,9 @@ export function sortByColumn<T extends object>(data: T[], column: string, order:
  * String-comparison sort for clean, homogeneous data.
  * Non-string pairs (numbers, bigints, dates) delegate to the shared
  * value-aware comparator so numeric columns sort by magnitude, not by
- * code-unit order; string pairs keep the branch-free `<` fast path.
+ * code-unit order; string pairs go through the shared code point comparator
+ * (SQLite BINARY order), which stays ASCII-fast without becoming locale
+ * sensitive.
  * @example
  * // Fast sort clean array by name
  * const sortedItems = sortByColumnFast(items, 'name', 'desc');
@@ -94,7 +150,7 @@ export function sortByColumnFast<T extends object>(data: T[], column: string, or
       return compareSortValues(va, vb, order);
     }
 
-    return va === vb ? 0 : va < vb ? -asc : asc;
+    return compareCodePointOrder(va, vb) * asc;
   });
 }
 
@@ -173,9 +229,11 @@ export function sortByColumnMerge<T extends object>(data: T[], column: string, o
 }
 
 /**
- * Locale-aware fallback sort for user-facing text.
+ * String-focused fallback sort for user-facing text.
  * Non-string pairs delegate to the shared value-aware comparator so numeric
- * columns sort by magnitude; string pairs keep locale-aware ordering.
+ * columns sort by magnitude; string pairs compare in deterministic Unicode
+ * code point order (the SQLite BINARY collation), so the result never varies
+ * with the host locale.
  * @example
  * // Sort array with Chinese names
  * const sortedProducts = sortByColumnSlow(products, 'name', 'asc');
@@ -196,6 +254,6 @@ export function sortByColumnSlow<T extends object>(data: T[], column: string, or
       return compareSortValues(va, vb, order);
     }
 
-    return va.localeCompare(vb) * asc;
+    return compareCodePointOrder(va, vb) * asc;
   });
 }

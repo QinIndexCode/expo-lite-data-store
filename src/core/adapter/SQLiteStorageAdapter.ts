@@ -92,11 +92,15 @@ export class SQLiteStorageAdapter implements IStorageEngine {
     return this.db;
   }
 
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+  private enqueue<T>(operation: () => Promise<T>, forceChain = false): Promise<T> {
     // Inside an open SQL transaction every statement already runs under the
     // single enqueued task that opened it, so queuing again would chain
-    // behind that task and deadlock the statement chain.
-    if (this.sqlTxDepth > 0) {
+    // behind that task and deadlock the statement chain. Callers that do NOT
+    // belong to the open transaction pass forceChain to queue behind it
+    // instead of interleaving with its statements — otherwise a concurrent
+    // insert arriving during an update's read-modify-replace would run in
+    // the middle of that transaction and be silently erased by the replace.
+    if (this.sqlTxDepth > 0 && !forceChain) {
       return Promise.resolve().then(operation);
     }
     const next = this.sqlChain.then(operation, operation);
@@ -179,12 +183,17 @@ export class SQLiteStorageAdapter implements IStorageEngine {
    * the SQL transaction is already open — the inner invocation executes the
    * task inside the existing transaction instead of issuing a nested BEGIN.
    *
-   * The depth check happens before {@link enqueue} because the commit replay
-   * runs inside an enqueued task: an inner enqueue would chain behind the
-   * task that is awaiting it and deadlock the statement chain.
+   * `nested` must be passed only by calls that genuinely run inside an
+   * already-open transaction (the replay carries `withInternalDirectWrite`,
+   * which no public entry point can forge): those inline their task or they
+   * would chain behind the task awaiting them and deadlock the statement
+   * chain. A concurrent call that merely arrives while some other operation's
+   * transaction is open passes the default (`nested = false`) and chains
+   * behind that transaction, so its statements cannot interleave with the
+   * open transaction's read-modify-replace.
    */
-  private async withSqlTransaction(task: () => Promise<void>): Promise<void> {
-    if (this.sqlTxDepth > 0) {
+  private async withSqlTransaction(task: () => Promise<void>, nested = false): Promise<void> {
+    if (nested && this.sqlTxDepth > 0) {
       await task();
       return;
     }
@@ -207,7 +216,44 @@ export class SQLiteStorageAdapter implements IStorageEngine {
       } finally {
         this.sqlTxDepth = 0;
       }
-    });
+    }, true);
+  }
+
+  /**
+   * Guards expression-index creation against identifier-normalization
+   * collisions. `cleanIdentifier` maps both `user.name` and `user_name` to the
+   * same index name, so a second CREATE ... IF NOT EXISTS would silently skip
+   * (leaving a UNIQUE constraint physically absent while metadata claims it
+   * exists) and a later dropIndex would drop the shared index. Fail closed
+   * whenever the name is taken by a different field expression.
+   */
+  private async assertIndexNameAvailable(
+    db: SQLiteDatabase,
+    tableName: string,
+    field: string,
+    indexName: string
+  ): Promise<void> {
+    const row = await db.getFirstAsync<{ sql: string | null }>(
+      "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+      [indexName]
+    );
+    if (!row) {
+      return;
+    }
+    const expectedPath = SqlQueryBuilder.getJsonPath(field);
+    if (expectedPath && row.sql && row.sql.includes(`'${expectedPath}'`)) {
+      // Same table/field expression: recreate is idempotent.
+      return;
+    }
+    throw new StorageError(
+      `Index name '${indexName}' is already used by a different field expression`,
+      'TABLE_INDEX_ALREADY_EXISTS',
+      {
+        details: `Field '${field}' normalizes to an index name that already exists on this database with a different JSON path.`,
+        suggestion: 'Rename one of the conflicting fields or drop the existing index before creating this one.',
+        tableName,
+      }
+    );
   }
 
   private async sqlWrite(tableName: string, items: StorageRecord[], overwrite: boolean): Promise<void> {
@@ -373,6 +419,19 @@ export class SQLiteStorageAdapter implements IStorageEngine {
 
   private async initialize(): Promise<void> {
     await ensureStorageRootReady();
+    // Cold start must hydrate the persisted metadata snapshot before any
+    // public API touches `metadataManager.get()`. Without this, every table
+    // reports as missing after a restart and the first implicit createTable
+    // overwrites surviving rows with empty seed data.
+    const metadataLoader = this.metadataManager as IMetadataManager & {
+      reload?: () => Promise<void>;
+      waitForLoad?: () => Promise<void>;
+    };
+    if (typeof metadataLoader.reload === 'function') {
+      await metadataLoader.reload();
+    } else if (typeof metadataLoader.waitForLoad === 'function') {
+      await metadataLoader.waitForLoad();
+    }
     const directory = pathHelper.getStorageFolder();
     const options = { enableChangeListener: false } as const;
     const sqliteModule = loadRequiredExpoModule<{
@@ -382,21 +441,75 @@ export class SQLiteStorageAdapter implements IStorageEngine {
         directory?: string
       ) => Promise<SQLiteDatabase>;
     }>('expo-sqlite', 'To use the SQLite engine, please install expo-sqlite: `npx expo install expo-sqlite`');
-    this.db = await sqliteModule.openDatabaseAsync(this.databaseName, options, directory);
-    await this.enqueue(async () => {
-      const db = this.assertDatabase();
-      await db.execAsync('PRAGMA journal_mode = WAL');
-      await db.execAsync('PRAGMA busy_timeout = 5000');
-      await db.execAsync(
-        'CREATE TABLE IF NOT EXISTS __elds_records (' +
-          'table_name TEXT NOT NULL, ' +
-          'id INTEGER NOT NULL, ' +
-          'payload TEXT NOT NULL, ' +
-          'PRIMARY KEY (table_name, id)' +
-          ') WITHOUT ROWID'
+    const db = await sqliteModule.openDatabaseAsync(this.databaseName, options, directory);
+    try {
+      // The DDL below reads the handle through `assertDatabase()`, so the
+      // assignment has to land before the enqueued task runs. It is only kept
+      // when every step succeeds; a failure rolls it back so the next
+      // `ensureInitialized()` call retries instead of returning early against
+      // a handle whose schema was never created.
+      this.db = db;
+      await this.enqueue(async () => {
+        const db = this.assertDatabase();
+        await db.execAsync('PRAGMA journal_mode = WAL');
+        await db.execAsync('PRAGMA busy_timeout = 5000');
+        await db.execAsync(
+          'CREATE TABLE IF NOT EXISTS __elds_records (' +
+            'table_name TEXT NOT NULL, ' +
+            'id INTEGER NOT NULL, ' +
+            'payload TEXT NOT NULL, ' +
+            'PRIMARY KEY (table_name, id)' +
+            ') WITHOUT ROWID'
+        );
+        await db.execAsync('CREATE INDEX IF NOT EXISTS idx_elds_records_table ON __elds_records (table_name, id)');
+      });
+    } catch (error) {
+      this.db = null;
+      try {
+        await (db as { closeAsync?: () => Promise<void> }).closeAsync?.();
+      } catch {
+        // Best effort: failing to close the abandoned handle must never mask
+        // the original initialization error.
+      }
+      throw error;
+    }
+    this.warnAboutIgnoredCrossCuttingConfig();
+  }
+
+  /**
+   * One-time notice for cross-cutting config the SQLite engine does not
+   * implement: `autoSync` and the storage-side sampling of
+   * `monitoring.enablePerformanceTracking` only take effect on the
+   * file-system engine, so leaving them on under `sqlite` would silently do
+   * nothing storage-side (encrypt/decrypt timing samples still record on both
+   * engines). `ensureInitialized()` runs `initialize()` at most once per
+   * adapter (guarded by `this.db`, which is only kept after a successful
+   * initialization while a failed attempt resets it to `null` so the next call
+   * retries, plus the memoized `initializationPromise`), which keeps this
+   * warning from repeating for the same adapter instance.
+   */
+  private warnAboutIgnoredCrossCuttingConfig(): void {
+    const config = configManager.getConfig();
+    const ignoredKeys: string[] = [];
+    const reasons: string[] = [];
+    if (config.autoSync?.enabled === true) {
+      ignoredKeys.push('autoSync');
+      reasons.push('autoSync is only implemented by the file-system engine');
+    }
+    if (config.monitoring?.enablePerformanceTracking === true) {
+      ignoredKeys.push('monitoring.enablePerformanceTracking');
+      reasons.push(
+        'monitoring.enablePerformanceTracking only records storage-side operations on the file-system engine ' +
+          '(encrypt/decrypt timing samples still record on both engines)'
       );
-      await db.execAsync('CREATE INDEX IF NOT EXISTS idx_elds_records_table ON __elds_records (table_name, id)');
-    });
+    }
+    if (ignoredKeys.length === 0) {
+      return;
+    }
+    const message =
+      `[SQLiteStorageAdapter] Configuration has no storage-side effect on the sqlite engine: ${ignoredKeys.join(', ')}. ` +
+      `${reasons.join('; ')}. Use engine: 'file-system' or remove them from the config.`;
+    logger.warn(message);
   }
 
   // ------------------------------------------------------------------
@@ -428,14 +541,23 @@ export class SQLiteStorageAdapter implements IStorageEngine {
           for (const idx of options.indexes) {
             const isUnique = typeof idx === 'object' && idx?.unique === true;
             const fieldName = typeof idx === 'string' ? idx : idx.field;
+            if (typeof fieldName !== 'string' || !fieldName.trim()) {
+              throw new StorageError('Index field name cannot be empty', 'TABLE_INDEX_INVALID', {
+                details:
+                  'Every entry of the indexes option must be a field name or { field, unique } with a non-empty field',
+                suggestion: 'Provide valid field names via createTable({ indexes })',
+              });
+            }
             const stmt = SqlQueryBuilder.buildIndexStatement(tableName, fieldName, isUnique);
             if (stmt) {
+              const indexName = `idx_${SqlQueryBuilder.cleanIdentifier(tableName)}__${SqlQueryBuilder.cleanIdentifier(fieldName)}`;
+              await this.assertIndexNameAvailable(db, tableName, fieldName, indexName);
               await db.execAsync(stmt);
               indexesRecord[`${fieldName}_${isUnique ? 'unique' : 'normal'}`] = isUnique ? 'unique' : 'normal';
             }
           }
         }
-      });
+      }, hasInternalDirectWrite(options));
 
       try {
         this.metadataManager.update(tableName, {
@@ -489,14 +611,16 @@ export class SQLiteStorageAdapter implements IStorageEngine {
         await this.enqueue(async () => {
           const db = this.assertDatabase();
           await db.execAsync(dropStmt);
-        });
+        }, true);
       }
     }
 
     await this.enqueue(async () => {
       const db = this.assertDatabase();
+      const indexName = `idx_${SqlQueryBuilder.cleanIdentifier(tableName)}__${SqlQueryBuilder.cleanIdentifier(field)}`;
+      await this.assertIndexNameAvailable(db, tableName, field, indexName);
       await db.execAsync(stmt);
-    });
+    }, true);
 
     const indexName = `${field}_${unique ? 'unique' : 'normal'}`;
     newIndexes[indexName] = unique ? 'unique' : 'normal';
@@ -524,8 +648,22 @@ export class SQLiteStorageAdapter implements IStorageEngine {
     }
     await this.enqueue(async () => {
       const db = this.assertDatabase();
+      const indexName = `idx_${SqlQueryBuilder.cleanIdentifier(tableName)}__${SqlQueryBuilder.cleanIdentifier(field)}`;
+      const row = await db.getFirstAsync<{ sql: string | null }>(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+        [indexName]
+      );
+      const expectedPath = SqlQueryBuilder.getJsonPath(field);
+      if (row && expectedPath && row.sql && !row.sql.includes(`'${expectedPath}'`)) {
+        // Legacy databases can hold a shared index name created before
+        // collision detection existed. Dropping it also removes the other
+        // field's index, so surface that before it happens.
+        logger.warn(
+          `[SQLiteStorageAdapter] Dropping index '${indexName}' which was created for a different field expression than '${field}'. Metadata for the other affected field should be re-created explicitly.`
+        );
+      }
       await db.execAsync(stmt);
-    });
+    }, true);
     if (tableMeta.indexes) {
       const newIndexes = { ...tableMeta.indexes };
       delete newIndexes[`${field}_normal`];
@@ -584,7 +722,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
         } catch (error) {
           return error;
         }
-      });
+      }, !hasInternalDirectWrite(options));
 
       if (cleanupError) {
         throw new StorageError(
@@ -667,7 +805,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
         await this.createTableIfMissing(tableName, options);
         await this.withSqlTransaction(async () => {
           await this.sqlWrite(tableName, normalizedData, options?.mode === 'overwrite');
-        });
+        }, directWrite);
         const finalCount = logicalCount ?? (await this.enqueue(async () => this.sqlCount(tableName)));
         this.metadataManager.update(tableName, { count: finalCount, updatedAt: Date.now() });
         await this.metadataManager.saveImmediately?.();
@@ -732,6 +870,12 @@ export class SQLiteStorageAdapter implements IStorageEngine {
     if (!tableMeta) {
       return 0;
     }
+    // A full-table encrypted table physically stores a single envelope row.
+    // The logical count lives in metadata and must not be reconciled against
+    // the physical row count (mirrors DataWriter.validateCountAsync).
+    if (tableMeta.encryptFullTable === true) {
+      return tableMeta.count ?? 0;
+    }
     const actual = await this.enqueue(async () => this.sqlCount(tableName));
     if (actual !== tableMeta.count) {
       this.metadataManager.update(tableName, { count: actual, updatedAt: Date.now() });
@@ -748,7 +892,19 @@ export class SQLiteStorageAdapter implements IStorageEngine {
     this.validateTableName(tableName);
 
     const metadataCount = this.metadataManager.count(tableName);
+    const tableMeta = this.metadataManager.get(tableName);
     const actualCount = await this.enqueue(async () => this.sqlCount(tableName));
+
+    // Only the encrypted decorator can verify a full-table encrypted table's
+    // logical count; report the envelope mismatch without "correcting" the
+    // logical count down to 1 (mirrors DataWriter.verifyCount).
+    if (tableMeta?.encryptFullTable === true) {
+      logger.warn(
+        `[SQLiteStorageAdapter] verifyCount skipped for full-table encrypted table '${tableName}': the physical row count (${actualCount}) reflects the encrypted envelope, not the logical record count.`
+      );
+      return { metadata: metadataCount, actual: actualCount, match: metadataCount === actualCount };
+    }
+
     const match = metadataCount === actualCount;
 
     if (!match) {
@@ -789,6 +945,17 @@ export class SQLiteStorageAdapter implements IStorageEngine {
     await this.write(tableName, [], { ...options, mode: 'overwrite' });
   }
 
+  /**
+   * Counts the physical rows backing a table without touching metadata.
+   * EngineMigrationService uses this to detect real destination occupancy —
+   * shared metadata makes `hasTable` unreliable across engines.
+   */
+  async getPhysicalRecordCount(tableName: string): Promise<number> {
+    await this.ensureInitialized();
+    this.validateTableName(tableName);
+    return this.enqueue(async () => this.sqlCount(tableName));
+  }
+
   async delete<T extends object = StorageRecord>(
     tableName: string,
     where: FilterCondition<T>,
@@ -825,7 +992,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
             const db = this.assertDatabase();
             const res = await db.runAsync(deleteQuery.sql, deleteQuery.params as SQLiteBindParams);
             changes = res.changes;
-          });
+          }, directWrite);
 
           if (changes > 0) {
             const finalCount = await this.enqueue(async () => this.sqlCount(tableName));
@@ -835,18 +1002,27 @@ export class SQLiteStorageAdapter implements IStorageEngine {
           return changes;
         }
 
-        const data = await this.readPersistedRecordsOrEmpty(tableName);
-        const filteredData = data.filter(item => QueryEngine.filter([item], storageWhere).length === 0);
-        const deletedCount = data.length - filteredData.length;
+        // Same read-inside-the-transaction rule as update(): the filtered
+        // full-table replace must be computed from a read that no concurrent
+        // write can slip in front of on the sqlChain.
+        let deletedCount = 0;
+        let remainingLength = 0;
+        await this.withSqlTransaction(async () => {
+          const data = await this.readPersistedRecordsOrEmpty(tableName);
+          const filteredData = data.filter(item => QueryEngine.filter([item], storageWhere).length === 0);
+          deletedCount = data.length - filteredData.length;
+          if (deletedCount === 0) {
+            return;
+          }
+          remainingLength = filteredData.length;
+          await this.sqlWrite(tableName, filteredData, true);
+        }, directWrite);
 
         if (deletedCount === 0) {
           return 0;
         }
 
-        await this.withSqlTransaction(async () => {
-          await this.sqlWrite(tableName, filteredData, true);
-        });
-        this.metadataManager.update(tableName, { count: filteredData.length, updatedAt: Date.now() });
+        this.metadataManager.update(tableName, { count: remainingLength, updatedAt: Date.now() });
         await this.metadataManager.saveImmediately?.();
 
         return deletedCount;
@@ -893,7 +1069,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
 
         await this.createTableIfMissing(tableName, options);
         const insertOnly = normalizedOperations.every(operation => operation.type === 'insert');
-        let finalCount: number;
+        let finalCount = 0;
 
         if (insertOnly) {
           const insertItems = normalizedOperations.flatMap(operation =>
@@ -901,41 +1077,43 @@ export class SQLiteStorageAdapter implements IStorageEngine {
           );
           await this.withSqlTransaction(async () => {
             await this.sqlWrite(tableName, insertItems, false);
-          });
+          }, directWrite);
           finalCount = await this.enqueue(async () => this.sqlCount(tableName));
           this.metadataManager.update(tableName, { count: finalCount, updatedAt: Date.now() });
           await this.metadataManager.saveImmediately?.();
           return { written: insertItems.length, totalAfterWrite: finalCount, chunked: false };
         }
 
-        const allData = await this.readPersistedRecords(tableName);
-        let finalData = [...allData];
+        // Read and full-table replace share one SQL transaction (see delete
+        // fallback) so interleaved writes cannot land between them.
         let writtenCount = 0;
-
-        for (const operation of normalizedOperations) {
-          if (operation.type === 'insert') {
-            const insertItems = Array.isArray(operation.data) ? operation.data : [operation.data];
-            finalData = [...finalData, ...insertItems];
-            writtenCount += insertItems.length;
-          } else if (operation.type === 'update') {
-            const matchedItems = QueryEngine.filter(finalData, operation.where);
-            const matchedItemRefs = new Set(matchedItems);
-            finalData = finalData.map(item =>
-              matchedItemRefs.has(item) ? QueryEngine.update(item, operation.data) : item
-            );
-            writtenCount += matchedItems.length;
-          } else {
-            const deletedItems = QueryEngine.filter(finalData, operation.where);
-            const deletedItemRefs = new Set(deletedItems);
-            finalData = finalData.filter(item => !deletedItemRefs.has(item));
-            writtenCount += deletedItems.length;
-          }
-        }
-
         await this.withSqlTransaction(async () => {
+          const allData = await this.readPersistedRecords(tableName);
+          let finalData = [...allData];
+
+          for (const operation of normalizedOperations) {
+            if (operation.type === 'insert') {
+              const insertItems = Array.isArray(operation.data) ? operation.data : [operation.data];
+              finalData = [...finalData, ...insertItems];
+              writtenCount += insertItems.length;
+            } else if (operation.type === 'update') {
+              const matchedItems = QueryEngine.filter(finalData, operation.where);
+              const matchedItemRefs = new Set(matchedItems);
+              finalData = finalData.map(item =>
+                matchedItemRefs.has(item) ? QueryEngine.update(item, operation.data) : item
+              );
+              writtenCount += matchedItems.length;
+            } else {
+              const deletedItems = QueryEngine.filter(finalData, operation.where);
+              const deletedItemRefs = new Set(deletedItems);
+              finalData = finalData.filter(item => !deletedItemRefs.has(item));
+              writtenCount += deletedItems.length;
+            }
+          }
+
           await this.sqlWrite(tableName, finalData, true);
-        });
-        finalCount = finalData.length;
+          finalCount = finalData.length;
+        }, directWrite);
         this.metadataManager.update(tableName, { count: finalCount, updatedAt: Date.now() });
         await this.metadataManager.saveImmediately?.();
 
@@ -1001,7 +1179,7 @@ export class SQLiteStorageAdapter implements IStorageEngine {
               ]);
             }
             updatedCount = matchedRows.length;
-          });
+          }, directWrite);
 
           if (updatedCount > 0) {
             this.metadataManager.update(tableName, { updatedAt: Date.now() });
@@ -1010,24 +1188,30 @@ export class SQLiteStorageAdapter implements IStorageEngine {
           return updatedCount;
         }
 
-        const allData = await this.readPersistedRecordsOrEmpty(tableName);
-        const matchedItems = QueryEngine.filter(allData, storageWhere);
-        const updatedCount = matchedItems.length;
-
-        if (updatedCount === 0) {
-          return 0;
-        }
-
-        const matchedItemRefs = new Set(matchedItems);
-        const finalData = allData.map(item =>
-          matchedItemRefs.has(item) ? QueryEngine.update(item, storageData) : item
-        );
-
+        // The read must share the write's SQL transaction: a read queued on
+        // sqlChain separately from the full-table replace lets a concurrent
+        // insert land between them and be silently erased by the replace.
+        let updatedCount = 0;
+        let finalLength = 0;
         await this.withSqlTransaction(async () => {
+          const allData = await this.readPersistedRecordsOrEmpty(tableName);
+          const matchedItems = QueryEngine.filter(allData, storageWhere);
+          updatedCount = matchedItems.length;
+          if (updatedCount === 0) {
+            return;
+          }
+          const matchedItemRefs = new Set(matchedItems);
+          const finalData = allData.map(item =>
+            matchedItemRefs.has(item) ? QueryEngine.update(item, storageData) : item
+          );
+          finalLength = finalData.length;
           await this.sqlWrite(tableName, finalData, true);
-        });
-        this.metadataManager.update(tableName, { count: finalData.length, updatedAt: Date.now() });
-        await this.metadataManager.saveImmediately?.();
+        }, directWrite);
+
+        if (updatedCount > 0) {
+          this.metadataManager.update(tableName, { count: finalLength, updatedAt: Date.now() });
+          await this.metadataManager.saveImmediately?.();
+        }
 
         return updatedCount;
       },
@@ -1039,10 +1223,13 @@ export class SQLiteStorageAdapter implements IStorageEngine {
   // IStorageEngine extensions
   // ------------------------------------------------------------------
 
-  async migrateToChunked(_tableName: string, _options?: TableOptions): Promise<void> {
-    // SQLite is already the optimal physical layout; chunked file mode is a
-    // file-system concept and requires no action here.
-    logger.info('[SQLiteStorageAdapter] migrateToChunked is a no-op for SQLite storage');
+  async migrateToChunked(tableName: string, options?: TableOptions): Promise<void> {
+    this.validateTableName(tableName);
+    // SQLite's layout needs no conversion, but the public schema-change contract
+    // must still reject the call while a transaction is active.
+    await this.runPublicSchemaChange(options, async () => {
+      logger.info('[SQLiteStorageAdapter] migrateToChunked is a no-op for SQLite storage');
+    });
   }
 
   getTableMeta(tableName: string): TableSchema | undefined {

@@ -1,4 +1,3 @@
-import bcrypt from 'bcryptjs';
 import logger from './logger';
 import { performanceMonitor } from '../core/monitor/PerformanceMonitor';
 import { configManager } from '../core/config/ConfigManager';
@@ -704,6 +703,24 @@ export const decrypt = async (encryptedBase64: string, masterKey: string): Promi
 };
 
 /**
+ * Warns once per process when a legacy payload without an embedded
+ * `iterations` field falls back to the current runtime configuration. If the
+ * configuration drifted since the payload was written, the derived key will
+ * not match and decryption fails; the warning makes that cause diagnosable.
+ * Never logs key material or payload values.
+ */
+let legacyIterationsFallbackWarned = false;
+const warnLegacyIterationsFallbackOnce = (): void => {
+  if (legacyIterationsFallbackWarned) {
+    return;
+  }
+  legacyIterationsFallbackWarned = true;
+  logger.warn(
+    '[crypto] Decrypting a legacy payload without an embedded iterations field; deriving the key from the current encryption.keyIterations config. If that config changed since the payload was written, decryption will fail until the original iteration count is restored.'
+  );
+};
+
+/**
  * Internal CTR+HMAC decryption (kept for backward compatibility)
  */
 const decryptCTR = async (encryptedBase64: string, masterKey: string): Promise<string> => {
@@ -719,6 +736,9 @@ const decryptCTR = async (encryptedBase64: string, masterKey: string): Promise<s
 
     const iterations =
       typeof payload.iterations === 'number' ? normalizePbkdf2Iterations(payload.iterations, 10000) : getIterations();
+    if (typeof payload.iterations !== 'number') {
+      warnLegacyIterationsFallbackOnce();
+    }
     const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array, iterations);
 
     const computedHmacBytes = computeHMAC(getCtrHmacInput(payload), hmacKey);
@@ -876,27 +896,6 @@ export const resetMasterKey = async (): Promise<void> => {
   }
 };
 
-/** Warms a small set of derived keys for the next encryption operations. */
-export const precomputeCommonKeys = async (): Promise<void> => {
-  try {
-    const masterKey = await getMasterKey();
-    if (!masterKey) {
-      logger.warn('Master key not available, skipping key precomputation');
-      return;
-    }
-
-    const commonSalts = [getSecureRandomBytes(16), getSecureRandomBytes(16), getSecureRandomBytes(16)];
-
-    logger.info(`Precomputing ${commonSalts.length} common keys for better performance`);
-
-    await Promise.all(commonSalts.map(salt => deriveKey(masterKey, salt)));
-
-    logger.info('Key precomputation completed');
-  } catch (error) {
-    logger.warn('Failed to precompute common keys:', error);
-  }
-};
-
 /** Generates a new 256-bit master key. */
 export const generateMasterKey = async (): Promise<string> => {
   try {
@@ -913,32 +912,6 @@ export const generateMasterKey = async (): Promise<string> => {
       bytes[i] = Math.floor(Math.random() * 256);
     }
     return bytesToBase64(bytes);
-  }
-};
-
-/** Hashes a password with bcrypt. */
-export const hashPassword = async (password: string, saltRounds: number = 12): Promise<string> => {
-  try {
-    return await bcrypt.hash(password, saltRounds);
-  } catch (error) {
-    throw new CryptoError('Password hashing failed', 'HASH_FAILED', error);
-  }
-};
-
-/** Verifies a password against a bcrypt hash. */
-export const verifyPassword = async (password: string, hash: string): Promise<boolean> => {
-  try {
-    return await bcrypt.compare(password, hash);
-  } catch (error) {
-    throw new CryptoError('Password verification failed', 'VERIFY_FAILED', error);
-  }
-};
-
-export const generateSalt = async (rounds: number = 12): Promise<string> => {
-  try {
-    return await bcrypt.genSalt(rounds);
-  } catch (error) {
-    throw new CryptoError('Salt generation failed', 'HASH_FAILED', error);
   }
 };
 
@@ -1078,6 +1051,9 @@ const decryptBulkCTR = async (encryptedTexts: string[], masterKey: string): Prom
 
       const iterations =
         typeof payload.iterations === 'number' ? normalizePbkdf2Iterations(payload.iterations, 10000) : getIterations();
+      if (typeof payload.iterations !== 'number') {
+        warnLegacyIterationsFallbackOnce();
+      }
       const { aesKey, hmacKey } = await deriveKey(masterKey, saltUint8Array, iterations);
 
       const computedHmacBytes = computeHMAC(getCtrHmacInput(payload), hmacKey);

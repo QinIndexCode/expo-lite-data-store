@@ -1,4 +1,4 @@
-import { configManager } from '../config/ConfigManager';
+import { ConfigManager } from '../config/ConfigManager';
 
 export interface PerformanceMetrics {
   operation: string;
@@ -133,6 +133,10 @@ export class PerformanceMonitor {
   private sampleRate: number;
   private thresholds: PerformanceThresholds;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private unsubscribeConfig: (() => void) | null = null;
+  // Explicit runtime overrides win over configuration changes until resetRuntimeOptions().
+  private explicitEnabled: boolean | null = null;
+  private explicitMetricsRetention: number | null = null;
 
   constructor() {
     this.enabled = PerformanceMonitor.isPerformanceTrackingEnabled();
@@ -140,10 +144,22 @@ export class PerformanceMonitor {
     this.metricsRetention = PerformanceMonitor.getMetricsRetention();
     this.sampleRate = DEFAULT_SAMPLE_RATE;
     this.thresholds = { ...DEFAULT_THRESHOLDS };
+
+    // Narrow refresh: only configuration-derived fields follow runtime config changes, and only
+    // while no explicit configure()/setEnabled() override is in effect for that field.
+    this.unsubscribeConfig = ConfigManager.getInstance().subscribe(() => {
+      if (this.explicitEnabled === null) {
+        this.enabled = PerformanceMonitor.isPerformanceTrackingEnabled();
+      }
+      if (this.explicitMetricsRetention === null) {
+        this.metricsRetention = PerformanceMonitor.getMetricsRetention();
+      }
+    });
   }
 
   configure(options: PerformanceMonitorOptions): void {
     if (typeof options.enabled === 'boolean') {
+      this.explicitEnabled = options.enabled;
       this.enabled = options.enabled;
     }
 
@@ -159,7 +175,9 @@ export class PerformanceMonitor {
     }
 
     if (typeof options.metricsRetention === 'number' && Number.isFinite(options.metricsRetention)) {
-      this.metricsRetention = Math.max(0, options.metricsRetention);
+      const metricsRetention = Math.max(0, options.metricsRetention);
+      this.explicitMetricsRetention = metricsRetention;
+      this.metricsRetention = metricsRetention;
     }
 
     if (options.thresholds) {
@@ -171,6 +189,9 @@ export class PerformanceMonitor {
   }
 
   resetRuntimeOptions(): void {
+    // Explicit overrides are dropped: configuration becomes authoritative again.
+    this.explicitEnabled = null;
+    this.explicitMetricsRetention = null;
     this.enabled = PerformanceMonitor.isPerformanceTrackingEnabled();
     this.maxRecords = DEFAULT_MAX_RECORDS;
     this.metricsRetention = PerformanceMonitor.getMetricsRetention();
@@ -273,6 +294,10 @@ export class PerformanceMonitor {
   }
 
   destroy(): void {
+    if (this.unsubscribeConfig) {
+      this.unsubscribeConfig();
+      this.unsubscribeConfig = null;
+    }
     this.stopMetricsCleanupTimer();
     this.clear();
     this.resetRuntimeOptions();
@@ -288,6 +313,7 @@ export class PerformanceMonitor {
   }
 
   setEnabled(enabled: boolean): void {
+    this.explicitEnabled = enabled;
     this.enabled = enabled;
   }
 
@@ -295,16 +321,18 @@ export class PerformanceMonitor {
     return this.enabled;
   }
 
+  // Configuration is read through the current singleton so a resetInstance() replacement is
+  // observed immediately instead of a stale module-level export.
   static isPerformanceTrackingEnabled(): boolean {
-    return configManager.getConfig().monitoring?.enablePerformanceTracking === true;
+    return ConfigManager.getInstance().getConfig().monitoring?.enablePerformanceTracking === true;
   }
 
   static isHealthChecksEnabled(): boolean {
-    return configManager.getConfig().monitoring?.enableHealthChecks !== false;
+    return ConfigManager.getInstance().getConfig().monitoring?.enableHealthChecks !== false;
   }
 
   static getMetricsRetention(): number {
-    return configManager.getConfig().monitoring?.metricsRetention || 86400000;
+    return ConfigManager.getInstance().getConfig().monitoring?.metricsRetention || 86400000;
   }
 
   performHealthCheck(): HealthCheckResult {

@@ -126,6 +126,8 @@ npx expo install expo-lite-data-store expo-file-system expo-constants expo-crypt
 }
 ```
 
+> `autoSync` applies to the default `file-system` engine only: it periodically flushes dirty cache entries through an in-process timer while your app is running. The `sqlite` engine writes through immediately and does not use this timer, and no sync runs while the process is suspended.
+
 ### 3. Create a table and store records
 
 ```ts
@@ -180,7 +182,7 @@ Chunked overwrites use a bounded v2 journal that records the previous count and 
 
 Single-file tables use recoverable publication. A v2 commit marker is bound to the table name and records both the previous and target storage commit tokens, SHA-256 hashes, and physical record counts. Recovery reads the durable metadata snapshot from disk instead of trusting an adapter's cached token. Canonical v1 markers remain readable for compatibility, but a temporary marker is accepted only when it is a v2 `committed` marker whose table name and target token match durable metadata and whose hash/count match the primary file; every mismatch fails closed and preserves the evidence. Outside a pending marker recovery, a missing or damaged primary can be restored only from a valid retained data backup.
 
-File handlers serialize operations for the same physical table path through an in-process FIFO queue shared across handler instances. Lock acquisition is bounded to 30 seconds. A recoverable mutation that crosses its deadline is observed until the underlying non-cancellable file operation settles, then rolled back before the path lock is released. This coordination does not provide cross-process locking.
+File handlers serialize operations for the same physical table path through an in-process FIFO queue shared across handler instances. Lock acquisition is bounded to 30 seconds. A recoverable mutation that crosses its deadline is observed until the underlying non-cancellable file operation settles, then rolled back before the path lock is released. This coordination does not provide cross-process locking. On top of that path queue, the adapter serializes each table's read-modify-write operations (`update`, `remove`, `bulkWrite`, and transaction commit/rollback writes) through a per-table write lock, so concurrent writers queue up instead of interleaving and losing updates.
 
 Metadata flushes use a separate process-wide FIFO keyed by the metadata file, also with a 30-second acquisition limit. Each flush rereads the latest disk snapshot; updates/deletes require the expected `createdAt` generation, while creation requires the name to remain absent. A stale mutation therefore cannot modify or replace a same-name new generation. A shared mutation epoch makes other adapters refresh metadata, storage representation, read-cache namespaces, and indexes; stable reads retry against the latest mode. A failed or timed-out mutation remains pending for an explicit retry. If the metadata primary is missing, initialization restores only a structurally valid backup; an existing but damaged primary never falls back to a potentially stale backup. Both publication and recovery are complete only after the stale backup is removed. This is still in-process coordination, not a cross-process metadata lock.
 
@@ -357,6 +359,8 @@ await db.createTable('products', {
 });
 ```
 
+Declarations are validated at creation — an empty field fails with `TABLE_INDEX_INVALID`, and a `unique` violation rolls the creation back instead of leaving a partial table. Under the `file-system` engine, index declarations persist in table metadata and are rebuilt automatically at startup, so unique constraints and query acceleration survive restarts; `createIndex` on a non-empty table builds the index over the existing rows immediately. Declarations apply only when `createTable` actually creates the table — calling it again on an existing table ignores them, so they can never roll back or delete rows the table already holds.
+
 #### Bidirectional Seamless Migration
 
 Migrate all tables, metadata, and expression indexes between `'file-system'` and `'sqlite'` with zero data loss:
@@ -409,7 +413,7 @@ Important transaction behavior:
 - on the active transaction owner's matching storage surface, public schema operations `createTable()`, `deleteTable()`, and `migrateToChunked()` are rejected with `TRANSACTION_OPERATION_NOT_SUPPORTED` because they persist metadata or files immediately; a different adapter or security surface is rejected by the existing transaction guard first;
 - an explicit rollback discards queued writes without rewriting table files; if a commit fails after partially applying changes, existing tables are restored and tables created by that transaction are removed;
 - commit execution and failed-commit snapshot restoration use a module-private symbol capability for direct writes; a public `directWrite` property cannot bypass transaction staging;
-- AutoSync leaves dirty cache entries queued while a transaction is active and writes them only on a later scheduled or explicit sync after the transaction settles;
+- AutoSync leaves dirty cache entries queued while a transaction is active and writes them only on a later scheduled sync after the transaction settles;
 - transactions are an in-process coordination feature, not a crash-durable or cross-process ACID implementation.
 
 ### Count vs verification
@@ -444,22 +448,27 @@ The runtime configuration layer is not a merge of every host source. In an Expo,
 
 ### Common runtime config keys
 
-| Key                                    | Default           | Purpose                                                                                     |
-| -------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------- |
-| `chunkSize`                            | `5242880`         | Target chunk size in bytes; initial-data auto-selection starts above half this value        |
-| `storageFolder`                        | `lite-data-store` | Root folder under Expo file storage                                                         |
-| `sortMethods`                          | `default`         | Default sort strategy hint                                                                  |
-| `timeout`                              | `10000`           | Timeout for selected file operations                                                        |
-| `encryption.algorithm`                 | `auto`            | Preferred encryption mode                                                                   |
-| `encryption.keyIterations`             | `600000`          | PBKDF2 iteration target before Expo Go downshifts                                           |
-| `performance.maxConcurrentOperations`  | `5`               | Max write-side concurrency                                                                  |
-| `cache.maxSize`                        | `1000`            | Cache entry budget                                                                          |
-| `monitoring.enablePerformanceTracking` | `false`           | Enables performance sampling                                                                |
-| `monitoring.enableHealthChecks`        | `true`            | Enables health-check evaluation                                                             |
-| `autoSync.enabled`                     | `false`           | Auto-sync service toggle; opt in explicitly when background dirty-cache syncing is required |
-| `autoSync.interval`                    | `30000`           | Auto-sync interval in milliseconds                                                          |
-| `autoSync.minItems`                    | `1`               | Minimum queued item count before auto-sync                                                  |
-| `autoSync.batchSize`                   | `100`             | Max dirty cache entries processed per table in one auto-sync run                            |
+| Key                                    | Default           | Purpose                                                                                                                                                                                                     |
+| -------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `engine`                               | `file-system`     | Storage engine: `'file-system'`, `'sqlite'`, or `'auto'` (uses `sqlite` when `expo-sqlite` is loadable, otherwise `file-system`); an explicit choice overrides the persisted migration marker               |
+| `chunkSize`                            | `5242880`         | Target chunk size in bytes; initial-data auto-selection starts above half this value                                                                                                                        |
+| `storageFolder`                        | `lite-data-store` | Root folder under Expo file storage                                                                                                                                                                         |
+| `sortMethods`                          | `default`         | Default sort strategy hint                                                                                                                                                                                  |
+| `timeout`                              | `10000`           | Timeout for single-file/chunked I/O operations (read on every call); the 30s read guards and file-lock waits are fixed and do not follow this setting                                                       |
+| `encryption.algorithm`                 | `auto`            | Preferred encryption mode                                                                                                                                                                                   |
+| `encryption.keyIterations`             | `600000`          | PBKDF2 iteration target before Expo Go downshifts                                                                                                                                                           |
+| `performance.maxConcurrentOperations`  | `5`               | Max write-side concurrency                                                                                                                                                                                  |
+| `cache.maxSize`                        | `1000`            | Cache entry budget; `file-system` engine only — ignored under `sqlite` (no warning)                                                                                                                         |
+| `monitoring.enablePerformanceTracking` | `false`           | Enables performance sampling; storage-side samples are recorded only by the `file-system` engine (encrypt/decrypt timing samples record on both engines) — the `sqlite` engine warns once at initialization |
+| `monitoring.enableHealthChecks`        | `true`            | Enables health-check evaluation                                                                                                                                                                             |
+| `autoSync.enabled`                     | `false`           | Auto-sync timer toggle for the `file-system` engine; opt in explicitly when periodic dirty-cache flushing is required; ignored (one-time initialization warning) under `sqlite`                             |
+| `autoSync.interval`                    | `30000`           | Auto-sync interval in milliseconds                                                                                                                                                                          |
+| `autoSync.minItems`                    | `1`               | Minimum queued item count before auto-sync                                                                                                                                                                  |
+| `autoSync.batchSize`                   | `100`             | Max dirty cache entries processed per table in one auto-sync run                                                                                                                                            |
+
+The `autoSync.*` keys configure an in-process timer that exists only in the `file-system` engine's write-behind dirty cache; the `sqlite` engine persists writes immediately, so these keys have no effect there. The timer fires only while your app is running — it is not an OS-level background task.
+
+`cache.*` is honored only by the `file-system` engine: the `sqlite` engine creates no write-behind cache. `monitoring.enablePerformanceTracking` likewise records storage-side samples only through the `file-system` engine — the `sqlite` engine records no storage-side performance samples, though encrypt/decrypt timing samples are recorded on both engines. Turning on `autoSync.enabled` or `monitoring.enablePerformanceTracking` under `sqlite` produces a one-time warning prefixed `[SQLiteStorageAdapter]` at initialization instead of a silent no-op; `cache.*` and the default-on `monitoring.enableHealthChecks` are never warned about (the latter is a `performanceMonitor` runtime switch, independent of the storage engine) and are documented only.
 
 `storageFolder` is a single directory name, not a path: separators, encoded separators, and traversal names are rejected. Set it before the first storage operation. Changing it while an adapter is active is rejected so metadata and cached state cannot be mixed across roots.
 
@@ -527,7 +536,7 @@ You can choose between:
 - full-table encryption through `encryptFullTable: true`;
 - strict access-authentication intent through `requireAuthOnAccess: true`.
 
-A non-empty `encryptedFields` list selects the encrypted facade even when `encrypted: true` is omitted. If an encrypted write implicitly creates a table inside a transaction, the resolved field list is carried into commit so the persisted policy matches the encrypted payload.
+A non-empty `encryptedFields` list selects the encrypted facade even when `encrypted: true` is omitted. If an encrypted write implicitly creates a table inside a transaction, the resolved field list is carried into commit so the persisted policy matches the encrypted payload. On implicit creation the write request's field list is persisted as the table policy; issuing such a write against an existing plaintext table or a table with a different policy fails with `MIGRATION_FAILED` instead of silently persisting plaintext. A write-path call (`insert`/`overwrite`/`update`/`bulkWrite`) that passes an empty `encryptedFields: []` list with no other encryption option such as `encrypted: true` is rejected with `FILE_CONTENT_INVALID`: the empty-list dynamic all-fields semantics belong to `createTable`, so write paths must pair them with `encrypted: true`.
 
 An encrypted write that creates a previously unknown table persists the selected encryption policy. That policy is not a per-call toggle: changing `encrypted`, `encryptFullTable`, `encryptedFields`, or `requireAuthOnAccess` for an existing encrypted table requires an application-controlled data migration. The runtime fails closed with `MIGRATION_FAILED` instead of silently rewriting data under a different policy.
 

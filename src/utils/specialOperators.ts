@@ -1,4 +1,5 @@
 import type { UpdatePayload } from '../types/storageTypes';
+import { deepEquals } from './deepEquality';
 
 export type QueryOperator = '$and' | '$or' | '$eq' | '$ne' | '$gt' | '$gte' | '$lt' | '$lte' | '$in' | '$nin' | '$like';
 
@@ -59,10 +60,6 @@ export function isQueryOperator(key: string): key is QueryOperator {
 
 export function isUpdateOperator(key: string): key is UpdateOperator {
   return Object.prototype.hasOwnProperty.call(SPECIAL_OPERATORS.UPDATE, key);
-}
-
-export function isSpecialOperator(key: string): boolean {
-  return isQueryOperator(key) || isUpdateOperator(key);
 }
 
 export function separateUpdateOperators(updateData: object): {
@@ -145,7 +142,10 @@ export function processUpdateOperators<T extends object>(originalData: T, update
             return item !== condition;
           }
 
-          return !Object.entries(condition).some(([key, value]) => item[key] === value);
+          // Mongo-aligned $pull semantics: an element is removed only when it
+          // matches ALL listed key/value pairs. Object values compare by deep
+          // equality since reference identity never holds for stored records.
+          return !Object.entries(condition).every(([key, value]) => deepEquals(item[key], value));
         });
       }
     }
