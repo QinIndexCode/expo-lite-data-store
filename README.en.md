@@ -16,6 +16,8 @@ The package is designed around the following runtime guarantees:
 - native SQL and expression index pushdown: under the SQLite engine, filters, sorting, and pagination compile directly to SQLite JSON1 statements with `json_extract` B-tree expression indexes, eliminating deserialization bottlenecks;
 - field-level on-demand page decryption: encrypted tables decrypt only sliced pagination results, minimizing CPU overhead and memory footprint;
 - online zero-data-loss bidirectional migration: seamless live engine switching between `'file-system'` and `'sqlite'` via `migrateEngine`;
+- complete index lifecycle: `createTable({ indexes })` and `createIndex` really build indexes and persist their declarations, so unique enforcement and query acceleration survive restarts;
+- cross-engine query consistency: numeric-key paths, array `$in`/`$nin`, `null` semantics, and Unicode code point string ordering return identical results on both engines, with automatic in-memory fallback when pushdown does not apply;
 - support for plain and encrypted storage surfaces;
 - compatibility with Expo Go for the documented feature set;
 - optional native crypto acceleration in development builds and standalone apps;

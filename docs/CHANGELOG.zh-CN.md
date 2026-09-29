@@ -6,6 +6,8 @@
 
 ## [未发布]
 
+## [4.0.0] - 2026-09-29
+
 ### 新增
 
 - **file-system 引擎的完整索引生命周期**：`createTable({ indexes })` 现在会真正创建并构建声明的索引（此前该选项被接受但被静默忽略）；`createIndex` 在持有表写锁期间立即基于现有数据构建索引，唯一约束与查询加速从下一次操作即生效；持久化的索引声明会在 adapter 初始化阶段、任何公开 API 调用之前重新登记并重建——唯一约束执行与索引加速读取跨重启保留。声明会先校验（字段名为空报 `TABLE_INDEX_INVALID`），带声明的建表失败不会留下半成品表。
@@ -38,6 +40,11 @@
 - **同一查询在两个存储引擎下返回一致结果（`sqlite` 条件下推语义对齐 `QueryEngine`）**：数组字段的 `$in`/`$nin` 现在同时匹配数组元素与标量字段值（复合条件经 `json_each` 展开，参数绑定保持占位符数组风格）；`json_type` 用于区分字段缺失、JSON `null`、布尔与数字（`active: 1` 或 `$in: [1]` 不再误命中 `true`），`$ne` 对缺失字段命中、直接 `null` 相等不命中缺失字段，`$in`/`$nin` 中的 `null`/`undefined` 成员按基准语义对齐；`$nin`/`$in` 增加单条查询 500 绑定参数上限（超出自动回退内存过滤并输出告警，`$in` 与 `$nin` 各含一份数组分支与标量分支副本）；`$like` 因 SQLite 缺少 Unicode 大小写折叠不再下推、始终由与 `file-system` 引擎相同的内存过滤执行；`$exists`/`$regex`/`$elemMatch`/`$size`/`$notLike` 等非白名单操作符与无 SQL 等价形态的操作数（对象、BigInt）保持回退内存。新增 `engine-parity` 双引擎集成测试，用同一数据集在两个引擎上断言读、删、改结果集一致。
 - **`performanceMonitor` 运行时开关接通**：`configManager.set('monitoring.enablePerformanceTracking', ...)` 现在运行时立即生效——`ConfigManager` 在配置成功落地后通知订阅方，`performanceMonitor` 就地刷新 `enabled` 与 `metricsRetention`（此前该值仅在构造时读取一次，之后任何 `set` 都不生效）；通知回调只刷新配置派生字段且不覆盖任何显式设置：`configure()` / `setEnabled()` 的显式设置（含 `enabled` 与 `metricsRetention`）优先于配置变更，`sampleRate`、`maxRecords` 与阈值同样不被配置触及，`resetRuntimeOptions()` 清除显式覆盖、恢复配置权威。
 - **SQLite 引擎初始化失败后可正常重试**：打开数据库或建表 DDL（`PRAGMA` / `CREATE TABLE` / `CREATE INDEX`）任一步失败时，SQLite 引擎不再永久停留在半初始化状态——下一次调用会重新执行初始化并补建缺失的 `__elds_records` 表，随后的读写恢复正常（此前初始化一旦失败，所有后续操作都会报 "no such table"，横切配置告警也永不发出）；失败时被放弃的数据库句柄会被关闭，而不是每次重试泄漏一个。
+
+### 安全
+
+- **SQLite `deleteTable` 索引前缀 `LIKE` 转义补全**：索引清理前缀的通配符转义类现在在 `_`、`%` 之外同时覆盖反斜杠，与既有 `ESCAPE '\'` 对应，关闭 CodeQL `js/incomplete-sanitization` 告警；上游 `SqlQueryBuilder.cleanIdentifier` 本已剔除反斜杠，此改动属使用点的纵深防御，两引擎行为不变。
+- **`js-yaml` override 升级至 4.3.2**：修复 Dependabot 高危告警（`maxTotalMergeKeys` 对空合并源不设 CPU 上限）；该依赖仅存在于 dev 工具链（eslint / @expo/cli / ts-jest），生产依赖 `npm audit --omit=dev` 持续 0 漏洞。
 
 ### 移除
 

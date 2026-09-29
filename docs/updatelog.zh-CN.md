@@ -2,6 +2,15 @@
 
 [README 入口](../README.md) | [English](./updatelog.en.md) | [消费者文档](../README.zh-CN.md)
 
+### 📅 2026-09-29 `v4.0.0` 跨引擎查询一致性、完整索引生命周期与安全加固
+
+> 跨引擎查询一致性（`sqlite` 下推语义对齐 `QueryEngine`）：数组字段 `$in`/`$nin` 同时匹配数组元素与标量值（`json_each` 展开），`json_type` 区分字段缺失与 JSON `null`、布尔与数字不再互串，`$ne` 命中缺失字段；单个无前导零数字段路径按点形/括号形双分支生成 WHERE 与 `COALESCE` 排序，多数字片段与前导零路径整体回退内存过滤；`$like` 因 SQLite 缺少 Unicode 大小写折叠不再下推；字符串排序统一为 Unicode 码点序（对齐 `BINARY` 排序规则）；新增 `engine-parity` 双引擎一致性集成测试。
+> 完整索引生命周期（file-system 引擎）：`createTable({ indexes })` 真正创建并构建声明的索引，`createIndex` 在表写锁内基于现有数据即时构建，持久化声明在 adapter 初始化时重建——唯一约束执行与索引加速跨重启保留；`createIndex`/`dropIndex` 立即刷写元数据，启动重建绕过读缓存且告警不再泄露冲突值，既有表不再被索引声明回滚误删数据。
+> 运行时接通与可重试性：`monitoring.enablePerformanceTracking` 运行时切换立即生效（显式 `configure`/`setEnabled` 优先）；`timeout` 配置接通 file-system 单文件/分片 I/O 路径；SQLite 初始化失败后可重试（半初始化回滚、句柄不泄漏），被忽略的 `autoSync` 与性能采样配置在 sqlite 引擎下输出一次性告警。
+> 写入一致性与安全：file-system 引擎按表 FIFO 写入串行化；SQLite 事务期间外部写入与 DDL 排队，`update`/`delete` 读-改-写在同一 SQL 事务内执行；保留信封字段名 `__enc`/`__enc_bulk` 在所有公开写入入口被拒（`FILE_CONTENT_INVALID`）；`migrateEngine` 目标表非空保护（`MIGRATION_DEST_NOT_EMPTY`）与引擎偏好持久化；写入路径遵循 `encryptedFields`（策略不一致以 `MIGRATION_FAILED` 响亮失败）。
+> 死代码清除与导出面锁定（**破坏性变更，主版本升至 4.0.0**）：删除零生产引用的 `core/api/*` 全簇、monitor barrel、`./utils/*` 四个子路径导出与零调用方符号（`precomputeCommonKeys`、`hashPassword` 等）；新增导出面锁定测试正向锁定主入口/`db`/`default` 三套公开表面与 `exports` 子路径键；接入 `import/no-cycle` ESLint 循环依赖门禁。
+> 安全：`deleteTable` 索引前缀 `LIKE` 转义类补全反斜杠（CodeQL `js/incomplete-sanitization` 告警）；`js-yaml` override 升级 4.3.2 修复 Dependabot 高危（仅 dev 工具链，`npm audit --omit=dev` 0 漏洞）。
+
 ### 📅 2026-09-19 `v3.1.1` SQLite 高性能存储引擎、表达式索引与安全加固
 
 > 存储引擎全面升级：正式引入生产级 SQLite 高性能底层存储引擎（默认引擎保持 `'file-system'`，`expo-sqlite` 作为可选 peer 依赖按需动态加载）。
