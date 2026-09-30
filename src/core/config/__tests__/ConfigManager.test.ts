@@ -116,6 +116,58 @@ describe('ConfigManager', () => {
     });
   });
 
+  describe('shared frozen configuration', () => {
+    it('returns a deeply frozen configuration snapshot', () => {
+      const config = configManager.getConfig();
+
+      expect(Object.isFrozen(config)).toBe(true);
+      expect(Object.isFrozen(config.encryption)).toBe(true);
+      expect(Object.isFrozen(config.encryption.encryptedFields)).toBe(true);
+      expect(Object.isFrozen(config.performance)).toBe(true);
+      expect(Object.isFrozen(config.api.rateLimit)).toBe(true);
+    });
+
+    it('throws TypeError when the returned snapshot is mutated', () => {
+      const config = configManager.getConfig();
+
+      expect(() => {
+        config.chunkSize = 1;
+      }).toThrow(TypeError);
+      expect(() => {
+        config.encryption.algorithm = 'AES-CTR';
+      }).toThrow(TypeError);
+      expect(() => {
+        config.encryption.encryptedFields?.push('secret');
+      }).toThrow(TypeError);
+    });
+
+    it('returns the same reference until a change rebuilds the snapshot', () => {
+      const first = configManager.getConfig();
+      expect(configManager.getConfig()).toBe(first);
+
+      configManager.updateConfig({ chunkSize: 2 * 1024 * 1024 });
+      const afterUpdate = configManager.getConfig();
+      expect(afterUpdate).not.toBe(first);
+      expect(afterUpdate.chunkSize).toBe(2 * 1024 * 1024);
+
+      configManager.setConfig({ chunkSize: 4 * 1024 * 1024 });
+      const afterSetConfig = configManager.getConfig();
+      expect(afterSetConfig).not.toBe(afterUpdate);
+      expect(afterSetConfig.chunkSize).toBe(4 * 1024 * 1024);
+
+      configManager.set('timeout', 5000);
+      const afterSetPath = configManager.getConfig();
+      expect(afterSetPath).not.toBe(afterSetConfig);
+      expect(afterSetPath.timeout).toBe(5000);
+
+      configManager.resetConfig();
+      const afterReset = configManager.getConfig();
+      expect(afterReset).not.toBe(afterSetPath);
+      expect(afterReset.chunkSize).toBe(defaultConfig.chunkSize);
+      expect(afterReset.timeout).toBe(defaultConfig.timeout);
+    });
+  });
+
   describe('change subscriptions', () => {
     it('notifies subscribers when configuration lands via set() and setConfig()', () => {
       const listener = jest.fn();

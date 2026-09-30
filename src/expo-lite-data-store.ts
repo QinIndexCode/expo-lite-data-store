@@ -258,7 +258,9 @@ const assertNoReservedEnvelopeFields = (data: unknown): void => {
     if (reserved) {
       rejectReservedEnvelopeField(reserved);
     }
-    for (const [key, value] of Object.entries(candidate) as [string, unknown][]) {
+    const record = candidate as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      const value = record[key];
       if (!key.startsWith('$') || value === null || typeof value !== 'object' || Array.isArray(value)) {
         continue;
       }

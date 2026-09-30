@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Performance
+
+- **`ConfigManager.getConfig()` no longer deep-copies the whole configuration tree per call**: the merged configuration is deep-frozen once at every rebuild point (singleton construction, `loadConfig`, and every `setConfig`/`updateConfig`/`resetConfig`/`set` commit), and `getConfig()` now returns that shared frozen reference directly instead of re-running `sanitizeConfigValue` over the entire tree. 4.0.0 replaced 45 I/O timeout literals with `getConfig().timeout` — 78 call sites in total (`ChunkedFileHandler` 31, `SingleFileHandler` 15, `EncryptedStorageAdapter` 8, crypto 6, …) — so every file-system operation was paying a full-tree deep copy (the profiled `sanitizeConfigValue` hotspot). Mutating the returned value now throws a `TypeError` (strict mode: ESM / React Native); since a configuration change rebuilds and re-freezes the whole tree, re-call `getConfig()` after a change to pick up the new reference. `get(path)` still returns a defensive copy.
+- **Envelope assertions on the insert/write paths deduplicated from three passes to two**: the adapter entry and the write-back guard scanned the same payload twice within one batch, so that entry-side duplicate scan was removed while the facade pass and the write-back last line of defense are unchanged.
+- **Host bulk-write throughput gate in CI**: added `bulk-write-throughput.benchmark.test.ts` (plain/field-encrypted/full-encrypted 5000-op batches and a 5000-row warm-cache full-table read, median of 3 runs after warmup) wired into CI via `npm run test:perf-gate`.
+
 ## [4.0.0] - 2026-09-29
 
 ### Added

@@ -10,8 +10,12 @@ const PROFILE_THRESHOLDS = {
     // Calibrated from the 2026-08-09 MuMu (127.0.0.1:7555) + Expo Go 56.0.1 baseline run
     // (artifact: artifacts/expo-runtime-qa/2026-08-09T19-15-39-712Z). Measured medians:
     // 25MB chunked table scenario = 29264ms, plain-5000 bulk write = 22727 ops/s.
-    // Thresholds keep ~1.5x headroom over measured values; 50MB extrapolated linearly
-    // from the 25MB measurement (no 50MB sample survives the 10s in-library read guard).
+    // largeFileMs: the 25MB floor (45000ms) is ~1.5x over the measured 29264ms; the 50MB
+    // floor is extrapolated linearly from the 25MB measurement (no 50MB sample survives
+    // the 10s in-library read guard).
+    // bulkOpsPerSec: plain-5000's 20000 floor sits ~12% BELOW the measured 22727 ops/s —
+    // a tight regression detector, not headroom; field-encrypted-5000 (600) and
+    // full-encrypted-5000 (1200) are conservative defaults pending a device baseline.
     largeFileMs: {
       '25MB': 45000,
       '50MB': 90000,

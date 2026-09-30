@@ -47,6 +47,9 @@ jobs:
       - name: Run deterministic test suite
         run: npm test -- --runInBand --coverage=false
 
+      - name: Run bulk-write throughput gate
+        run: npm run test:perf-gate
+
       - name: Smoke-test an Expo consumer
         run: npm run smoke:expo-consumer
 

@@ -1517,6 +1517,22 @@ describe('EncryptedStorageAdapter', () => {
       expect(await adapter.count(tableName)).toBe(0);
     });
 
+    it('rejects zero-match update payloads that never reach the write-back scan', async () => {
+      // An update matching no record is discarded before write-back, so the
+      // entry scan (normalizeStorageRecord / normalizeBulkOperations) is its
+      // only coverage against reserved envelope field names.
+      await expect(
+        adapter.bulkWrite(tableName, [{ type: 'update' as const, data: { __enc: 'boom' }, where: { id: 999999 } }])
+      ).rejects.toMatchObject({
+        code: 'FILE_CONTENT_INVALID',
+      });
+      await expect(adapter.update(tableName, { __enc_bulk: 'boom' }, { id: 999999 })).rejects.toMatchObject({
+        code: 'FILE_CONTENT_INVALID',
+      });
+
+      expect(await adapter.count(tableName)).toBe(0);
+    });
+
     it('rejects createTable initialData that carries a reserved envelope field name', async () => {
       const reservedTable = 'test_reserved_initial_data';
 

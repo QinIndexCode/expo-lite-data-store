@@ -78,14 +78,23 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   private readonly engine: IStorageEngine;
   private readonly transactionOwner: TransactionOwnerToken = {};
 
-  private normalizeStorageInput<T extends object>(data: StorageInput<T>): StorageRecord[] {
+  private normalizeStorageInput<T extends object>(
+    data: StorageInput<T>,
+    options?: { skipEnvelopeAssertion?: boolean }
+  ): StorageRecord[] {
     const records: unknown[] = Array.isArray(data) ? data : [data];
     if (!records.every(isStorageRecord)) {
       throw new StorageError('Invalid data: expected an object or an array of objects', 'FILE_CONTENT_INVALID', {
         suggestion: 'Provide a non-null object for every record.',
       });
     }
-    this.assertNoReservedEnvelopeFieldNames(records);
+    // An adapter entry that hands this exact payload straight to write-back skips the
+    // scan here: write-back re-normalizes the identical records before anything lands
+    // on disk, so running the same scan at entry was a same-batch duplicate. The shape
+    // validation above still runs at entry so payload-shape errors keep their timing.
+    if (!options?.skipEnvelopeAssertion) {
+      this.assertNoReservedEnvelopeFieldNames(records);
+    }
     return records;
   }
 
@@ -141,7 +150,10 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     return operations.map(operation => {
       switch (operation.type) {
         case 'insert': {
-          const records = this.normalizeStorageInput(operation.data);
+          // Insert records reach write-back unchanged (same object references in
+          // finalData on both bulkWrite branches), so the entry scan is a duplicate
+          // of the write-back scan over the identical payload.
+          const records = this.normalizeStorageInput(operation.data, { skipEnvelopeAssertion: true });
           return {
             type: 'insert',
             data: Array.isArray(operation.data) ? records : records[0],
@@ -786,7 +798,8 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
   ): Promise<void> {
     const accessKey = await this.ensureAccessAuthorized();
     const { initialData = [], ...tableOptions } = options ?? {};
-    const normalizedInitialData = this.normalizeStorageInput(initialData);
+    // The reserved-envelope scan runs at write-back over this identical payload.
+    const normalizedInitialData = this.normalizeStorageInput(initialData, { skipEnvelopeAssertion: true });
 
     if (options?.requireAuthOnAccess === true && !this.requireAuthOnAccess) {
       throw new StorageError(`Table '${tableName}' requires a strict encrypted storage adapter`, 'PERMISSION_DENIED', {
@@ -882,7 +895,13 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     data: StorageInput<T>,
     options?: Omit<WriteOptions, 'mode'>
   ): Promise<WriteResult> {
-    return this.overwriteWithKey(tableName, this.normalizeStorageInput(data), options, await this.key());
+    // The reserved-envelope scan runs at write-back over this identical payload.
+    return this.overwriteWithKey(
+      tableName,
+      this.normalizeStorageInput(data, { skipEnvelopeAssertion: true }),
+      options,
+      await this.key()
+    );
   }
 
   private async overwriteWithKey(
@@ -974,7 +993,13 @@ export class EncryptedStorageAdapter implements IStorageAdapter {
     data: StorageInput<T>,
     options?: WriteOptions
   ): Promise<WriteResult> {
-    return this.writeWithKey(tableName, this.normalizeStorageInput(data), options, await this.key());
+    // The reserved-envelope scan runs at write-back over this identical payload.
+    return this.writeWithKey(
+      tableName,
+      this.normalizeStorageInput(data, { skipEnvelopeAssertion: true }),
+      options,
+      await this.key()
+    );
   }
 
   private async writeWithKey(

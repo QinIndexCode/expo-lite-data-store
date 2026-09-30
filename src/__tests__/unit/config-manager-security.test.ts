@@ -48,7 +48,9 @@ describe('ConfigManager security hardening', () => {
     const config = manager.getConfig();
     const encryption = manager.get<{ encryptedFields: string[] }>('encryption')!;
 
-    config.encryption.encryptedFields = ['external-field'];
+    expect(() => {
+      config.encryption.encryptedFields = ['external-field'];
+    }).toThrow(TypeError);
     encryption.encryptedFields.push('external-field-from-get');
 
     expect(manager.getConfig().encryption.encryptedFields).not.toContain('external-field');

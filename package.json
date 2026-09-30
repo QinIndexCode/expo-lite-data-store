@@ -67,6 +67,7 @@
     "test:utils": "jest --config jest.simple.config.cjs --testMatch=**/src/utils/**/__tests__/**/*.test.ts",
     "test:crypto": "jest --config jest.crypto.config.cjs",
     "test:performance": "jest --config jest.performance.config.cjs",
+    "test:perf-gate": "jest --config jest.performance.config.cjs --runTestsByPath src/__tests__/benchmark/bulk-write-throughput.benchmark.test.ts",
     "test:all": "npm run test && npm run test:stress && npm run test:crypto && npm run test:performance",
     "test:watch": "jest --config jest.simple.config.cjs --watch --testPathIgnorePatterns=crypto-security-assessment --testPathIgnorePatterns=performance-optimization --testPathIgnorePatterns=api.stress --testPathIgnorePatterns=benchmark",
     "test:coverage": "jest --config jest.simple.config.cjs --coverage --testPathIgnorePatterns=crypto-security-assessment,performance-optimization",

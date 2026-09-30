@@ -76,6 +76,16 @@ describe('reserved envelope field names at the public surface', () => {
     }
   });
 
+  it('rejects reserved createTable initialData on an already existing table', async () => {
+    // The facade scan fires before the adapter in every case, including an
+    // existing table where the adapter would discard initialData without a write.
+    await expect(createTable(TEST_TABLE, { initialData: [{ id: 1, __enc: 'boom' }] })).rejects.toMatchObject({
+      code: 'FILE_CONTENT_INVALID',
+    });
+    expect(await hasTable(TEST_TABLE)).toBe(true);
+    expect(await read(TEST_TABLE)).toHaveLength(0);
+  });
+
   it('still accepts ordinary fields shaped like the check', async () => {
     await expect(
       insert(TEST_TABLE, asCast<LooseRecord>({ id: 9, encoding: 'utf-8', dollar: '$set' }))

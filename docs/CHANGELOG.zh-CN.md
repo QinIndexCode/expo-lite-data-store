@@ -6,6 +6,12 @@
 
 ## [未发布]
 
+### 性能
+
+- **`ConfigManager.getConfig()` 不再逐次深拷贝整棵配置树**：合并后的配置在每个重建点（单例构造、`loadConfig`，以及每次 `setConfig`/`updateConfig`/`resetConfig`/`set` 提交）被整体深度冻结一次，`getConfig()` 直接返回该共享的冻结引用，不再对整棵树重跑 `sanitizeConfigValue`。4.0.0 把 45 处 I/O 超时字面量改成了 `getConfig().timeout`（全仓 78 处调用点：`ChunkedFileHandler` 31、`SingleFileHandler` 15、`EncryptedStorageAdapter` 8、crypto 6 …），于是每次文件系统操作都要付一次整树深拷贝（profile 中的 `sanitizeConfigValue` 热点）。对返回值的修改现在会抛 `TypeError`（严格模式：ESM / React Native）；配置变更会整体重建并重新冻结，因此变更后需重新调用 `getConfig()` 取得新引用。`get(path)` 仍返回防御性拷贝。
+- **写入（insert/write）路径的信封断言由 3 遍去重为 2 遍**：adapter 入口与 write-back 在同一批次内对同一载荷重复扫描，入口侧的重复扫描已移除，facade 层断言与 write-back 最后防线保持不变。
+- **CI 新增宿主 bulk 写入吞吐门禁**：新增 `bulk-write-throughput.benchmark.test.ts`（plain/字段加密/全表加密 5000 条批次 + 5000 行温缓存全表读取，预热后 3 次取中位数），经 `npm run test:perf-gate` 接入 CI。
+
 ## [4.0.0] - 2026-09-29
 
 ### 新增

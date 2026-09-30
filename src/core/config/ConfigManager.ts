@@ -32,7 +32,7 @@ export class ConfigManager {
   private customConfig: DeepPartial<LiteStoreConfig> = Object.create(null) as DeepPartial<LiteStoreConfig>;
 
   private constructor() {
-    this.currentConfig = this.sanitizeConfigValue(defaultConfig as LiteStoreConfig);
+    this.currentConfig = this.deepFreeze(this.sanitizeConfigValue(defaultConfig as LiteStoreConfig));
     this.loadConfig();
   }
 
@@ -98,6 +98,33 @@ export class ConfigManager {
     return value;
   }
 
+  /**
+   * Recursively freezes objects and arrays in place and returns the same
+   * reference (scalars pass through untouched). Callers must not mutate the
+   * returned value afterwards: strict-mode writes throw a TypeError.
+   */
+  private deepFreeze<T>(value: T): T {
+    if (Array.isArray(value)) {
+      const items = value as unknown[];
+      for (const item of items) {
+        this.deepFreeze(item);
+      }
+      Object.freeze(items);
+      return value;
+    }
+
+    if (this.isConfigObject(value)) {
+      const container = value as Record<string, unknown>;
+      for (const nestedValue of Object.values(container)) {
+        this.deepFreeze(nestedValue);
+      }
+      Object.freeze(container);
+      return value;
+    }
+
+    return value;
+  }
+
   private getGlobalLiteStoreConfig(): LiteStoreGlobals | undefined {
     if (typeof global === 'undefined') {
       return undefined;
@@ -123,9 +150,11 @@ export class ConfigManager {
     assertValidStorageFolderName(mergedConfig.storageFolder);
 
     // Update current config and its root together so a rejected configuration
-    // cannot leave one singleton pointed at a different directory.
+    // cannot leave one singleton pointed at a different directory. The merged
+    // tree is fully built by this point, so it is deep-frozen once here and
+    // handed out shared (zero copy) by getConfig().
     pathHelper.setStorageFolder(mergedConfig.storageFolder);
-    this.currentConfig = mergedConfig;
+    this.currentConfig = this.deepFreeze(mergedConfig);
 
     logger.success('Configuration loaded successfully');
   }
@@ -290,9 +319,16 @@ export class ConfigManager {
     return merged;
   }
 
-  /** Returns a defensive copy that callers cannot use to mutate internal configuration. */
+  /**
+   * Returns the shared, deeply frozen configuration — zero copy. Any mutation
+   * of the returned value throws a TypeError (strict mode: ESM / React Native).
+   * Because the reference is shared, configuration changes (setConfig,
+   * updateConfig, resetConfig, set — each rebuilds and re-freezes the whole
+   * tree) are only visible by calling getConfig() again to pick up the new
+   * reference; holding an old reference keeps serving the old snapshot.
+   */
   public getConfig(): LiteStoreConfig {
-    return this.sanitizeConfigValue(this.currentConfig);
+    return this.currentConfig;
   }
 
   /**
