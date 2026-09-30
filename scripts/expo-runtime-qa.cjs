@@ -360,7 +360,19 @@ const buildQaConsumerTempPrefix = ({ channel, profile, platform = process.platfo
   return path.posix.join(qaTempRoot, `expo-lite-data-store-${shortChannel}-${shortProfile}-`);
 };
 
-const isPortAvailable = port =>
+const canConnectToPort = port =>
+  new Promise(resolve => {
+    const socket = net.connect({ port, host: '127.0.0.1' });
+    const finish = occupied => {
+      socket.destroy();
+      resolve(occupied);
+    };
+    socket.once('connect', () => finish(true));
+    socket.once('error', () => finish(false));
+    socket.setTimeout(1000, () => finish(false));
+  });
+
+const canBindPort = (port, host) =>
   new Promise(resolve => {
     const server = net.createServer();
     server.once('error', () => {
@@ -369,8 +381,26 @@ const isPortAvailable = port =>
     server.once('listening', () => {
       server.close(() => resolve(true));
     });
-    server.listen(port, '127.0.0.1');
+    server.listen(port, host);
   });
+
+const isPortAvailable = async port => {
+  if (await canConnectToPort(port)) {
+    return false;
+  }
+
+  // On Windows a bind probe on 127.0.0.1/0.0.0.0 succeeds next to a dual-stack
+  // listener (SO_REUSEADDR), so Metro sees a conflict our probe missed; probe
+  // every address family as well.
+  const probeHosts = ['127.0.0.1', '0.0.0.0', '::'];
+  for (let i = 0; i < probeHosts.length; i += 1) {
+    if (!(await canBindPort(port, probeHosts[i]))) {
+      return false;
+    }
+  }
+
+  return true;
+};
 
 const findAvailablePort = async (preferredPort = DEFAULT_EXPO_START_PORT) => {
   for (let offset = 0; offset < MAX_EXPO_PORT_PROBES; offset += 1) {
@@ -386,6 +416,47 @@ const findAvailablePort = async (preferredPort = DEFAULT_EXPO_START_PORT) => {
 };
 
 const needsShell = command => process.platform === 'win32' && /\.(cmd|bat)$/iu.test(command);
+
+const killProcessesUnderDir = consumerDir => {
+  if (process.platform !== 'win32') {
+    return;
+  }
+
+  const systemRoot = process.env.SystemRoot || 'C:\\Windows';
+  const marker = path.basename(consumerDir).replace(/'/g, "''");
+  const script = `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*${marker}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+  const result = spawnSync(
+    path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    { windowsHide: true, timeout: 30000 }
+  );
+  if (result.status !== 0) {
+    console.error(
+      `[expo-runtime-qa] residual process cleanup status=${result.status} error=${result.error && result.error.code}`
+    );
+  }
+};
+
+// Metro keeps file handles inside the consumer dir open until its whole
+// process tree dies, so a plain rmSync gets EPERM on Windows when a tree
+// leaked past stop(); kill matching residuals and retry before failing.
+const removeConsumerDir = consumerDir => {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      fs.rmSync(consumerDir, {
+        recursive: true,
+        force: true,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      console.error(`[expo-runtime-qa] rm attempt ${attempt} failed for ${consumerDir}: ${error && error.code}`);
+      killProcessesUnderDir(consumerDir);
+    }
+  }
+  throw lastError;
+};
 
 const writeJson = (filePath, value) => {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
@@ -1273,6 +1344,9 @@ const createProcessLogger = ({ processHandle, outputFile, onLine }) => {
         }
 
         const fallbackTimer = setTimeout(() => {
+          console.error(
+            `[expo-runtime-qa] pid=${processHandle.pid} still open 15s after kill attempt; finalizing anyway`
+          );
           finalize(processHandle.exitCode ?? 0);
         }, 15000);
 
@@ -1282,9 +1356,23 @@ const createProcessLogger = ({ processHandle, outputFile, onLine }) => {
         });
 
         if (process.platform === 'win32') {
-          spawnSync('taskkill', ['/PID', String(processHandle.pid), '/T', '/F'], {
+          const killResult = spawnSync('taskkill', ['/PID', String(processHandle.pid), '/T', '/F'], {
             windowsHide: true,
           });
+          if (killResult.status !== 0) {
+            console.error(
+              `[expo-runtime-qa] taskkill pid=${processHandle.pid} status=${killResult.status} error=${killResult.error && killResult.error.code} stderr=${String(killResult.stderr || '').trim()}`
+            );
+            const systemRoot = process.env.SystemRoot || 'C:\\Windows';
+            const escalateResult = spawnSync(
+              path.join(systemRoot, 'System32', 'taskkill.exe'),
+              ['/PID', String(processHandle.pid), '/T', '/F'],
+              { windowsHide: true }
+            );
+            console.error(
+              `[expo-runtime-qa] taskkill escalation status=${escalateResult.status} error=${escalateResult.error && escalateResult.error.code}`
+            );
+          }
         } else {
           try {
             processHandle.kill('SIGTERM');
@@ -2215,10 +2303,7 @@ const runChannel = async ({ channel, profile, tarballPath, options, serial, reco
     };
   } finally {
     if (options.cleanupConsumers) {
-      fs.rmSync(consumerDir, {
-        recursive: true,
-        force: true,
-      });
+      removeConsumerDir(consumerDir);
     } else {
       fs.writeFileSync(path.join(channelArtifacts, 'consumer-path.txt'), `${consumerDir}\n`, 'utf8');
     }
