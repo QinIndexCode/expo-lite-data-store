@@ -28,7 +28,10 @@ describe('expo runtime QA artifact hygiene', () => {
   };
 
   const createCompletedRun = (root: string, name: string) => {
-    const runDir = path.join(root, name);
+    const runDir = path.resolve(root, name);
+    if (!runDir.startsWith(root + path.sep)) {
+      throw new Error(`Refusing to use a run directory outside the temporary root: ${runDir}`);
+    }
     fs.mkdirSync(runDir, { recursive: true });
     fs.writeFileSync(path.join(runDir, '.complete'), '{"status":"completed"}\n', 'utf8');
     return runDir;

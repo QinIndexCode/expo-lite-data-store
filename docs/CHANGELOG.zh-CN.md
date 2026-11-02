@@ -6,6 +6,11 @@
 
 ## [未发布]
 
+### 安全
+
+- **修复全部 7 个开放的 Dependabot 告警（dev 工具链）**：新增 `handlebars` override 至 4.7.10（修复 GHSA-xw65-4hp5-5hc7 / GHSA-8r5x-fm3f-whwj / GHSA-p8wg-vrv2-v86f——经 `ts-jest` 暴露的三个 JS 注入问题）；`shell-quote` override 由 1.9.0 升至 1.11.0（修复 GHSA-pqg4-j6r4-53mv 经 `react-devtools-core` 暴露的 `quote()` 命令注入；1.9.0 只覆盖了上一轮 CVE-2026-9277）；新增 `compression` override 至 1.8.2（修复 GHSA-vc2v-76pw-4v95 经 `@expo/cli` 暴露的提前断开内存泄漏）；新增 `source-map-js` override 至 1.2.2（修复 GHSA-68fv-2mgg-jv7q 经 `postcss` 暴露的事件循环 DoS）；`brace-expansion` override 由裸版本 `"5.0.9"` 改写为分线钉版——`brace-expansion@>=4: 5.0.12`、`brace-expansion@<4: 1.1.21`（修复 GHSA-q2hr-2g5m-vwhr、GHSA-qhr7-859c-m2p7、GHSA-6j4f-fj2g-mc7p）。分线钉版顺带排除一颗潜伏雷：原裸钉把 `minimatch@3` 的 `brace-expansion` 依赖强抬到 5.x，其命名导出形态会破坏 `minimatch@3` 的花括号展开（任何含 `{}` 的模式抛 `TypeError: expand is not a function`）；`minimatch@3` 现已回到 1.1.21。五个包均为 dev 工具链专用（`src/`、`scripts/`、`dist/` 零引用），生产依赖 `npm audit --omit=dev` 持续 0 漏洞。
+- **移除未使用的 `bcryptjs` 运行时依赖**（及 `@types/bcryptjs`）：`src/`、`scripts/`、`__mocks__/`、`dist/` 中零引用——4.0.0 已删除基于 `bcryptjs` 的 `hashPassword` 类导出，但依赖声明被遗留。运行时 `dependencies` 现仅剩 `@noble/ciphers` 与 `@noble/hashes`。
+
 ### 性能
 
 - **`ConfigManager.getConfig()` 不再逐次深拷贝整棵配置树**：合并后的配置在每个重建点（单例构造、`loadConfig`，以及每次 `setConfig`/`updateConfig`/`resetConfig`/`set` 提交）被整体深度冻结一次，`getConfig()` 直接返回该共享的冻结引用，不再对整棵树重跑 `sanitizeConfigValue`。4.0.0 把 45 处 I/O 超时字面量改成了 `getConfig().timeout`（全仓 78 处调用点：`ChunkedFileHandler` 31、`SingleFileHandler` 15、`EncryptedStorageAdapter` 8、crypto 6 …），于是每次文件系统操作都要付一次整树深拷贝（profile 中的 `sanitizeConfigValue` 热点）。对返回值的修改现在会抛 `TypeError`（严格模式：ESM / React Native）；配置变更会整体重建并重新冻结，因此变更后需重新调用 `getConfig()` 取得新引用。`get(path)` 仍返回防御性拷贝。

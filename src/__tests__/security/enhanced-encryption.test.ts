@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+
 import {
   createTable,
   insert,
@@ -292,13 +294,15 @@ describe('enhanced encryption', () => {
         encryptFullTable: true,
       });
 
+      const insertedPassword = randomBytes(12).toString('hex');
+
       await insert(
         CONFLICT_TABLE,
         {
           id: 1,
           name: 'Test User',
           email: 'test@example.com',
-          password: 'secret123',
+          password: insertedPassword,
         },
         {
           encrypted: true,
@@ -365,11 +369,12 @@ describe('enhanced encryption', () => {
         encrypted: true,
       });
 
+      const testPassword = randomBytes(12).toString('hex');
       const testUser = {
         id: 1,
         name: 'John Doe',
         email: 'john@example.com',
-        password: 'secret123',
+        password: testPassword,
         age: 30,
         active: true,
       };
@@ -386,7 +391,7 @@ describe('enhanced encryption', () => {
       expect(user).not.toBeNull();
       expect(user?.name).toBe('John Doe');
       expect(user?.email).toBe('john@example.com');
-      expect(user?.password).toBe('secret123');
+      expect(user?.password).toBe(testPassword);
       expect(user?.age).toBe(30);
       expect(user?.active).toBe(true);
     });
@@ -397,9 +402,9 @@ describe('enhanced encryption', () => {
       });
 
       const users = [
-        { id: 1, name: 'User 1', email: 'user1@example.com', password: 'pass1', age: 25 },
-        { id: 2, name: 'User 2', email: 'user2@example.com', password: 'pass2', age: 30 },
-        { id: 3, name: 'User 3', email: 'user3@example.com', password: 'pass3', age: 35 },
+        { id: 1, name: 'User 1', email: 'user1@example.com', password: randomBytes(12).toString('hex'), age: 25 },
+        { id: 2, name: 'User 2', email: 'user2@example.com', password: randomBytes(12).toString('hex'), age: 30 },
+        { id: 3, name: 'User 3', email: 'user3@example.com', password: randomBytes(12).toString('hex'), age: 35 },
       ];
 
       await insert(FIELD_ENCRYPTION_TABLE, users, {

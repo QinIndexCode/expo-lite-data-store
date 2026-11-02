@@ -11,8 +11,6 @@ type PublicApiRuntime = Record<string, unknown> & {
 type ExpoFileSystemModule = Pick<typeof import('expo-file-system'), 'getInfoAsync' | 'writeAsStringAsync'>;
 type MetadataManagerModule = Pick<typeof import('../../core/meta/MetadataManager'), 'MetadataManager'>;
 
-const loadRuntimeModule = (modulePath: string): unknown => require(modulePath) as unknown;
-
 const loadPublicApiRuntime = (): PublicApiRuntime =>
   require('../../expo-lite-data-store') as unknown as PublicApiRuntime;
 
@@ -47,7 +45,7 @@ describe('public API contract', () => {
     });
 
     expect(() => {
-      void loadRuntimeModule('../../utils/fileSystemCompat');
+      void require('../../utils/fileSystemCompat');
     }).not.toThrow();
   });
 

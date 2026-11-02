@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 
 describe('patch ESM extensions helper', () => {
-  const scriptPath = path.resolve(__dirname, '../../../scripts/patch-esm-extensions.cjs');
+  const loadPatcher = (): unknown => require('../../../scripts/patch-esm-extensions.cjs') as unknown;
   const temporaryRoots: string[] = [];
 
   const createTempDist = () => {
@@ -27,7 +27,7 @@ describe('patch ESM extensions helper', () => {
     fs.writeFileSync(path.join(distRoot, 'setup.js'), "import('./feature/util');\n");
     fs.writeFileSync(path.join(featureDir, 'util.js'), 'export const util = 1;\n');
 
-    const patcher = require(scriptPath) as {
+    const patcher = loadPatcher() as {
       patchEsmExtensions: (distRoot: string) => number;
     };
 
@@ -45,7 +45,7 @@ describe('patch ESM extensions helper', () => {
       "import React from 'react';\nimport data from './data.json';\nexport * from './missing';\n"
     );
 
-    const patcher = require(scriptPath) as {
+    const patcher = loadPatcher() as {
       patchEsmExtensions: (distRoot: string) => number;
     };
 

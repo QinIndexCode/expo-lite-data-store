@@ -97,8 +97,7 @@
   },
   "dependencies": {
     "@noble/ciphers": "~0.6.0",
-    "@noble/hashes": "^1.8.0",
-    "bcryptjs": "~2.4.3"
+    "@noble/hashes": "^1.8.0"
   },
   "peerDependencies": {
     "expo": ">=56 <57",
@@ -141,11 +140,15 @@
     }
   },
   "overrides": {
-    "brace-expansion": "5.0.9",
+    "brace-expansion@>=4": "5.0.12",
+    "brace-expansion@<4": "1.1.21",
+    "compression": "1.8.2",
+    "handlebars": "4.7.10",
     "js-yaml": "4.3.2",
     "nanoid": "3.3.18",
     "postcss": "8.5.26",
-    "shell-quote": "1.9.0",
+    "shell-quote": "1.11.0",
+    "source-map-js": "1.2.2",
     "xcode": {
       "uuid": "11.1.1"
     }
@@ -153,7 +156,6 @@
   "devDependencies": {
     "@babel/plugin-transform-modules-commonjs": "^7.29.7",
     "@eslint/js": "^9.39.4",
-    "@types/bcryptjs": "^2.4.6",
     "@types/jest": "^29.5.0",
     "@types/node": "^24.13.2",
     "@types/react": "~19.2.14",

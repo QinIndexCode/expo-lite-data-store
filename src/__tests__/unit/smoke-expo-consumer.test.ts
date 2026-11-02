@@ -7,7 +7,7 @@ jest.mock('child_process', () => ({
 }));
 
 describe('smoke expo consumer helpers', () => {
-  const scriptPath = path.resolve(__dirname, '../../../scripts/smoke-expo-consumer.cjs');
+  const loadSmokeModule = (): unknown => require('../../../scripts/smoke-expo-consumer.cjs') as unknown;
   const temporaryRoots: string[] = [];
   let originalNpmConfigDryRun: string | undefined;
   let originalNpmConfigDryRunUppercase: string | undefined;
@@ -22,7 +22,10 @@ describe('smoke expo consumer helpers', () => {
     const artifactPaths = ['dist/js/index.js', 'dist/cjs/index.js', 'dist/types/index.d.ts'];
 
     for (const relativePath of artifactPaths) {
-      const absolutePath = path.join(root, relativePath);
+      const absolutePath = path.resolve(root, relativePath);
+      if (!absolutePath.startsWith(root + path.sep)) {
+        throw new Error(`Refusing to write outside the temporary repo root: ${absolutePath}`);
+      }
       fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
       fs.writeFileSync(absolutePath, '// built artifact\n');
     }
@@ -61,7 +64,7 @@ describe('smoke expo consumer helpers', () => {
 
   it('detects when required build artifacts are missing', () => {
     const tempRoot = createTempRepo();
-    const smokeModule = require(scriptPath) as {
+    const smokeModule = loadSmokeModule() as {
       hasBuiltArtifacts: (root: string) => boolean;
     };
 
@@ -71,7 +74,7 @@ describe('smoke expo consumer helpers', () => {
   it('does not rebuild when required build artifacts already exist', () => {
     const tempRoot = createTempRepo();
     writeArtifacts(tempRoot);
-    const smokeModule = require(scriptPath) as {
+    const smokeModule = loadSmokeModule() as {
       ensureBuiltArtifacts: (root: string) => void;
     };
     const { spawnSync } = require('child_process') as { spawnSync: jest.Mock };
@@ -83,7 +86,7 @@ describe('smoke expo consumer helpers', () => {
 
   it('rebuilds when required build artifacts are missing', () => {
     const tempRoot = createTempRepo();
-    const smokeModule = require(scriptPath) as {
+    const smokeModule = loadSmokeModule() as {
       ensureBuiltArtifacts: (root: string) => void;
     };
     const { spawnSync } = require('child_process') as { spawnSync: jest.Mock };
@@ -101,7 +104,7 @@ describe('smoke expo consumer helpers', () => {
   });
 
   it('wraps Windows batch commands through cmd.exe without using shell mode', () => {
-    const smokeModule = require(scriptPath) as {
+    const smokeModule = loadSmokeModule() as {
       resolveCommandInvocation: (
         command: string,
         args: string[],
@@ -119,7 +122,7 @@ describe('smoke expo consumer helpers', () => {
   });
 
   it('keeps non-Windows commands unchanged', () => {
-    const smokeModule = require(scriptPath) as {
+    const smokeModule = loadSmokeModule() as {
       resolveCommandInvocation: (
         command: string,
         args: string[],
@@ -151,7 +154,7 @@ describe('smoke expo consumer helpers', () => {
       stderr: '',
       error: null,
     });
-    const smokeModule = require(scriptPath) as {
+    const smokeModule = loadSmokeModule() as {
       packRepoTarball: (root: string) => string;
     };
 
@@ -161,7 +164,7 @@ describe('smoke expo consumer helpers', () => {
   it('removes inherited npm dry-run flags from child command environments', () => {
     process.env.npm_config_dry_run = 'true';
     process.env.NPM_CONFIG_DRY_RUN = 'true';
-    const smokeModule = require(scriptPath) as {
+    const smokeModule = loadSmokeModule() as {
       createCommandEnv: () => NodeJS.ProcessEnv;
     };
 
@@ -193,7 +196,7 @@ describe('smoke expo consumer helpers', () => {
       error: null,
     }));
 
-    const smokeModule = require(scriptPath) as { main: () => void };
+    const smokeModule = loadSmokeModule() as { main: () => void };
     smokeModule.main();
 
     expect(createdDirectories).toHaveLength(2);
@@ -218,7 +221,7 @@ describe('smoke expo consumer helpers', () => {
     }));
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    const smokeModule = require(scriptPath) as { main: () => void };
+    const smokeModule = loadSmokeModule() as { main: () => void };
 
     expect(() => smokeModule.main()).toThrow('Command output did not contain a valid JSON payload');
     expect(createdDirectories).toHaveLength(2);
@@ -234,7 +237,7 @@ describe('smoke expo consumer helpers', () => {
     ].join('\n');
 
     it('recognizes a lone Hermes V1 advisory as non-blocking', () => {
-      const smokeModule = require(scriptPath) as {
+      const smokeModule = loadSmokeModule() as {
         isHermesOnlyDoctorFailure: (output: string) => boolean;
       };
 
@@ -242,7 +245,7 @@ describe('smoke expo consumer helpers', () => {
     });
 
     it('keeps failing closed for other expo-doctor failures', () => {
-      const smokeModule = require(scriptPath) as {
+      const smokeModule = loadSmokeModule() as {
         isHermesOnlyDoctorFailure: (output: string) => boolean;
       };
 
@@ -281,7 +284,7 @@ describe('smoke expo consumer helpers', () => {
       });
       jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-      const smokeModule = require(scriptPath) as { main: () => void };
+      const smokeModule = loadSmokeModule() as { main: () => void };
 
       expect(() => smokeModule.main()).not.toThrow();
       expect(createdDirectories).toHaveLength(2);
@@ -305,7 +308,7 @@ describe('smoke expo consumer helpers', () => {
         };
       });
 
-      const smokeModule = require(scriptPath) as { main: () => void };
+      const smokeModule = loadSmokeModule() as { main: () => void };
 
       expect(() => smokeModule.main()).toThrow('Command failed (1)');
     });

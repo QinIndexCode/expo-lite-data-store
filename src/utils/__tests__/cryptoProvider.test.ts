@@ -1,4 +1,4 @@
-import { createHash, createHmac, pbkdf2Sync } from 'node:crypto';
+import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto';
 import {
   __resetNativeCryptoForTest,
   hash as providerHash,
@@ -26,7 +26,7 @@ describe('cryptoProvider', () => {
   });
 
   it('pbkdf2 matches node crypto (sha256)', () => {
-    const password = 'test-password';
+    const password = randomBytes(16).toString('hex');
     const salt = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
     const iterations = 1000;
     const dkLen = 64;

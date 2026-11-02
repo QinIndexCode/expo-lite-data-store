@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+
 import { createTable, insert, read, update, findOne, remove } from '../../expo-lite-data-store';
 import { plainStorage } from '../../core/db';
 import { resetMasterKey } from '../../utils/crypto';
@@ -62,12 +64,15 @@ describe('encryption parameters', () => {
       encrypted: true,
     });
 
+    const firstPassword = randomBytes(12).toString('hex');
+    const secondPassword = randomBytes(12).toString('hex');
+
     await insert(
       SENSITIVE_TABLE,
       {
         id: 1,
         username: 'test_user',
-        password: 'secure_password',
+        password: firstPassword,
       },
       { encrypted: true }
     );
@@ -75,11 +80,11 @@ describe('encryption parameters', () => {
     const data = await read(SENSITIVE_TABLE, { encrypted: true });
     expect(data.length).toBe(1);
     expect(data[0].username).toBe('test_user');
-    expect(data[0].password).toBe('secure_password');
+    expect(data[0].password).toBe(firstPassword);
 
-    await update(SENSITIVE_TABLE, { password: 'new_secure_password' }, { where: { id: 1 }, encrypted: true });
+    await update(SENSITIVE_TABLE, { password: secondPassword }, { where: { id: 1 }, encrypted: true });
     const updatedData = await read(SENSITIVE_TABLE, { encrypted: true });
-    expect(updatedData[0].password).toBe('new_secure_password');
+    expect(updatedData[0].password).toBe(secondPassword);
 
     const foundItem = await findOne(SENSITIVE_TABLE, { where: { id: 1 }, encrypted: true });
     expect(foundItem?.username).toBe('test_user');

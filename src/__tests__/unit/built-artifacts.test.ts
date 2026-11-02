@@ -4,7 +4,6 @@ import path from 'path';
 describe('built PerformanceMonitor artifacts', () => {
   const distJsPath = path.resolve(__dirname, '../../../dist/js/core/monitor/PerformanceMonitor.js');
   const distTypesPath = path.resolve(__dirname, '../../../dist/types/core/monitor/PerformanceMonitor.d.ts');
-  const distCjsModulePath = path.resolve(__dirname, '../../../dist/cjs/core/monitor/PerformanceMonitor.js');
 
   it('keeps the runtime configuration API in the ESM bundle', () => {
     const distJs = fs.readFileSync(distJsPath, 'utf8');
@@ -14,7 +13,7 @@ describe('built PerformanceMonitor artifacts', () => {
   });
 
   it('exposes the runtime configuration API from the CJS bundle', () => {
-    const { performanceMonitor } = require(distCjsModulePath) as {
+    const { performanceMonitor } = require('../../../dist/cjs/core/monitor/PerformanceMonitor.js') as {
       performanceMonitor: {
         configure?: unknown;
         resetRuntimeOptions?: unknown;

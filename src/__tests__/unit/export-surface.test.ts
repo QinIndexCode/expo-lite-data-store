@@ -23,8 +23,6 @@ import path from 'path';
 
 type RuntimeExports = Record<string, unknown>;
 
-const MAIN_ENTRY_SPECIFIER = '../../expo-lite-data-store';
-const INDEX_ENTRY_SPECIFIER = '../../index';
 const PACKAGE_JSON_PATH = path.resolve(__dirname, '../../../package.json');
 
 /**
@@ -140,7 +138,10 @@ const DEFAULT_EXPORT_KEYS: readonly string[] = [
 /** Subpath keys of the `package.json` `exports` field. */
 const PACKAGE_EXPORT_SUBPATHS: readonly string[] = ['.', './cjs', './js', './utils/*'];
 
-const loadRuntimeExports = (specifier: string): RuntimeExports => require(specifier) as unknown as RuntimeExports;
+const loadMainEntryExports = (): RuntimeExports =>
+  require('../../expo-lite-data-store') as unknown as RuntimeExports;
+
+const loadIndexEntryExports = (): RuntimeExports => require('../../index') as unknown as RuntimeExports;
 
 const sortedKeys = (value: unknown): string[] => Object.keys(value as object).sort();
 
@@ -148,19 +149,19 @@ const sortedCopy = (keys: readonly string[]): string[] => [...keys].sort();
 
 describe('export surface lock', () => {
   it('locks the runtime-enumerable exports of the main entrypoint', () => {
-    const mainEntry = loadRuntimeExports(MAIN_ENTRY_SPECIFIER);
+    const mainEntry = loadMainEntryExports();
 
     expect(Object.keys(mainEntry).sort()).toEqual(sortedCopy(MAIN_ENTRY_RUNTIME_EXPORT_KEYS));
   });
 
   it('locks the `db` facade key set', () => {
-    const mainEntry = loadRuntimeExports(MAIN_ENTRY_SPECIFIER);
+    const mainEntry = loadMainEntryExports();
 
     expect(sortedKeys(mainEntry.db)).toEqual(sortedCopy(DB_FACADE_KEYS));
   });
 
   it('locks the default export object key set', () => {
-    const mainEntry = loadRuntimeExports(MAIN_ENTRY_SPECIFIER);
+    const mainEntry = loadMainEntryExports();
 
     expect(sortedKeys(mainEntry.default)).toEqual(sortedCopy(DEFAULT_EXPORT_KEYS));
   });
@@ -174,8 +175,8 @@ describe('export surface lock', () => {
   });
 
   it('keeps the index entrypoint re-export surface identical to the main entrypoint', () => {
-    const indexEntry = loadRuntimeExports(INDEX_ENTRY_SPECIFIER);
-    const mainEntry = loadRuntimeExports(MAIN_ENTRY_SPECIFIER);
+    const indexEntry = loadIndexEntryExports();
+    const mainEntry = loadMainEntryExports();
 
     expect(Object.keys(indexEntry).sort()).toEqual(Object.keys(mainEntry).sort());
   });

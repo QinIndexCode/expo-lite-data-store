@@ -1,9 +1,9 @@
-import { createHash, createHmac, hkdfSync, pbkdf2Sync } from 'node:crypto';
+import { createHash, createHmac, hkdfSync, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { hashBytesSync, hashHexSync, hkdfBytesSync, hmacBytesSync, pbkdf2BytesSync } from '../cryptoPrimitives';
 
 describe('cryptoPrimitives', () => {
   it('pbkdf2BytesSync matches node crypto sha256 output', () => {
-    const password = 'test-password';
+    const password = randomBytes(16).toString('hex');
     const salt = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
     const iterations = 2048;
     const dkLen = 48;

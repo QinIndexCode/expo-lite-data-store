@@ -1,16 +1,6 @@
 type MockParams = (string | number | null | boolean | undefined)[] | undefined;
 
-interface NodeSqliteStatement {
-  run(...params: unknown[]): { changes: number | bigint; lastInsertRowid: number | bigint };
-  get(...params: unknown[]): unknown;
-  all(...params: unknown[]): unknown[];
-}
-
-interface NodeSqliteDatabase {
-  exec(sql: string): void;
-  prepare(sql: string): NodeSqliteStatement;
-  close(): void;
-}
+type NodeSqliteDatabase = InstanceType<(typeof import('node:sqlite'))['DatabaseSync']>;
 
 interface NodeSqliteModule {
   DatabaseSync: new (location: string) => NodeSqliteDatabase;
