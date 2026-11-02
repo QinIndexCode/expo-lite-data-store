@@ -138,8 +138,7 @@ const DEFAULT_EXPORT_KEYS: readonly string[] = [
 /** Subpath keys of the `package.json` `exports` field. */
 const PACKAGE_EXPORT_SUBPATHS: readonly string[] = ['.', './cjs', './js', './utils/*'];
 
-const loadMainEntryExports = (): RuntimeExports =>
-  require('../../expo-lite-data-store') as unknown as RuntimeExports;
+const loadMainEntryExports = (): RuntimeExports => require('../../expo-lite-data-store') as unknown as RuntimeExports;
 
 const loadIndexEntryExports = (): RuntimeExports => require('../../index') as unknown as RuntimeExports;
 
