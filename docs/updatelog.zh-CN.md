@@ -2,6 +2,11 @@
 
 [README 入口](../README.md) | [English](./updatelog.en.md) | [消费者文档](../README.zh-CN.md)
 
+### 📅 2026-11-03 `v4.0.1` dev 工具链安全整改与宿主写入路径性能
+
+> 安全：通过 `package.json` overrides 关闭默认分支上全部开放的 Dependabot 告警——`handlebars` 4.7.10（经 `ts-jest` 暴露的三个 JS 注入通告）、`shell-quote` 1.11.0（经 `react-devtools-core` 暴露的 `quote()` 命令注入）、`compression` 1.8.2（经 `@expo/cli` 暴露的提前断开内存泄漏）、`source-map-js` 1.2.2（经 `postcss` 暴露的事件循环 DoS）、分线钉版的 `brace-expansion`（`@>=4: 5.0.12` / `@<4: 1.1.21`，顺带修复此前裸钉破坏的 `minimatch@3` 花括号展开）与 `node-forge` 1.4.2（经 `@expo/code-signing-certificates` / `@expo/cli` 暴露的九条通告）；移除未使用的 `bcryptjs` 运行时依赖，`SECURITY.md` 受支持版本表与 4.x 对齐。以上包均为 dev 工具链专用——`npm audit --omit=dev` 保持 0 漏洞；`minimatch`（修复版跨大版本，3.x 线无修复）与 `deepmerge`（上游未发布修复版）作为已记录遗留保留。
+> 性能：`ConfigManager.getConfig()` 返回共享冻结配置，不再逐次深拷贝整棵配置树（file-system I/O 路径上 78 处调用点；修改返回值现在会抛 `TypeError`——配置变更后需重新调用 `getConfig()`）；insert/write 路径的信封断言由三遍去重为两遍；宿主 bulk 写入吞吐门禁经 `npm run test:perf-gate` 接入 CI。
+
 ### 📅 2026-09-29 `v4.0.0` 跨引擎查询一致性、完整索引生命周期与安全加固
 
 > 跨引擎查询一致性（`sqlite` 下推语义对齐 `QueryEngine`）：数组字段 `$in`/`$nin` 同时匹配数组元素与标量值（`json_each` 展开），`json_type` 区分字段缺失与 JSON `null`、布尔与数字不再互串，`$ne` 命中缺失字段；单个无前导零数字段路径按点形/括号形双分支生成 WHERE 与 `COALESCE` 排序，多数字片段与前导零路径整体回退内存过滤；`$like` 因 SQLite 缺少 Unicode 大小写折叠不再下推；字符串排序统一为 Unicode 码点序（对齐 `BINARY` 排序规则）；新增 `engine-parity` 双引擎一致性集成测试。
