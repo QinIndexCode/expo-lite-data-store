@@ -138,7 +138,7 @@
 > Documentation Update: Updated README.md, README.en.md, WIKI.md, WIKI_EN.md, simplifying configuration descriptions and encryption recommendations
 > Configuration System: Removed code for creating configuration files in the root directory, only supporting app.json configuration and source code default configuration, adapting to Expo Go environment
 > Configuration Cleanup: Removed unnecessary configurations like api.version, encryption.requireAuthOnAccess, cache.enableCompression
-> Performance Configuration: Enabled performance.maxConcurrentOperations, performance.enableBatchOptimization, performance.memoryWarningThreshold, cache.cleanupInterval configurations
+> Performance Configuration: Enabled performance.maxConcurrentOperations and cache.cleanupInterval configurations; performance.enableBatchOptimization and performance.memoryWarningThreshold are compatibility-reserved keys with no runtime consumer, so they currently have no effect
 > File Cleanup: Deleted unnecessary ConfigGenerator.ts file
 > Fix: Handled removed cache.enableCompression property in CacheManager.ts, returning default value false
 > Fix: Removed reference to deleted requireAuthOnAccess property in ConfigManager.test.ts

@@ -4,7 +4,7 @@
 
 ## 文档范围
 
-本文件是当前 `3.x` 公共表面的详细 API 参考，覆盖以下内容：
+本文件是当前 `4.x` 公共表面的详细 API 参考，覆盖以下内容：
 
 - 正式支持的安装契约；
 - 公开导出的 facade、命名函数与辅助导出；
@@ -19,6 +19,16 @@
 `plainStorage` 以及 `expo-lite-data-store/dist/js/...`、`dist/cjs/...` 等包内深层导入不再属于公开 API。请从 `expo-lite-data-store` 根入口使用 `db` facade 或命名 API。对以 `encrypted: true` 创建的表，每一次表操作都必须传入 `encrypted: true`；选择明文表面的请求会以 fail-closed 方式被拒绝。
 
 上述禁令仅针对字面 `dist/...` 文件路径和已移除的 `plainStorage` 导出。`package.json` 的 `exports` 子路径 `./js`、`./cjs`、`./utils/*` 仍是受支持的兼容写法，会解析到同一份构建产物；新代码请优先使用根入口。
+
+## v4 升级
+
+`4.x` 是破坏性主版本。从 `3.x` 升级时请确认以下行为变化：
+
+- **公开导出面收紧**：零生产引用的 `core/api/*` 全簇、monitor barrel 与零调用方符号已删除；`./js`、`./cjs`、`./utils/*` 子路径仍解析到同一构建产物，但新代码应使用根入口。
+- **引擎偏好持久化**：`migrateEngine()` 成功后所选引擎跨启动持久化；`init({ engine })` 或 `configManager` 的程序化选择仍会覆盖标记，配置文件（如 `app.json`）里的 `engine` 不会。
+- **迁移目标保护**：目标表已有数据时 `migrateEngine()` 以 `MIGRATION_DEST_NOT_EMPTY` 失败；需要替换时显式传 `overwriteExisting: true`。
+- **跨引擎查询一致性**：`sqlite` 下推与 `file-system` 内存查询在 `$in`/`$nin`、`$ne`、JSON `null` 与字符串排序上对齐；无法保证一致的操作符会自动回退内存过滤。
+- **配置与监控**：`configManager.getConfig()` 返回共享冻结对象，修改会抛 `TypeError`，配置变更后需重新调用；`monitoring.enablePerformanceTracking` 运行时切换立即生效，存储侧读写样本仅由 `file-system` 引擎记录。
 
 ## 安装契约
 
@@ -629,6 +639,8 @@ import { db, init } from 'expo-lite-data-store';
 await init({ engine: 'sqlite' });
 ```
 
+`engine` 只在 `init({ engine })` 或 `configManager` 上生效；把它传给单表 API（如 `createTable()`、`read()`）会被忽略，开发环境会输出一次警告。
+
 > **依赖说明**：`expo-sqlite` 是可选 peer 依赖。使用默认的 `'file-system'` 引擎时无需安装 `expo-sqlite`；仅当显式启用 `sqlite` 引擎时才需要安装该模块。
 
 ### 索引管理 API
@@ -759,6 +771,25 @@ configManager.set('monitoring.enablePerformanceTracking', true);
 `set()` 成功返回后立即生效：配置落地时会通知已订阅的组件（如 `performanceMonitor`）就地刷新受影响的运行时字段，无需重建实例。配置变更只接管未被显式覆盖的字段：`performanceMonitor.configure()` 与 `setEnabled()` 的显式设置优先于配置变更，`resetRuntimeOptions()` 会清除显式覆盖、恢复配置权威。
 
 > `cache.*` 仅在 `file-system` 引擎下生效。`monitoring.enablePerformanceTracking` 的存储侧读写样本也仅由 `file-system` 引擎记录（encrypt/decrypt 等加密耗时样本两引擎均记录）。在 `sqlite` 引擎下开启 `monitoring.enablePerformanceTracking`，初始化时会输出一条带 `[SQLiteStorageAdapter]` 前缀的一次性告警后忽略；`cache.*` 被静默忽略、不告警。`monitoring.enableHealthChecks`（默认 `true`）是 `performanceMonitor` 的运行开关，与存储引擎无关，也不会告警。
+
+#### `configManager.hasExplicitEngineChoice()`
+
+返回 `boolean`，表示当前运行时是否通过程序化方式（`setConfig()`、`updateConfig()`、`set('engine', ...)` 或 `init({ engine })`）显式选择过引擎。返回 `false` 时，配置文件（如 `app.json`）里的 `engine` 不会覆盖迁移持久化的引擎标记，启动时仍可能按标记提升为 `sqlite`。
+
+#### `configManager.subscribe(listener)`
+
+注册配置变更监听器，返回一个幂等的取消订阅函数。监听器在 `setConfig()`、`updateConfig()`、`resetConfig()`、`set()` 成功落地后触发；合并失败并回滚的变更不会通知。订阅保存在 `ConfigManager` 类上，`ConfigManager.resetInstance()` 重建单例后仍然有效。
+
+```ts
+const unsubscribe = configManager.subscribe(() => {
+  console.log(configManager.getConfig().cache.maxSize);
+});
+
+configManager.set('cache.maxSize', 2000); // 监听器被调用
+
+unsubscribe();
+unsubscribe(); // 幂等：重复调用无副作用
+```
 
 ### 运行时配置来源
 

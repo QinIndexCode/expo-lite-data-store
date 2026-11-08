@@ -18,22 +18,29 @@ export class DbInstanceManager {
   }
 
   public resolveActiveEngine(): 'file-system' | 'sqlite' {
+    // A programmatic choice (setConfig / init({ engine })) always wins, so
+    // callers can intentionally switch back after a migration.
+    if (configManager.hasExplicitEngineChoice()) {
+      return this.resolveConfiguredEngine();
+    }
+
+    // After a successful migration the marker is the durable source of truth.
+    // Config-file values (app.json / Expo config) must not send the app back
+    // to an engine whose data was cleaned by cleanSource.
+    if (this.persistedEnginePreference) {
+      return this.persistedEnginePreference;
+    }
+
+    return this.resolveConfiguredEngine();
+  }
+
+  private resolveConfiguredEngine(): 'file-system' | 'sqlite' {
     const configuredEngine = configManager.getConfig().engine ?? 'file-system';
     if (configuredEngine === 'sqlite') {
       return 'sqlite';
     }
     if (configuredEngine === 'auto') {
-      const sqliteModule = loadOptionalExpoModule('expo-sqlite');
-      if (sqliteModule) {
-        return 'sqlite';
-      }
-      return 'file-system';
-    }
-    // Explicit runtime engine choices always win. Only the untouched default
-    // defers to the persisted migration marker, so a programmatic
-    // setConfig({ engine: 'file-system' }) can always switch back.
-    if (!configManager.hasExplicitEngineChoice() && this.persistedEnginePreference === 'sqlite') {
-      return 'sqlite';
+      return loadOptionalExpoModule('expo-sqlite') ? 'sqlite' : 'file-system';
     }
     return 'file-system';
   }

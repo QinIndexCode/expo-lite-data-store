@@ -100,9 +100,11 @@ describe('EngineMigrationService', () => {
     expect(sqliteRecords).toHaveLength(2);
     expect(sqliteRecords.map(r => r.name)).toEqual(['Alice', 'Bob']);
 
-    // Verify source was cleaned
-    const fsCountAfterClean = await storage.count(fsTable);
-    expect(fsCountAfterClean).toBe(0);
+    // Verify source data was cleaned. count() is table-level and reads the
+    // shared metadata, so it reflects the migrated rows instead of the source
+    // file; the source storage itself must be empty.
+    expect(await storage.read(fsTable)).toHaveLength(0);
+    expect(await sqliteAdapter.count(fsTable)).toBe(2);
 
     // 3. Migrate back from SQLite to FileSystem
     const backwardResult = await migrateEngine('file-system', {

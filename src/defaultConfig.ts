@@ -8,6 +8,8 @@ export default {
   engine: 'file-system' as const,
 
   api: {
+    // Reserved: accepted and validated by the config type, but no runtime path
+    // enforces rate limiting, so changing these values has no effect.
     rateLimit: {
       enabled: false,
       requestsPerSecond: 10,
@@ -33,9 +35,13 @@ export default {
   },
 
   performance: {
+    // Reserved: no runtime consumer reads this key, so toggling it has no effect.
     enableQueryOptimization: true,
     maxConcurrentOperations: 5,
+    // Reserved: no runtime consumer reads this key, so toggling it has no effect.
     enableBatchOptimization: true,
+    // Reserved: memory warnings use `cache.memoryWarningThreshold`; this key has
+    // no runtime consumer, including the LITE_STORE_* environment mapping.
     memoryWarningThreshold: 0.8,
   },
 
