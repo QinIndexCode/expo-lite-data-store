@@ -7,31 +7,44 @@ export class CacheMonitor {
   private history: CacheStats[] = [];
   private readonly maxHistoryRecords = 100;
   private monitoringInterval: ReturnType<typeof setInterval> | null = null;
+  private monitoringIntervalMs = 60000;
+  private monitoringRequested = false;
   private enabled = true;
 
   constructor(cacheManager: CacheManager) {
     this.cacheManager = cacheManager;
   }
 
+  /**
+   * Requests periodic sampling. The timer only runs while monitoring is enabled,
+   * so a disabled monitor holds no pending interval.
+   */
   startMonitoring(intervalMs: number = 60000): void {
-    if (this.monitoringInterval) {
-      this.stopMonitoring();
-    }
-
-    this.monitoringInterval = setInterval(() => {
-      if (this.enabled) {
-        this.recordStats();
-      }
-    }, intervalMs);
-
-    this.recordStats();
+    this.monitoringIntervalMs = intervalMs;
+    this.monitoringRequested = true;
+    this.syncMonitoringTimer();
   }
 
   stopMonitoring(): void {
+    this.monitoringRequested = false;
+    this.syncMonitoringTimer();
+  }
+
+  private syncMonitoringTimer(): void {
     if (this.monitoringInterval) {
       clearInterval(this.monitoringInterval);
       this.monitoringInterval = null;
     }
+
+    if (!this.monitoringRequested || !this.enabled) {
+      return;
+    }
+
+    this.monitoringInterval = setInterval(() => {
+      this.recordStats();
+    }, this.monitoringIntervalMs);
+
+    this.recordStats();
   }
 
   recordStats(): void {
@@ -68,39 +81,12 @@ export class CacheMonitor {
     }));
   }
 
-  checkHealth(): {
-    healthy: boolean;
-    issues: string[];
-    recommendations: string[];
-  } {
-    const stats = this.getCurrentStats();
-    const issues: string[] = [];
-    const recommendations: string[] = [];
-
-    if (stats.hitRate < 0.5) {
-      issues.push(`缓存命中率较低: ${(stats.hitRate * 100).toFixed(2)}%`);
-      recommendations.push('考虑增加缓存大小或调整缓存策略');
-    }
-
-    if (stats.maxMemoryUsage > 0 && stats.memoryUsage > stats.maxMemoryUsage * 0.9) {
-      issues.push(`内存使用率较高: ${((stats.memoryUsage / stats.maxMemoryUsage) * 100).toFixed(2)}%`);
-      recommendations.push('考虑增加最大内存限制或优化缓存清理策略');
-    }
-
-    if (stats.evictions > stats.writes * 0.5) {
-      issues.push(`缓存淘汰频繁: ${stats.evictions} 次淘汰，${stats.writes} 次写入`);
-      recommendations.push('考虑增加缓存容量');
-    }
-
-    return {
-      healthy: issues.length === 0,
-      issues,
-      recommendations,
-    };
-  }
-
   setEnabled(enabled: boolean): void {
+    if (this.enabled === enabled) {
+      return;
+    }
     this.enabled = enabled;
+    this.syncMonitoringTimer();
   }
 
   isEnabled(): boolean {

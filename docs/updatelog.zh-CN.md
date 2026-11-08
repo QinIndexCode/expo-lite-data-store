@@ -137,7 +137,7 @@
 > 文档更新：更新README.md、README.en.md、WIKI.md、WIKI_EN.md，简化配置描述和加密推荐模式
 > 配置系统：移除了根目录下创建配置文件的代码，仅支持app.json配置和源代码默认配置，适配Expo Go环境
 > 配置清理：移除了api.version、encryption.requireAuthOnAccess、cache.enableCompression等非必要配置
-> 性能配置：启用performance.maxConcurrentOperations、performance.enableBatchOptimization、performance.memoryWarningThreshold、cache.cleanupInterval配置
+> 性能配置：启用performance.maxConcurrentOperations、cache.cleanupInterval配置；performance.enableBatchOptimization、performance.memoryWarningThreshold为兼容保留项，当前无运行时消费方、设置后不生效
 > 文件清理：删除了不再需要的ConfigGenerator.ts文件
 > 修复：CacheManager.ts中处理已移除的cache.enableCompression属性，返回默认值false
 > 修复：ConfigManager.test.ts中移除对已删除requireAuthOnAccess属性的引用

@@ -65,6 +65,16 @@ npm run qa:expo-go:mumu:full
 npm run qa:flagship:native
 ```
 
+### MuMu 基线脚本的前置条件
+
+`qa:expo-go:mumu`、`qa:expo-go:mumu:full`、`qa:flagship:native` 以及全部 `qa:baseline:*` 脚本都转调 `scripts/mumu-expo-qa.cjs`。该包装脚本本身不实现 QA 流程，而是运行一个仓库并未内置的 Python 脚本。使用这些脚本前需要准备：
+
+- 安装 `mumu-expo-qa` skill，使 `<CODEX_HOME>/skills/mumu-expo-qa/scripts/mumu_expo_qa.py` 存在；`<CODEX_HOME>` 取 `$CODEX_HOME`，未设置时为 `~/.codex`。
+- 让 `python` 在 `PATH` 中可用，或用 `PYTHON` 指向要使用的解释器。
+- 以仓库根目录作为工作目录；包装脚本会把额外参数原样转交给 Python 脚本，并以其退出码结束。
+
+缺少上述条件时，包装脚本会抛出 spawn 错误，或由 Python 报 "No such file or directory"。仓库内自带的 `qa:expo-go*` 脚本（`expo-runtime-qa.cjs`）没有这些前置要求。
+
 如需针对单一组合做定向复测，可直接调用脚本：
 
 ```bash
@@ -123,6 +133,12 @@ artifacts/expo-runtime-qa/<timestamp>/
 发布判断应以 `summary.json` 为准，`cases.jsonl` 与各 phase 工件用于进一步定位。
 
 `expo-doctor.log`、`expo-export.log`、`logcat.txt`、事件 JSONL 及其他文本诊断工件均使用有界尾部保留，单个文本或 JSONL 文件最多 512 KiB。较早内容可能被截断，因此需要完整原始日志时应由 CI 或设备平台在工件目录之外单独保留。
+
+### 工件清理
+
+- 捕获的命令日志与流日志，以及 JSONL case/event 文件，只保留各自最新的 512 KiB；它们是诊断用的尾部片段，不是完整的历史日志。
+- 默认工件运行写入 `artifacts/expo-runtime-qa/` 下。运行完成后，harness 保留最新 3 个带时间戳的已完成运行，只清理更早且安全的已完成运行；进行中、不带时间戳以及符号链接位置不会被自动清理。
+- 传入 `--artifacts-dir=PATH` 会退出自动保留策略；自定义工件目录永远不会被 harness 自动清理。
 
 ## Verdict 解读
 

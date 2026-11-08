@@ -5,7 +5,6 @@ import { configManager } from '../config/ConfigManager';
 import { writePersistedEnginePreference } from '../config/EnginePreference';
 import { dbManager } from '../db';
 import { StorageError } from '../../types/storageErrorInfc';
-import { withDynamicFieldEncryption } from './TransactionService';
 import logger from '../../utils/logger';
 
 export interface MigrateEngineOptions {
@@ -78,6 +77,11 @@ export class EngineMigrationService {
     const tableNames = await sourceEngine.listTables();
     const migratedTables: string[] = [];
     const newlyCreatedTables: string[] = [];
+    // Both engines share one metadata store, so clearing a source table after
+    // migration also resets the shared count. Capture the verified destination
+    // counts first and republish them after cleanup, otherwise count() reports
+    // an empty migrated table until the asynchronous validator repairs it.
+    const verifiedCounts = new Map<string, number>();
     let totalRecords = 0;
 
     // Shared metadata makes hasTable() true for every source table on the
@@ -117,27 +121,11 @@ export class EngineMigrationService {
             : meta.get(tableName);
         const records = await sourceEngine.read(tableName, { bypassCache: true });
 
-        const targetHasTable = await destEngine.hasTable(tableName);
-        if (!targetHasTable) {
-          const isDynamicAllFields = tableMeta?.encryptAllFields === true;
-          const createOptions = {
-            mode: tableMeta?.mode,
-            columns: tableMeta?.columns,
-            encrypted: tableMeta?.encrypted,
-            requireAuthOnAccess: tableMeta?.requireAuthOnAccess,
-            encryptedFields: tableMeta?.encryptedFields,
-            encryptFullTable: tableMeta?.encryptFullTable,
-            isHighRisk: tableMeta?.isHighRisk,
-            highRiskFields: tableMeta?.highRiskFields,
-            initialData: records,
-          };
-          await destEngine.createTable(
-            tableName,
-            isDynamicAllFields ? withDynamicFieldEncryption(createOptions, true) : createOptions
-          );
-        } else {
-          await destEngine.overwrite(tableName, records);
-        }
+        // Both engines read table existence from the shared metadata store, and
+        // every name here came from that same store, so the destination always
+        // reports the table as existing. overwrite() creates the physical table
+        // (or SQL table) when the destination engine holds no rows for it yet.
+        await destEngine.overwrite(tableName, records);
 
         // If table had index definitions, recreate them on the destination engine
         const indexes = tableMeta?.indexes;
@@ -155,8 +143,10 @@ export class EngineMigrationService {
           }
         }
 
-        // Verify row counts match
-        const destCount = await destEngine.count(tableName);
+        // Verify row counts match. The physical adapter re-reads the destination
+        // instead of trusting the shared metadata count, which both engines
+        // publish from the same store and could mask a failed write.
+        const destCount = await getVerifiedDestCount(destEngine, tableName, tableMeta?.encryptFullTable === true);
         if (destCount !== records.length) {
           throw new StorageError(
             `Migration verification failed for table '${tableName}': expected ${records.length} records, got ${destCount}`,
@@ -166,6 +156,9 @@ export class EngineMigrationService {
 
         totalRecords += records.length;
         migratedTables.push(tableName);
+        // Publish the logical record count verified above; a full-table
+        // encrypted destination reports one physical envelope, not N rows.
+        verifiedCounts.set(tableName, records.length);
 
         if (options?.progressCallback) {
           options.progressCallback({
@@ -210,6 +203,16 @@ export class EngineMigrationService {
           logger.warn(`[EngineMigrationService] Failed to clean source table '${tableName}'`, cleanError);
         }
       }
+
+      // Source clears write the shared metadata count back to zero, so restore
+      // the counts already verified against the destination data.
+      for (const tableName of migratedTables) {
+        const verifiedCount = verifiedCounts.get(tableName);
+        if (verifiedCount !== undefined) {
+          meta.update(tableName, { count: verifiedCount });
+        }
+      }
+      await meta.saveImmediately?.();
     }
 
     // Switch active runtime engine configuration and reset cached adapter instances
@@ -239,6 +242,24 @@ const getDestPhysicalRecordCount = async (
     return destEngine.getPhysicalRecordCount(tableName);
   }
   return 0;
+};
+
+/**
+ * Verifies the destination without trusting the shared metadata count.
+ * A full-table encrypted destination stores one envelope for many logical
+ * rows, so its verifyCount() cannot validate logical rows; count() remains
+ * authoritative there because only the encrypted facade can verify it.
+ */
+const getVerifiedDestCount = async (
+  destEngine: FileSystemStorageAdapter | SQLiteStorageAdapter,
+  tableName: string,
+  encryptFullTable: boolean
+): Promise<number> => {
+  if (!encryptFullTable) {
+    const { actual } = await destEngine.verifyCount(tableName);
+    return actual;
+  }
+  return destEngine.count(tableName);
 };
 
 export const migrateEngine = EngineMigrationService.migrateEngine;

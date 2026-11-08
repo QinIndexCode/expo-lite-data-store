@@ -102,6 +102,28 @@ describe('ConfigManager Integration with Expo Constants', () => {
     expect(config.chunkSize).toBe(888888);
   });
 
+  it('warns and falls back to defaults when the global Expo config cannot be read', async () => {
+    Object.defineProperty(globalThis, '__expoConfig', {
+      configurable: true,
+      get() {
+        throw new Error('global config unavailable');
+      },
+    });
+
+    jest.resetModules();
+    const { default: logger } = await import('../../utils/logger');
+    const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+    const { default: defaultConfig } = await import('../../defaultConfig');
+    const mod = await import('../../core/config/ConfigManager');
+
+    const config = mod.ConfigManager.getInstance().getConfig();
+
+    expect(config.storageFolder).toBe(defaultConfig.storageFolder);
+    const messages = warnSpy.mock.calls.map(([message]) => String(message));
+    expect(messages.some(message => message.includes('Failed to read the global Expo configuration'))).toBe(true);
+    warnSpy.mockRestore();
+  });
+
   it('propagates Expo configuration to adapter runtime consumers', async () => {
     const { FileSystemStorageAdapter } = await import('../../core/adapter/FileSystemStorageAdapter');
 

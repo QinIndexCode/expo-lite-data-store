@@ -328,7 +328,7 @@ describe('developer documentation contract', () => {
     expect(apiGuideZh).toContain('[English](./API.en.md)');
   });
 
-  it('documents the v3 strict table-listing boundary and public type exports', () => {
+  it('documents the strict table-listing boundary and public type exports', () => {
     const strictListCall = /listTables\s*\(\{\s*encrypted:\s*true,\s*requireAuthOnAccess:\s*true\s*\}\)/;
     const publicTypeExports = [
       'PerformanceStats',
@@ -401,10 +401,15 @@ describe('developer documentation contract', () => {
     }
   });
 
-  it('records the current v3 release in both update logs', () => {
+  it('records the v3 release in both update logs', () => {
     for (const updateLogContent of [updateLog, updateLogZh]) {
       expect(updateLogContent).toMatch(/2026-07-18[^\r\n]*v3\.0\.0/);
     }
+  });
+
+  it('documents the v4 upgrade surface in both API guides', () => {
+    expect(apiGuide).toContain('## Upgrading to v4');
+    expect(apiGuideZh).toContain('## v4 升级');
   });
 
   it('keeps bug report templates aligned with Expo runtime triage needs', () => {

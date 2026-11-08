@@ -246,8 +246,13 @@ export class ConfigManager {
             if (typeof Constants.getConfig === 'function') {
               try {
                 expoConfig = Constants.getConfig();
-              } catch {
-                // An unavailable Expo config is treated as absent.
+              } catch (error) {
+                // An unavailable Expo config is treated as absent, but the
+                // failure stays visible at debug level for configuration drift.
+                logger.debug(
+                  '[ConfigManager] expo-constants getConfig() unavailable; falling back to other sources',
+                  error
+                );
               }
             }
 
@@ -273,7 +278,11 @@ export class ConfigManager {
                 return this.mergeConfig(baseConfig, liteStoreConfig);
               }
             }
-          } catch {}
+          } catch (error) {
+            // expo-constants is optional in some runtimes; keep the fallback
+            // observable without failing configuration loading.
+            logger.debug('[ConfigManager] expo-constants could not be read; falling back to other sources', error);
+          }
 
           const globalExpoFallback = this.extractLiteStoreConfig(globalConfig?.expo);
           if (globalExpoFallback) {
@@ -285,9 +294,15 @@ export class ConfigManager {
             logger.info('Configuration loaded from global.liteStoreConfig');
             return this.mergeConfig(baseConfig, globalConfig.liteStoreConfig);
           }
-        } catch {}
+        } catch (error) {
+          // A throwing global config getter is unexpected; warn so the silent
+          // fallback to defaults does not hide a broken host configuration.
+          logger.warn('[ConfigManager] Failed to read the global Expo configuration; continuing with defaults', error);
+        }
       }
-    } catch {}
+    } catch (error) {
+      logger.warn('[ConfigManager] Failed to resolve file-based configuration; continuing with defaults', error);
+    }
 
     return baseConfig;
   }

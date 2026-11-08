@@ -77,3 +77,24 @@ export const StorageErrorCode = {
 } as const;
 
 export type StorageErrorCode = (typeof StorageErrorCode)[keyof typeof StorageErrorCode];
+
+/**
+ * Compatibility-reserved codes.
+ *
+ * The members below are part of the public `StorageErrorCode` surface but have
+ * no production code path that throws them today. They are kept so existing
+ * consumers can keep switching on them, and so future releases can wire them up
+ * without a breaking change. Do not remove them without a major version bump.
+ *
+ * TABLE_CREATE_FAILED, TABLE_COUNT_FAILED, TABLE_SIZE_FAILED, TABLE_CHUNK_FAILED,
+ * TABLE_CHUNK_SIZE_FAILED, TABLE_CHUNK_SIZE_TOO_SMALL, TABLE_CHUNK_SIZE_TOO_LARGE,
+ * TABLE_CHUNK_SIZE_TOO_MANY, TABLE_CHUNK_SIZE_TOO_FEW, TABLE_CHUNK_SIZE_TOO_MUCH,
+ * TABLE_CHUNK_SIZE_TOO_LITTLE, TABLE_ALREADY_EXISTS, TABLE_INDEX_NAME_INVALID,
+ * TABLE_INDEX_TYPE_INVALID, TABLE_INDEX_UNIQUE_INVALID, FILE_NOT_FOUND,
+ * FILE_ALREADY_EXISTS, FILE_NAME_INVALID, FILE_CONTENT_TOO_LARGE,
+ * FILE_CONTENT_TOO_SMALL, FILE_CONTENT_TOO_LONG, FILE_CONTENT_TOO_SHORT,
+ * FILE_CONTENT_TOO_MANY, FILE_CONTENT_TOO_FEW, FILE_MOVE_FAILED, FILE_COPY_FAILED,
+ * FILE_RENAME_FAILED, FILE_TRUNCATE_FAILED, FILE_CLOSE_FAILED, FILE_SEEK_FAILED,
+ * FILE_TELL_FAILED, CHUNK_INTEGRITY_FAILED, BULK_OPERATION_FAILED,
+ * TRANSACTION_COMMIT_FAILED.
+ */

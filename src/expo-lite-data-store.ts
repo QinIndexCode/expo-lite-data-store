@@ -31,6 +31,7 @@ import type {
 import type { PerformanceStats, HealthCheckResult } from './core/monitor/PerformanceMonitor';
 import type { KeyCacheStats } from './utils/crypto';
 import { StorageError } from './types/storageErrorInfc';
+import logger from './utils/logger';
 import * as CryptoService from './core/crypto/CryptoService';
 import { migrateEngine, EngineMigrationService } from './core/service/EngineMigrationService';
 export type { MigrateEngineOptions, MigrationResult } from './core/service/EngineMigrationService';
@@ -136,7 +137,11 @@ const resolveStorageAdapter = (options?: CommonOptions) => {
     hasExplicitSecurityOptions(options) &&
     !matchesTransactionSecurity(requestedSecurity, activeTransactionSecurity)
   ) {
-    throw new Error('Transaction security options must match the active transaction');
+    throw new StorageError('Transaction security options must match the active transaction', 'PERMISSION_DENIED', {
+      details: 'Every operation inside a transaction must use the storage surface that opened it.',
+      suggestion:
+        'Repeat the operation with the same encrypted/requireAuthOnAccess options that were passed to beginTransaction.',
+    });
   }
 
   return {
@@ -222,7 +227,28 @@ const assertTableAccessPolicy = async (tableName: string, security: TransactionS
   }
 };
 
+let ignoredTableEngineOptionWarned = false;
+
+/**
+ * `TableOptions.engine` is only honored by `init()`. Per-table APIs resolve the
+ * engine from runtime config, so an engine passed alongside a table operation is
+ * ignored; surface that once in development instead of letting it look effective.
+ */
+const warnOnIgnoredTableEngineOption = (options?: CommonOptions): void => {
+  if (ignoredTableEngineOptionWarned || process.env.NODE_ENV === 'production') {
+    return;
+  }
+  if (!options || (options as { engine?: unknown }).engine === undefined) {
+    return;
+  }
+  ignoredTableEngineOptionWarned = true;
+  logger.warn(
+    '[expo-lite-data-store] TableOptions.engine is ignored by per-table APIs; it is only honored by init({ engine }). Set the engine through config or init() instead.'
+  );
+};
+
 const resolveTableStorageAdapter = async (tableName: string, options?: CommonOptions) => {
+  warnOnIgnoredTableEngineOption(options);
   const resolved = resolveStorageAdapter(options);
   await assertTableAccessPolicy(tableName, resolved);
   return resolved;

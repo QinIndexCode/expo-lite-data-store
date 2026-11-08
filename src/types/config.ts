@@ -31,9 +31,15 @@ export interface LiteStoreConfig {
 
   /** Performance configuration */
   performance: {
+    /** Reserved: no runtime consumer reads this key, so it currently has no effect. */
     enableQueryOptimization: boolean;
     maxConcurrentOperations: number;
+    /** Reserved: no runtime consumer reads this key, so it currently has no effect. */
     enableBatchOptimization: boolean;
+    /**
+     * Reserved: memory warnings use `cache.memoryWarningThreshold`. This key has
+     * no runtime consumer, so it currently has no effect.
+     */
     memoryWarningThreshold: number;
   };
 
@@ -62,6 +68,7 @@ export interface LiteStoreConfig {
 
   /** API configuration */
   api: {
+    /** Reserved: no runtime path enforces rate limiting, so these values currently have no effect. */
     rateLimit: {
       enabled: boolean;
       requestsPerSecond: number;

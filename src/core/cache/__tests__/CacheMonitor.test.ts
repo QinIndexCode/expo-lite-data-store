@@ -60,49 +60,6 @@ describe('CacheMonitor', () => {
     });
   });
 
-  describe('health checks', () => {
-    it('reports a healthy cache state', () => {
-      cacheManager.set('key1', 'value1');
-      cacheManager.get('key1');
-      cacheManager.get('key1');
-
-      cacheMonitor.recordStats();
-      const health = cacheMonitor.checkHealth();
-
-      expect(health.healthy).toBe(true);
-      expect(health.issues.length).toBe(0);
-    });
-
-    it('flags a low cache hit rate', () => {
-      cacheManager.set('key1', 'value1');
-      cacheManager.get('key1');
-      for (let index = 0; index < 9; index++) {
-        cacheManager.get(`missing-${index}`);
-      }
-
-      cacheMonitor.recordStats();
-      const health = cacheMonitor.checkHealth();
-
-      expect(health.healthy).toBe(false);
-      expect(health.issues).toContainEqual(expect.stringContaining('命中率'));
-    });
-
-    it('flags high reported memory usage', () => {
-      const baseStats = cacheManager.getStats();
-      jest.spyOn(cacheManager, 'getStats').mockReturnValue({
-        ...baseStats,
-        memoryUsage: 9_500,
-        maxMemoryUsage: 10_000,
-      });
-
-      cacheMonitor.recordStats();
-      const health = cacheMonitor.checkHealth();
-
-      expect(health.healthy).toBe(false);
-      expect(health.issues).toContainEqual(expect.stringContaining('内存使用率'));
-    });
-  });
-
   describe('monitoring controls', () => {
     it('records while monitoring and stops recording after stop', () => {
       jest.useFakeTimers();
@@ -119,12 +76,37 @@ describe('CacheMonitor', () => {
       expect(cacheMonitor.getHistory()).toHaveLength(2);
     });
 
-    it('enables and disables monitoring', () => {
+    it('does not run a timer while monitoring is disabled', () => {
+      jest.useFakeTimers();
       cacheMonitor.setEnabled(false);
-      expect(cacheMonitor.isEnabled()).toBe(false);
+      cacheMonitor.startMonitoring(100);
+
+      expect(cacheMonitor.getHistory()).toHaveLength(0);
+      jest.advanceTimersByTime(300);
+      expect(cacheMonitor.getHistory()).toHaveLength(0);
 
       cacheMonitor.setEnabled(true);
-      expect(cacheMonitor.isEnabled()).toBe(true);
+      expect(cacheMonitor.getHistory()).toHaveLength(1);
+      jest.advanceTimersByTime(100);
+      expect(cacheMonitor.getHistory()).toHaveLength(2);
+    });
+
+    it('stops the timer when disabled and restarts it when re-enabled', () => {
+      jest.useFakeTimers();
+      cacheMonitor.startMonitoring(100);
+      expect(cacheMonitor.getHistory()).toHaveLength(1);
+
+      jest.advanceTimersByTime(100);
+      expect(cacheMonitor.getHistory()).toHaveLength(2);
+
+      cacheMonitor.setEnabled(false);
+      jest.advanceTimersByTime(300);
+      expect(cacheMonitor.getHistory()).toHaveLength(2);
+
+      cacheMonitor.setEnabled(true);
+      expect(cacheMonitor.getHistory()).toHaveLength(3);
+      jest.advanceTimersByTime(100);
+      expect(cacheMonitor.getHistory()).toHaveLength(4);
     });
 
     it('clears monitoring history', () => {

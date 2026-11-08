@@ -65,6 +65,16 @@ npm run qa:expo-go:mumu:full
 npm run qa:flagship:native
 ```
 
+### Baseline prerequisites for the MuMu scripts
+
+`qa:expo-go:mumu`, `qa:expo-go:mumu:full`, `qa:flagship:native`, and every `qa:baseline:*` script delegate to `scripts/mumu-expo-qa.cjs`. That wrapper does not implement the QA flow itself: it runs an external Python script that this repository does not vendor. Before using these scripts:
+
+- Install the `mumu-expo-qa` skill so that `<CODEX_HOME>/skills/mumu-expo-qa/scripts/mumu_expo_qa.py` exists. `<CODEX_HOME>` is `$CODEX_HOME` when set, otherwise `~/.codex`.
+- Make a Python interpreter available as `python` on `PATH`, or point `PYTHON` at the interpreter to use.
+- Keep the repository as the working directory; the wrapper forwards every extra argument to the Python script and exits with its status code.
+
+Without these prerequisites the wrapper fails with a spawn error or a "No such file or directory" message from Python. The in-repo `qa:expo-go*` scripts (`expo-runtime-qa.cjs`) have no such requirement.
+
 Direct harness usage for focused reruns:
 
 ```bash

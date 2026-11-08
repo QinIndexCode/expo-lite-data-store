@@ -4,7 +4,7 @@
 
 ## Scope of this reference
 
-This document is the detailed API reference for the current `3.x` public surface. It covers:
+This document is the detailed API reference for the current `4.x` public surface. It covers:
 
 - the supported install contract;
 - the exported facade and named functions;
@@ -19,6 +19,16 @@ For a narrative setup guide, start with [README.en.md](../README.en.md). For mai
 `plainStorage` and package deep imports (`expo-lite-data-store/dist/js/...` or `dist/cjs/...`) are no longer public. Use the root `db` facade or named APIs imported from `expo-lite-data-store`. A table created with `encrypted: true` must be accessed with `encrypted: true` on every table operation; requests that select the plain surface fail closed.
 
 The ban covers literal `dist/...` file paths and the removed `plainStorage` export only. The `package.json` `exports` subpaths `./js`, `./cjs`, and `./utils/*` remain supported compatibility spellings that resolve to the same built files; prefer the root entrypoint for new code.
+
+## Upgrading to v4
+
+`4.x` is a breaking major release. When upgrading from `3.x`, check these behaviour changes:
+
+- **Tighter public export surface**: the zero-referenced `core/api/*` cluster, the monitor barrel, and symbols with no callers were removed. The `./js`, `./cjs`, and `./utils/*` subpaths still resolve to the same built files, but new code should use the root entrypoint.
+- **Persisted engine preference**: after a successful `migrateEngine()` the chosen engine survives restarts. A programmatic choice through `init({ engine })` or `configManager` still overrides the marker; an `engine` value in config files such as `app.json` does not.
+- **Migration destination protection**: `migrateEngine()` fails with `MIGRATION_DEST_NOT_EMPTY` when a destination table already holds data; pass `overwriteExisting: true` to replace it explicitly.
+- **Cross-engine query consistency**: SQLite pushdown and in-memory `file-system` queries now agree on `$in`/`$nin`, `$ne`, JSON `null`, and string ordering; operators that cannot be pushed down fall back to in-memory filtering.
+- **Configuration and monitoring**: `configManager.getConfig()` returns a shared frozen object, so mutating it throws `TypeError` and you must call it again after a configuration change; `monitoring.enablePerformanceTracking` takes effect at runtime, and storage-side samples are recorded by the `file-system` engine only.
 
 ## Installation Contract
 
@@ -629,6 +639,8 @@ import { db, init } from 'expo-lite-data-store';
 await init({ engine: 'sqlite' });
 ```
 
+`engine` is honored only by `init({ engine })` or `configManager`; passing it to a per-table API such as `createTable()` or `read()` is ignored, and development builds log a one-time warning.
+
 > **Dependency Note**: `expo-sqlite` is an optional peer dependency. When using the default `'file-system'` engine, `expo-sqlite` is not required; it only needs to be installed when explicitly configuring `engine: 'sqlite'`.
 
 ### Index Management APIs
@@ -759,6 +771,25 @@ configManager.set('monitoring.enablePerformanceTracking', true);
 The value takes effect as soon as `set()` returns: committed changes notify subscribed components (such as `performanceMonitor`) to refresh the affected runtime fields in place, with no instance rebuild required. Changes only take over fields that have not been explicitly overridden: explicit `performanceMonitor.configure()` and `setEnabled()` settings win over configuration changes, and `resetRuntimeOptions()` drops those overrides to restore configuration authority.
 
 > `cache.*` takes effect only on the `file-system` engine. `monitoring.enablePerformanceTracking` likewise records storage-side samples only through the `file-system` engine (encrypt/decrypt timing samples record on both engines). Enabling `monitoring.enablePerformanceTracking` under `sqlite` produces a one-time warning prefixed `[SQLiteStorageAdapter]` at initialization and is then ignored; `cache.*` is ignored silently without a warning. `monitoring.enableHealthChecks` (default `true`) is a `performanceMonitor` runtime switch, independent of the storage engine, and is never warned about.
+
+#### `configManager.hasExplicitEngineChoice()`
+
+Returns a `boolean` indicating whether the engine was chosen programmatically at runtime (`setConfig()`, `updateConfig()`, `set('engine', ...)`, or `init({ engine })`). When it returns `false`, an `engine` value from config files such as `app.json` does not override the persisted migration marker, so a launch may still be promoted to `sqlite` by that marker.
+
+#### `configManager.subscribe(listener)`
+
+Registers a configuration-change listener and returns an idempotent unsubscribe function. Listeners run after `setConfig()`, `updateConfig()`, `resetConfig()`, or `set()` commits successfully; changes that fail to merge and roll back are not notified. Subscriptions live on the `ConfigManager` class, so they keep working after `ConfigManager.resetInstance()` replaces the singleton.
+
+```ts
+const unsubscribe = configManager.subscribe(() => {
+  console.log(configManager.getConfig().cache.maxSize);
+});
+
+configManager.set('cache.maxSize', 2000); // listener runs
+
+unsubscribe();
+unsubscribe(); // idempotent: repeated calls have no effect
+```
 
 ### Runtime config sources
 

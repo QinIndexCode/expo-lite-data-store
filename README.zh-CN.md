@@ -450,27 +450,29 @@ const result = await db.verifyCountTable('users');
 
 ### 常用运行时配置项
 
-| Key                                    | 默认值            | 作用                                                                                                                                                |
-| -------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `engine`                               | `file-system`     | 存储引擎：`'file-system'`、`'sqlite'` 或 `'auto'`（可加载 `expo-sqlite` 时选 `sqlite`，否则回退 `file-system`）；显式指定会覆盖迁移持久化的引擎标记 |
-| `chunkSize`                            | `5242880`         | 分片目标大小；初始数据自动选 chunked 的门槛为其一半                                                                                                 |
-| `storageFolder`                        | `lite-data-store` | Expo 文件系统下的根目录名                                                                                                                           |
-| `sortMethods`                          | `default`         | 默认排序策略提示                                                                                                                                    |
-| `timeout`                              | `10000`           | 单文件/分片 I/O 等操作的超时时间（每次调用时读取）；30 秒读守卫与文件锁等待为固定保护值、不随该配置                                                 |
-| `encryption.algorithm`                 | `auto`            | 首选加密算法模式                                                                                                                                    |
-| `encryption.keyIterations`             | `600000`          | PBKDF2 目标迭代次数，Expo Go 下会自动下调                                                                                                           |
-| `performance.maxConcurrentOperations`  | `5`               | 写入侧最大并发数                                                                                                                                    |
-| `cache.maxSize`                        | `1000`            | 缓存项预算；仅 `file-system` 引擎生效，`sqlite` 引擎下被忽略（不告警）                                                                              |
-| `monitoring.enablePerformanceTracking` | `false`           | 是否开启性能采样；存储侧读写样本仅 `file-system` 引擎记录（encrypt/decrypt 加密耗时样本两引擎均记录），`sqlite` 引擎初始化时一次性告警              |
-| `monitoring.enableHealthChecks`        | `true`            | 是否开启健康检查                                                                                                                                    |
-| `autoSync.enabled`                     | `false`           | `file-system` 引擎的自动同步定时器开关；需要定期刷出脏缓存时显式开启；`sqlite` 引擎下忽略并在初始化时一次性告警                                     |
-| `autoSync.interval`                    | `30000`           | 自动同步间隔，单位毫秒                                                                                                                              |
-| `autoSync.minItems`                    | `1`               | 触发自动同步前的最小排队项数                                                                                                                        |
-| `autoSync.batchSize`                   | `100`             | 每次自动同步中每张表最多处理的脏缓存条目数                                                                                                          |
+| Key                                    | 默认值            | 作用                                                                                                                                                                                                                                         |
+| -------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `engine`                               | `file-system`     | 存储引擎：`'file-system'`、`'sqlite'` 或 `'auto'`（可加载 `expo-sqlite` 时选 `sqlite`，否则回退 `file-system`）；只有程序化选择（`setConfig()` / `init({ engine })`）会覆盖迁移持久化的引擎标记，配置文件（如 `app.json`）里的 `engine` 不会 |
+| `chunkSize`                            | `5242880`         | 分片目标大小；初始数据自动选 chunked 的门槛为其一半                                                                                                                                                                                          |
+| `storageFolder`                        | `lite-data-store` | Expo 文件系统下的根目录名                                                                                                                                                                                                                    |
+| `sortMethods`                          | `default`         | 默认排序策略提示                                                                                                                                                                                                                             |
+| `timeout`                              | `10000`           | 单文件/分片 I/O 等操作的超时时间（每次调用时读取）；30 秒读守卫与文件锁等待为固定保护值、不随该配置                                                                                                                                          |
+| `encryption.algorithm`                 | `auto`            | 首选加密算法模式                                                                                                                                                                                                                             |
+| `encryption.keyIterations`             | `600000`          | PBKDF2 目标迭代次数，Expo Go 下会自动下调                                                                                                                                                                                                    |
+| `performance.maxConcurrentOperations`  | `5`               | 写入侧最大并发数                                                                                                                                                                                                                             |
+| `cache.maxSize`                        | `1000`            | 缓存项预算；仅 `file-system` 引擎生效，`sqlite` 引擎下被忽略（不告警）                                                                                                                                                                       |
+| `monitoring.enablePerformanceTracking` | `false`           | 是否开启性能采样；存储侧读写样本仅 `file-system` 引擎记录（encrypt/decrypt 加密耗时样本两引擎均记录），`sqlite` 引擎初始化时一次性告警                                                                                                       |
+| `monitoring.enableHealthChecks`        | `true`            | 是否开启健康检查                                                                                                                                                                                                                             |
+| `autoSync.enabled`                     | `false`           | `file-system` 引擎的自动同步定时器开关；需要定期刷出脏缓存时显式开启；`sqlite` 引擎下忽略并在初始化时一次性告警                                                                                                                              |
+| `autoSync.interval`                    | `30000`           | 自动同步间隔，单位毫秒                                                                                                                                                                                                                       |
+| `autoSync.minItems`                    | `1`               | 触发自动同步前的最小排队项数                                                                                                                                                                                                                 |
+| `autoSync.batchSize`                   | `100`             | 每次自动同步中每张表最多处理的脏缓存条目数                                                                                                                                                                                                   |
 
 `autoSync.*` 配置的是一个进程内定时器，它只存在于 `file-system` 引擎的写后脏缓存链路中；`sqlite` 引擎直接落盘，这些配置项对其没有影响。定时器只在应用运行期间触发，不是操作系统级别的后台任务。
 
 `cache.*` 仅在 `file-system` 引擎下生效：`sqlite` 引擎不创建写后缓存。`monitoring.enablePerformanceTracking` 的存储侧读写样本也仅由 `file-system` 引擎记录——`sqlite` 引擎不记录存储侧性能样本，但 encrypt/decrypt 等加密耗时样本在两个引擎下都会记录。在 `sqlite` 引擎下开启 `autoSync.enabled` 或 `monitoring.enablePerformanceTracking`，初始化时会输出一条带 `[SQLiteStorageAdapter]` 前缀的一次性告警，而不是静默忽略；`cache.*` 与默认开启的 `monitoring.enableHealthChecks` 不告警（后者是 `performanceMonitor` 的运行开关，与存储引擎无关），只在文档中说明。
+
+以下配置键为兼容保留，当前运行时没有任何消费方，设置它们不会改变行为：`api.rateLimit.*`、`performance.enableQueryOptimization`、`performance.enableBatchOptimization`、`performance.memoryWarningThreshold`。内存告警实际读取的是 `cache.memoryWarningThreshold`；对应环境变量 `LITE_STORE_PERFORMANCE_MEMORY_WARNING_THRESHOLD` 也只写入配置对象，不触发任何告警逻辑。
 
 `storageFolder` 只能是单一目录名，不能包含路径分隔符、编码后的分隔符或路径穿越名称。请在首次存储操作前完成配置；适配器运行期间修改该值会被明确拒绝，避免不同根目录间混用元数据和缓存状态。
 

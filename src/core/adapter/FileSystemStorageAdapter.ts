@@ -405,6 +405,9 @@ export class FileSystemStorageAdapter implements IStorageAdapter {
 
     if (typeof process === 'undefined' || process.env.NODE_ENV !== 'test') {
       taskQueue.start();
+      // Cache sampling honours the same switch as PerformanceMonitor instead
+      // of running a timer regardless of the configured tracking preference.
+      this.cacheMonitor.setEnabled(configManager.getConfig().monitoring.enablePerformanceTracking);
       this.cacheMonitor.startMonitoring(60000);
       this.autoSyncService.start(true);
     }
